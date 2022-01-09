@@ -1,0 +1,18 @@
+[package]
+name = "ardae"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+cpal = "0.13.4"
+ringbuf = "0.2.6"
+hound = { version = "3.4.0", optional = true }
+spin_sleep = "1.0.0"
+
+[features]
+# Record output for debug purposes.
+record_output = ["hound"]
+# default = ["record_output"]
