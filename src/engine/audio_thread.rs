@@ -1,7 +1,7 @@
 use cpal::StreamConfig;
 
 use super::components::{
-    new_peak_meter, DelayPoint, MixPoint, PeakMeterOutput, PeakMeterReporter, TestToneGenerator,
+    new_peak_meter, DelayPoint, MixPoint, PeakMeter, PeakMeterInterface, TestToneGenerator,
 };
 use super::{Sample, CHANNELS};
 #[cfg(feature = "record_output")]
@@ -23,10 +23,12 @@ pub fn new_audio_thread(
 ) -> (AudioThreadInterface, AudioThread) {
     let sample_rate = stream_config.sample_rate.0;
 
-    let (peak_output, peak_reporter) = new_peak_meter(1.0 / 20.0, sample_rate, max_buffer_size);
+    let (peak_meter_interface, peak_meter) = new_peak_meter();
 
     (
-        AudioThreadInterface { peak_output },
+        AudioThreadInterface {
+            peak_meter: peak_meter_interface,
+        },
         AudioThread {
             output_channels: stream_config.channels,
             sample_rate,
@@ -37,7 +39,7 @@ pub fn new_audio_thread(
             test_tone2: TestToneGenerator::new(max_buffer_size),
             delay: DelayPoint::new(48000),
             mixer: MixPoint::new(max_buffer_size),
-            peak_reporter,
+            peak_meter,
 
             #[cfg(feature = "record_output")]
             recorder: WavRecorder::new(CHANNELS as u16, sample_rate),
@@ -46,8 +48,9 @@ pub fn new_audio_thread(
 }
 
 /// The interface to the audio thread, living elsewhere.
+/// Should somehwat mirror the `AudioThread`.
 pub struct AudioThreadInterface {
-    peak_output: PeakMeterOutput,
+    pub peak_meter: PeakMeterInterface,
 }
 
 /// Contatins all data that should persist from one buffer output to the next.
@@ -62,7 +65,7 @@ pub struct AudioThread {
     delay: DelayPoint,
     mixer: MixPoint,
 
-    peak_reporter: PeakMeterReporter,
+    peak_meter: PeakMeter,
 
     #[cfg(feature = "record_output")]
     recorder: WavRecorder,
@@ -97,13 +100,13 @@ impl AudioThread {
         self.poll_events();
 
         self.test_tone2.gain.set(0.5);
-        let buffer = self.test_tone1.output(self.sample_rate, buffer_size);
-        // let tone2 = self.test_tone2.output(self.sample_rate, buffer_size);
-        // self.delay.next(tone2);
-        // let buffer = self.mixer.mix(tone1, tone2);
+        let tone1 = self.test_tone1.output(self.sample_rate, buffer_size);
+        let tone2 = self.test_tone2.output(self.sample_rate, buffer_size);
+        self.delay.next(tone2);
+        let buffer = self.mixer.mix(&[tone1, tone2]);
         debug_assert_eq!(buffer.len(), data.len());
 
-        self.peak_reporter.report(buffer);
+        self.peak_meter.report(buffer);
 
         Self::clip(buffer);
 

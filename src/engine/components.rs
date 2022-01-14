@@ -1,10 +1,5 @@
 use core::sync::atomic::Ordering;
-use std::{
-    sync::atomic::AtomicBool,
-    sync::Arc,
-    thread::{self, JoinHandle},
-    time::Duration,
-};
+use std::{sync::atomic::AtomicU32, sync::Arc};
 
 use super::{Sample, CHANNELS};
 
@@ -108,30 +103,57 @@ impl MovingAverage {
     }
 }
 
-/// Component for the simple mixing together (addition) of two signals.
+/// Component for the simple mixing together (addition) of signals.
 ///
 /// Mixing is done via 64-bit summing.
 pub struct MixPoint {
-    buffer: Vec<Sample>,
+    sum_buffer: Vec<f64>,
+    output_buffer: Vec<Sample>,
 }
 impl MixPoint {
     pub fn new(max_buffer_size: usize) -> Self {
         Self {
-            buffer: vec![0.0; max_buffer_size * CHANNELS],
+            sum_buffer: vec![0.0; max_buffer_size * CHANNELS],
+            output_buffer: vec![0.0; max_buffer_size * CHANNELS],
         }
     }
 
-    /// Mix the two buffers into a new one via 64-bit summing.
+    /// Mix the buffers into a new one via 64-bit summing.
+    /// If all buffers are not of equal size, the function will panic in debug mode.
     ///
     /// Result is not clipped.
-    pub fn mix(&mut self, buffer1: &[Sample], buffer2: &[Sample]) -> &mut [Sample] {
-        debug_assert_eq!(buffer1.len(), buffer2.len());
+    pub fn mix(&mut self, input_buffers: &[&[Sample]]) -> &mut [Sample] {
+        let buffer_size = input_buffers[0].len();
 
-        for ((own_sample, sample1), sample2) in self.buffer.iter_mut().zip(buffer1).zip(buffer2) {
-            *own_sample = (*sample1 as f64 + *sample2 as f64) as Sample;
+        // Set sum buffer equal to the first input buffer.
+        for (sum_sample, &input_sample) in self.sum_buffer.iter_mut().zip(input_buffers[0]) {
+            *sum_sample = input_sample as f64;
         }
 
-        &mut self.buffer[..buffer1.len()]
+        for &input_buffer in input_buffers[1..].iter() {
+            #[cfg(debug_assertions)]
+            if buffer_size != input_buffer.len() {
+                panic!(
+                    "At least two buffers were of different sizes: {}, {}.",
+                    buffer_size,
+                    input_buffer.len()
+                );
+            }
+
+            for (sum_sample, &input_sample) in self.sum_buffer.iter_mut().zip(input_buffer) {
+                *sum_sample += input_sample as f64;
+            }
+        }
+
+        // Convert back to original sample format.
+        for (output_sample, &sum_sample) in self.output_buffer[..buffer_size]
+            .iter_mut()
+            .zip(self.sum_buffer.iter())
+        {
+            *output_sample = sum_sample as Sample;
+        }
+
+        &mut self.output_buffer[..buffer_size]
     }
 }
 
@@ -153,132 +175,61 @@ impl DelayPoint {
     }
 }
 
-/// Creates a corresponding pair of `PeakMeterReporter` and `PeakMeterOutput`.
-/// `PeakMeterReporter` should live on the audio thread, while `PeakMeterOutput` can live wherever else.
-pub fn new_peak_meter(
-    interval: f32,
-    sample_rate: u32,
-    max_buffer_size: usize,
-) -> (PeakMeterOutput, PeakMeterReporter) {
-    let (sender, receiver) = ringbuf::RingBuffer::new(max_buffer_size).split();
+/// Creates a corresponding pair of `PeakMeterInterface` and `PeakMeter`.
+/// `PeakMeter` should live on the audio thread, while `PeakMeterInterface` can live wherever else.
+pub fn new_peak_meter() -> (PeakMeterInterface, PeakMeter) {
+    let synced_peak = Arc::new(AtomicF32::new(0.0));
+    let synced_peak2 = Arc::clone(&synced_peak);
     (
-        PeakMeterOutput::new(
-            receiver,
-            interval,
-            max_buffer_size,
-            Box::new(|peak| println!("Peak: {}", peak)),
-        ),
-        PeakMeterReporter {
-            sender,
-            sample_interval: (interval * sample_rate as f32) as usize,
-
-            previous_max: 0.0,
-            remainding: 0,
-        },
+        PeakMeterInterface { peak: synced_peak },
+        PeakMeter { peak: synced_peak2 },
     )
 }
 
 /// Acquired via the `new_peak_meter` function.
-pub struct PeakMeterReporter {
-    sender: ringbuf::Producer<Sample>,
-    sample_interval: usize,
-
-    // Carries over when buffer size isn't divisible by interval.
-    previous_max: Sample,
-    remainding: usize,
+pub struct PeakMeter {
+    peak: Arc<AtomicF32>,
 }
-impl PeakMeterReporter {
+impl PeakMeter {
+    /// Locates the peak of the buffer and syncs it to the corresponding `PeakMeterInterface`.
     pub fn report(&mut self, buffer: &[Sample]) {
-        // Handle previous remainder
-        if self.remainding > buffer.len() {
-            self.remainding -= buffer.len();
-            self.previous_max = Self::max(self.previous_max, buffer);
-        } else {
-            let peak = Self::max(self.previous_max, &buffer[..self.remainding]);
-            self.sender.push(peak).unwrap();
-
-            // Handle main part
-            let main_part = buffer[self.remainding..].chunks_exact(self.sample_interval);
-            let remainder = main_part.remainder();
-            for chunk in main_part {
-                let peak = Self::max(0.0, chunk);
-                self.sender.push(peak).unwrap();
-            }
-
-            // Handle next remainder
-            self.previous_max = Self::max(0.0, remainder);
-            self.remainding = self.sample_interval - remainder.len();
-        }
-    }
-
-    fn max(start: Sample, buffer: &[Sample]) -> Sample {
-        let mut max = start;
+        let mut max = 0.0;
         for &value in buffer.iter() {
-            if value > max {
+            if value.abs() > max {
                 max = value;
             }
         }
-        max
+        self.peak.store(max, Ordering::Release);
     }
 }
 
 /// Acquired via the `new_peak_meter` function.
-pub struct PeakMeterOutput {
-    stopped: Arc<AtomicBool>,
-    join_handle: Option<JoinHandle<()>>,
+pub struct PeakMeterInterface {
+    peak: Arc<AtomicF32>,
 }
-impl PeakMeterOutput {
-    fn new(
-        receiver: ringbuf::Consumer<f32>,
-        interval: f32,
-        max_buffer_size: usize,
-        callback: Box<dyn Fn(Sample) + Send>,
-    ) -> Self {
-        let stopped = Arc::new(AtomicBool::new(false));
-        let stopped2 = Arc::clone(&stopped);
+impl PeakMeterInterface {
+    pub fn get(&self) -> Sample {
+        self.peak.load(Ordering::Acquire)
+    }
+}
 
-        let join_handle = thread::spawn(move || {
-            Self::run(
-                stopped2,
-                interval,
-                receiver,
-                CircularArray::new(0.0, max_buffer_size),
-                callback,
-            )
-        });
-
-        let join_handle = Some(join_handle);
-
+/// Atomic storing and loading of an f32, via the raw bits of a u32.
+struct AtomicF32 {
+    inner: AtomicU32,
+}
+impl AtomicF32 {
+    fn new(v: f32) -> Self {
         Self {
-            stopped,
-            join_handle,
+            inner: AtomicU32::new(v.to_bits()),
         }
     }
 
-    fn run(
-        stopped: Arc<AtomicBool>,
-        interval: f32,
-        mut receiver: ringbuf::Consumer<f32>,
-        mut delay: CircularArray<Sample>,
-        callback: Box<dyn Fn(Sample) + Send>,
-    ) {
-        while !stopped.load(Ordering::Relaxed) {
-            spin_sleep::sleep(Duration::from_secs_f32(interval));
-            while receiver.is_empty() {}
-            let new_peak = receiver.pop().unwrap();
-            let peak = delay.push_pop(new_peak);
-            (callback)(peak);
-        }
+    fn store(&self, val: f32, order: Ordering) {
+        self.inner.store(val.to_bits(), order);
     }
 
-    fn stop(&mut self) {
-        self.stopped.store(true, Ordering::Relaxed);
-        self.join_handle.take().unwrap().join().unwrap();
-    }
-}
-impl Drop for PeakMeterOutput {
-    fn drop(&mut self) {
-        self.stop();
+    fn load(&self, order: Ordering) -> f32 {
+        f32::from_bits(self.inner.load(order))
     }
 }
 

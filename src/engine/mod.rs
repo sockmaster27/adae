@@ -17,10 +17,10 @@ const CHANNELS: usize = 2;
 /// Biggest possible requested buffer size.
 const MAX_BUFFER_SIZE_DEFAULT: usize = 1056;
 
-// CHANNELS and MAX_BUFFER_SIZE_DEFAULT are both usize, because they are mostly used for initializing and indexing Vec's
+// CHANNELS and MAX_BUFFER_SIZE_DEFAULT are both usize, because they are mostly used for initializing and indexing Vec's.
 
 pub struct Engine {
-    /// Signals to the
+    /// Signal whether the stream should stop.
     stopped: Arc<AtomicBool>,
     join_handle: Option<JoinHandle<()>>,
 
@@ -70,7 +70,7 @@ impl Engine {
                 sample_format.sample_size()
             );
 
-            while !stopped2.load(Ordering::Relaxed) {
+            while !stopped2.load(Ordering::Acquire) {
                 // Parking the thread is more efficient than spinning, but can risk unparking seemingly randomly, hence the 'stopped' flag.
                 thread::park();
             }
@@ -108,11 +108,15 @@ impl Engine {
     pub fn set_volume(&mut self, value: f32) {
         self.event_sender.push(Event::SetVolume(value)).unwrap();
     }
+
+    pub fn get_peak(&self) -> Sample {
+        self.audio_thread_interface.peak_meter.get()
+    }
 }
 
 impl Drop for Engine {
     fn drop(&mut self) {
-        self.stopped.store(true, Ordering::Relaxed);
+        self.stopped.store(true, Ordering::Release);
         let join_handle = self
             .join_handle
             .take()
