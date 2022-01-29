@@ -24,14 +24,10 @@ pub struct Engine {
     stopped: Arc<AtomicBool>,
     join_handle: Option<JoinHandle<()>>,
 
-    event_sender: ringbuf::Producer<Event>,
     audio_thread_interface: AudioThreadInterface,
 }
 impl Engine {
     pub fn new() -> Self {
-        let event_ring_buffer = ringbuf::RingBuffer::new(256);
-        let (event_sender, event_receiver) = event_ring_buffer.split();
-
         let host = cpal::default_host();
         let device = host
             .default_output_device()
@@ -46,8 +42,7 @@ impl Engine {
             cpal::BufferSize::Fixed(size) => size as usize,
             cpal::BufferSize::Default => MAX_BUFFER_SIZE_DEFAULT,
         };
-        let (audio_thread_interface, audio_thread) =
-            new_audio_thread(&config, max_buffer_size, event_receiver);
+        let (audio_thread_interface, audio_thread) = new_audio_thread(&config, max_buffer_size);
 
         let create_stream = match sample_format {
             SampleFormat::F32 => Self::create_stream::<f32>,
@@ -85,7 +80,6 @@ impl Engine {
         Engine {
             stopped,
             join_handle,
-            event_sender,
             audio_thread_interface,
         }
     }
@@ -106,7 +100,7 @@ impl Engine {
     }
 
     pub fn set_volume(&mut self, value: f32) {
-        self.event_sender.push(Event::SetVolume(value)).unwrap();
+        self.audio_thread_interface.set_gain(value);
     }
 
     pub fn get_peak(&self) -> Sample {

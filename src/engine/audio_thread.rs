@@ -1,4 +1,5 @@
 use cpal::StreamConfig;
+use ringbuf::RingBuffer;
 
 use super::components::{
     new_peak_meter, DelayPoint, MixPoint, PeakMeter, PeakMeterInterface, TestToneGenerator,
@@ -10,7 +11,7 @@ use crate::wav_recorder::WavRecorder;
 #[derive(Debug)]
 pub enum Event {
     /// Sets the gain multiplier of the test tone.
-    SetVolume(f32),
+    SetGain(f32),
 }
 
 /// Creates an corresponding pair of `AudioThread` and `AudioThreadInterface`.
@@ -19,14 +20,15 @@ pub enum Event {
 pub fn new_audio_thread(
     stream_config: &StreamConfig,
     max_buffer_size: usize,
-    event_receiver: ringbuf::Consumer<Event>,
 ) -> (AudioThreadInterface, AudioThread) {
     let sample_rate = stream_config.sample_rate.0;
 
+    let (event_sender, event_receiver) = RingBuffer::new(256).split();
     let (peak_meter_interface, peak_meter) = new_peak_meter();
 
     (
         AudioThreadInterface {
+            event_sender,
             peak_meter: peak_meter_interface,
         },
         AudioThread {
@@ -50,7 +52,16 @@ pub fn new_audio_thread(
 /// The interface to the audio thread, living elsewhere.
 /// Should somehwat mirror the `AudioThread`.
 pub struct AudioThreadInterface {
+    event_sender: ringbuf::Producer<Event>,
+
     pub peak_meter: PeakMeterInterface,
+}
+impl AudioThreadInterface {
+    pub fn set_gain(&mut self, value: f32) {
+        self.event_sender
+            .push(Event::SetGain(value))
+            .expect("Audio thread's event queue overflowed.");
+    }
 }
 
 /// Contatins all data that should persist from one buffer output to the next.
@@ -77,7 +88,7 @@ impl AudioThread {
             |event| {
                 #[allow(unreachable_patterns)]
                 match event {
-                    Event::SetVolume(value) => self.test_tone1.gain.set(value),
+                    Event::SetGain(value) => self.test_tone1.gain.set(value),
                     _ => todo!("Add more events"),
                 }
 

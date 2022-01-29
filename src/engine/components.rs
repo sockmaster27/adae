@@ -46,7 +46,7 @@ impl TestToneGenerator {
 
 /// Representes a numeric value, controlled by the user - by a knob or slider for example.
 ///
-/// The value is smoothed (via simple moving average), to avoid distortion and clicking.
+/// The value is smoothed (via simple moving average), to avoid distortion and clicking in the sound.
 pub struct ValueParameter {
     buffer: Vec<f32>,
 
@@ -103,7 +103,7 @@ impl MovingAverage {
     }
 }
 
-/// Component for the simple mixing together (addition) of signals.
+/// Component for the simple addition of signals.
 ///
 /// Mixing is done via 64-bit summing.
 pub struct MixPoint {
@@ -131,6 +131,7 @@ impl MixPoint {
         }
 
         for &input_buffer in input_buffers[1..].iter() {
+            // Assert that all buffers are of equal size.
             #[cfg(debug_assertions)]
             if buffer_size != input_buffer.len() {
                 panic!(
@@ -140,6 +141,7 @@ impl MixPoint {
                 );
             }
 
+            // Sum
             for (sum_sample, &input_sample) in self.sum_buffer.iter_mut().zip(input_buffer) {
                 *sum_sample += input_sample as f64;
             }
