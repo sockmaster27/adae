@@ -1,9 +1,8 @@
 use cpal::StreamConfig;
 use ringbuf::RingBuffer;
 
-use super::components::{
-    new_audio_meter, AudioMeter, AudioMeterInterface, DelayPoint, MixPoint, TestToneGenerator,
-};
+use super::components::audio_meter::{new_audio_meter, AudioMeter, AudioMeterInterface};
+use super::components::{DelayPoint, MixPoint, TestToneGenerator};
 use super::{Sample, CHANNELS};
 #[cfg(feature = "record_output")]
 use crate::wav_recorder::WavRecorder;

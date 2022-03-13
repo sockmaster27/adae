@@ -10,7 +10,6 @@ publish = false
 cpal = "0.13.4"
 ringbuf = "0.2.6"
 hound = { version = "3.4.0", optional = true }
-spin_sleep = "1.0.0"
 
 [features]
 # Record output for debug purposes.
