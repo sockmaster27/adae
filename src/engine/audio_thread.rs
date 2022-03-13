@@ -2,21 +2,21 @@ use cpal::StreamConfig;
 use ringbuf::RingBuffer;
 
 use super::components::{
-    new_peak_meter, DelayPoint, MixPoint, PeakMeter, PeakMeterInterface, TestToneGenerator,
+    new_audio_meter, AudioMeter, AudioMeterInterface, DelayPoint, MixPoint, TestToneGenerator,
 };
 use super::{Sample, CHANNELS};
 #[cfg(feature = "record_output")]
 use crate::wav_recorder::WavRecorder;
 
 #[derive(Debug)]
-pub enum Event {
+enum Event {
     /// Sets the gain multiplier of the test tone.
     SetGain(f32),
 }
 
-/// Creates an corresponding pair of `AudioThread` and `AudioThreadInterface`.
+/// Creates an corresponding pair of [`AudioThread`] and [`AudioThreadInterface`].
 ///
-/// The `AudioThreadInterface` should not live on the actual audio thread.
+/// The [`AudioThreadInterface`] should not live on the actual audio thread.
 pub fn new_audio_thread(
     stream_config: &StreamConfig,
     max_buffer_size: usize,
@@ -24,12 +24,12 @@ pub fn new_audio_thread(
     let sample_rate = stream_config.sample_rate.0;
 
     let (event_sender, event_receiver) = RingBuffer::new(256).split();
-    let (peak_meter_interface, peak_meter) = new_peak_meter();
+    let (audio_meter_interface, audio_meter) = new_audio_meter();
 
     (
         AudioThreadInterface {
             event_sender,
-            peak_meter: peak_meter_interface,
+            audio_meter: audio_meter_interface,
         },
         AudioThread {
             output_channels: stream_config.channels,
@@ -41,7 +41,7 @@ pub fn new_audio_thread(
             test_tone2: TestToneGenerator::new(max_buffer_size),
             delay: DelayPoint::new(48000),
             mixer: MixPoint::new(max_buffer_size),
-            peak_meter,
+            audio_meter,
 
             #[cfg(feature = "record_output")]
             recorder: WavRecorder::new(CHANNELS as u16, sample_rate),
@@ -50,11 +50,11 @@ pub fn new_audio_thread(
 }
 
 /// The interface to the audio thread, living elsewhere.
-/// Should somehwat mirror the `AudioThread`.
+/// Should somehwat mirror the [`AudioThread`].
 pub struct AudioThreadInterface {
     event_sender: ringbuf::Producer<Event>,
 
-    pub peak_meter: PeakMeterInterface,
+    pub audio_meter: AudioMeterInterface,
 }
 impl AudioThreadInterface {
     pub fn set_gain(&mut self, value: f32) {
@@ -76,7 +76,7 @@ pub struct AudioThread {
     delay: DelayPoint,
     mixer: MixPoint,
 
-    peak_meter: PeakMeter,
+    audio_meter: AudioMeter,
 
     #[cfg(feature = "record_output")]
     recorder: WavRecorder,
@@ -117,7 +117,7 @@ impl AudioThread {
         let buffer = self.mixer.mix(&[tone1, tone2]);
         debug_assert_eq!(buffer.len(), data.len());
 
-        self.peak_meter.report(buffer);
+        self.audio_meter.report(buffer, self.sample_rate as f32);
 
         Self::clip(buffer);
 

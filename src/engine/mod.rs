@@ -8,7 +8,7 @@ use std::thread::{self, JoinHandle};
 mod components;
 
 mod audio_thread;
-use self::audio_thread::{new_audio_thread, AudioThread, AudioThreadInterface, Event};
+use self::audio_thread::{new_audio_thread, AudioThread, AudioThreadInterface};
 
 /// Internally used sample format.
 type Sample = f32;
@@ -103,8 +103,10 @@ impl Engine {
         self.audio_thread_interface.set_gain(value);
     }
 
-    pub fn get_peak(&self) -> Sample {
-        self.audio_thread_interface.peak_meter.get()
+    /// Return an array of the signals current peak, long-term peak and RMS-level for each channel in the form:
+    /// - `[peak: [left, right], long_peak: [left, right], rms: [left, right]]`
+    pub fn get_meter(&self) -> [[Sample; CHANNELS]; 3] {
+        self.audio_thread_interface.audio_meter.read()
     }
 }
 
