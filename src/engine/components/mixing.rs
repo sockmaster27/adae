@@ -55,3 +55,62 @@ impl MixPoint {
         &mut self.output_buffer[..buffer_size]
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mixing_of_two_signals() {
+        let mut mp = MixPoint::new(10);
+
+        let signal1 = [3.0, 5.0, -2.0];
+        let signal2 = [7.0, -2.0, -6.0];
+        let result = mp.mix(&[&signal1, &signal2]);
+
+        assert_eq!(result, [10.0, 3.0, -8.0]);
+    }
+
+    // This should only happen with debug assertions enabled.
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic]
+    fn panics_with_different_lengths() {
+        let mut mp = MixPoint::new(10);
+
+        let signal1 = [3.0, 5.0, -2.0];
+        let signal2 = [7.0, -2.0, -6.0, 8.0];
+        mp.mix(&[&signal1, &signal2]);
+    }
+
+    // Tests whether there are significant rounding errors while mixing a large amount of signals.
+    #[test]
+    fn retains_precision() {
+        let mut mp = MixPoint::new(10);
+
+        let mut signals1 = [[0.0; 10]; 10000];
+
+        for (i, signal) in signals1.iter_mut().enumerate() {
+            for (t, sample) in signal.iter_mut().enumerate() {
+                *sample = ((t * i) as Sample).sin();
+            }
+        }
+
+        let mut signals2 = signals1.clone();
+
+        // Negate all
+        for signal in &mut signals2 {
+            for sample in signal {
+                *sample *= -1.0;
+            }
+        }
+
+        let mut all_signals = vec![];
+        for signal in signals1.iter().chain(signals2.iter()) {
+            all_signals.push(&signal[..]);
+        }
+
+        let result = mp.mix(&all_signals[..]);
+        assert_eq!(result, [0.0; 10])
+    }
+}

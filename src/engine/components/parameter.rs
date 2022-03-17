@@ -26,7 +26,7 @@ impl F32Parameter {
     pub fn get(&mut self, buffer_size: usize) -> &mut [f32] {
         for point in self.buffer[..buffer_size].iter_mut() {
             self.moving_average.push(self.desired);
-            *point = self.moving_average.get();
+            *point = self.moving_average.get_average();
         }
 
         &mut self.buffer[..buffer_size]

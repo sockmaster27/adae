@@ -29,7 +29,7 @@ pub fn new_audio_meter() -> (AudioMeterInterface, AudioMeter) {
             since_last_peak: [0.0; CHANNELS],
 
             rms: rms2,
-            rms_history: [RMS::new(4800), RMS::new(48000)],
+            rms_history: [RMS::new(4800), RMS::new(4800)],
         },
     )
 }
@@ -57,7 +57,7 @@ impl AudioMeter {
         for frame in buffer.chunks(2) {
             for (max, &value) in max_values.iter_mut().zip(frame) {
                 if value.abs() > *max {
-                    *max = value;
+                    *max = value.abs();
                 }
             }
         }
@@ -66,6 +66,7 @@ impl AudioMeter {
         }
     }
 
+    /// Holds the peak for 1 second, before letting it fall.
     fn long_peak(&mut self, buffer: &[Sample], sample_rate: f32) {
         for ((a_long_peak, a_peak), since_last_peak) in self
             .long_peak
@@ -79,9 +80,9 @@ impl AudioMeter {
                 a_long_peak.store(peak, Ordering::Relaxed);
                 *since_last_peak = 0.0;
             } else {
-                let elapsed = sample_rate / (buffer.len() / CHANNELS) as f32;
+                let elapsed = (buffer.len() / CHANNELS) as f32 / sample_rate;
                 *since_last_peak += elapsed;
-                if *since_last_peak > 5.0 {
+                if *since_last_peak > 1.0 {
                     let mut new_long_peak = long_peak - elapsed;
                     if new_long_peak < 0.0 {
                         new_long_peak = 0.0;
@@ -102,7 +103,7 @@ impl AudioMeter {
 
         // Output to atomics
         for (rms, rms_history) in self.rms.iter().zip(&self.rms_history) {
-            let rms_value = rms_history.get_rms();
+            let rms_value = rms_history.get_rms() as f32;
             rms.store(rms_value, Ordering::Relaxed);
         }
     }
@@ -130,5 +131,55 @@ impl AudioMeterInterface {
         }
 
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn peak() {
+        let (am_interface, mut am) = new_audio_meter();
+        let input = [0.0, 3.5, -6.4, 0.2, -0.3, 0.4];
+
+        am.report(&input, 1.0);
+
+        let [peak, _, _] = am_interface.read();
+        assert_eq!(peak, [6.4, 3.5]);
+    }
+
+    #[test]
+    fn long_peak_reflects_peak() {
+        let (am_interface, mut am) = new_audio_meter();
+        let input = [0.0, 3.5, -6.4, 0.2, -0.3, 0.4];
+
+        am.report(&input, 3.0);
+
+        let [_, long_peak, _] = am_interface.read();
+        assert_eq!(long_peak, [6.4, 3.5]);
+    }
+
+    #[test]
+    fn long_peak_stays_for_a_bit() {
+        let (am_interface, mut am) = new_audio_meter();
+        let input = [3.5, -1.2, 0.0, 0.0, 0.0, 0.0];
+
+        // Since the long_peak should stay in place for 1 second
+        am.report(&input, 3.0);
+
+        let [_, long_peak, _] = am_interface.read();
+        assert_eq!(long_peak, [3.5, 1.2]);
+    }
+
+    #[test]
+    fn long_peak_falls() {
+        let (am_interface, mut am) = new_audio_meter();
+        let input = [-3.5, 1.2, 0.0, 0.0, 0.0, 0.0];
+
+        am.report(&input, 4.0);
+
+        let [_, long_peak, _] = am_interface.read();
+        assert_eq!(long_peak, [3.5, 1.2]);
     }
 }
