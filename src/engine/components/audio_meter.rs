@@ -2,7 +2,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use super::super::{Sample, CHANNELS};
-use super::utils::{AtomicF32, RMS};
+use super::utils::{rms, AtomicF32};
 
 /// Creates a corresponding pair of [`AudioMeterInterface`] and [`AudioMeter`].
 /// [`AudioMeter`] should live on the audio thread, while [`AudioMeterInterface`] can live wherever else.
@@ -29,7 +29,6 @@ pub fn new_audio_meter() -> (AudioMeterInterface, AudioMeter) {
             since_last_peak: [0.0; CHANNELS],
 
             rms: rms2,
-            rms_history: [RMS::new(4800), RMS::new(4800)],
         },
     )
 }
@@ -42,7 +41,6 @@ pub struct AudioMeter {
     since_last_peak: [f32; CHANNELS],
 
     rms: Arc<[AtomicF32; CHANNELS]>,
-    rms_history: [RMS; CHANNELS],
 }
 impl AudioMeter {
     pub fn report(&mut self, buffer: &[Sample], sample_rate: f32) {
@@ -95,16 +93,11 @@ impl AudioMeter {
 
     /// Calculates the root-mean-square of the buffer, and syncs it to the corresponding [`AudioMeterInterface`].
     fn rms(&mut self, buffer: &[Sample]) {
-        for frame in buffer.chunks(2) {
-            for (&sample, rms_history) in frame.iter().zip(&mut self.rms_history) {
-                rms_history.push(sample);
-            }
-        }
+        let rms_values = rms(buffer);
 
         // Output to atomics
-        for (rms, rms_history) in self.rms.iter().zip(&self.rms_history) {
-            let rms_value = rms_history.get_rms() as f32;
-            rms.store(rms_value, Ordering::Relaxed);
+        for (rms_atomic, rms_value) in self.rms.iter().zip(rms_values) {
+            rms_atomic.store(rms_value, Ordering::Relaxed);
         }
     }
 }

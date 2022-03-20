@@ -1,5 +1,7 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 
+use super::super::{Sample, CHANNELS};
+
 /// Atomic supporting storing and loading of an f32, via the raw bits of a u32.
 pub struct AtomicF32 {
     inner: AtomicU32,
@@ -20,23 +22,19 @@ impl AtomicF32 {
     }
 }
 
-pub struct RMS {
-    average: MovingAverage,
-}
-impl RMS {
-    pub fn new(length: usize) -> Self {
-        Self {
-            average: MovingAverage::new(0.0, length),
+/// Root Mean Square of a single buffer.
+pub fn rms(buffer: &[Sample]) -> [f32; CHANNELS] {
+    let buffer_size = (buffer.len() / CHANNELS) as f64;
+    let mut averages = [0.0; CHANNELS];
+
+    for frame in buffer.chunks(CHANNELS) {
+        for (sample, average) in frame.iter().zip(&mut averages) {
+            *average += sample.powf(2.0) as f64 / buffer_size;
         }
     }
 
-    pub fn push(&mut self, new_value: f32) {
-        self.average.push(new_value.powf(2.0));
-    }
-
-    pub fn get_rms(&self) -> f32 {
-        self.average.get_average().sqrt()
-    }
+    let result = averages.map(|x| (x as f32).sqrt());
+    result
 }
 
 /// Calculates simple moving average with an internal history buffer.
@@ -113,19 +111,12 @@ mod tests {
     }
 
     #[test]
-    fn rms() {
-        let mut rms = RMS::new(10);
+    fn root_mean_square() {
+        let result = rms(&[2.0, 5.4, 3.7, -3.0, 1.0, -15.0]);
 
-        for _ in 0..5 {
-            rms.push(2.0)
-        }
-        for _ in 0..5 {
-            rms.push(4.0)
-        }
+        let expected = [6.23_f32.sqrt(), 87.72_f32.sqrt()];
 
-        // (5 * 2^2 + 5 * 4^2) / 10 = 10
-        let sqrt10 = 10.0_f32.sqrt();
-        assert_eq!(rms.get_rms(), sqrt10)
+        assert_eq!(result, expected)
     }
 
     #[test]
