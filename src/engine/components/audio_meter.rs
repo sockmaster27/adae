@@ -2,7 +2,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use super::super::{Sample, CHANNELS};
-use super::utils::{rms, AtomicF32};
+use super::utils::{rms, AtomicF32, MovingAverage};
 
 /// Creates a corresponding pair of [`AudioMeterInterface`] and [`AudioMeter`].
 /// [`AudioMeter`] should live on the audio thread, while [`AudioMeterInterface`] can live wherever else.
@@ -16,11 +16,28 @@ pub fn new_audio_meter() -> (AudioMeterInterface, AudioMeter) {
     let rms1 = Arc::new([AtomicF32::new(0.0), AtomicF32::new(0.0)]);
     let rms2 = Arc::clone(&rms1);
 
+    const SMOOTH_LENGHT: usize = 7;
+
     (
         AudioMeterInterface {
             peak: peak1,
             long_peak: long_peak1,
             rms: rms1,
+
+            smoothing: [
+                [
+                    MovingAverage::new(0.0, SMOOTH_LENGHT),
+                    MovingAverage::new(0.0, SMOOTH_LENGHT),
+                ],
+                [
+                    MovingAverage::new(0.0, SMOOTH_LENGHT),
+                    MovingAverage::new(0.0, SMOOTH_LENGHT),
+                ],
+                [
+                    MovingAverage::new(0.0, SMOOTH_LENGHT),
+                    MovingAverage::new(0.0, SMOOTH_LENGHT),
+                ],
+            ],
         },
         AudioMeter {
             peak: peak2,
@@ -107,11 +124,31 @@ pub struct AudioMeterInterface {
     peak: Arc<[AtomicF32; CHANNELS]>,
     long_peak: Arc<[AtomicF32; CHANNELS]>,
     rms: Arc<[AtomicF32; CHANNELS]>,
+
+    smoothing: [[MovingAverage; CHANNELS]; 3],
 }
 impl AudioMeterInterface {
     /// Return an array of the signals current peak, long-term peak and RMS-level for each channel in the form:
     /// - `[peak: [left, right], long_peak: [left, right], rms: [left, right]]`
-    pub fn read(&self) -> [[Sample; CHANNELS]; 3] {
+    ///
+    /// Results are smoothed to avoid jittering, suitable for reading every frame.
+    /// If this is not desirable see [`AudioMeterInterface::read_raw`].
+    pub fn read(&mut self) -> [[Sample; CHANNELS]; 3] {
+        let mut result = self.read_raw();
+
+        // Smooth
+        for (stats, avgs) in result.iter_mut().zip(&mut self.smoothing) {
+            for (stat, avg) in &mut stats.iter_mut().zip(avgs.iter_mut()) {
+                avg.push(*stat);
+                *stat = avg.get_average();
+            }
+        }
+
+        result
+    }
+
+    /// Same as [`AudioMeterInterface::read`], except results are not smoothed.
+    pub fn read_raw(&self) -> [[Sample; CHANNELS]; 3] {
         let mut result = [[0.0; CHANNELS]; 3];
         for (result_frame, atomic_frame) in
             result
@@ -138,7 +175,7 @@ mod tests {
 
         am.report(&input, 1.0);
 
-        let [peak, _, _] = am_interface.read();
+        let [peak, _, _] = am_interface.read_raw();
         assert_eq!(peak, [6.4, 3.5]);
     }
 
@@ -149,7 +186,7 @@ mod tests {
 
         am.report(&input, 3.0);
 
-        let [_, long_peak, _] = am_interface.read();
+        let [_, long_peak, _] = am_interface.read_raw();
         assert_eq!(long_peak, [6.4, 3.5]);
     }
 
@@ -161,7 +198,7 @@ mod tests {
         // Since the long_peak should stay in place for 1 second
         am.report(&input, 3.0);
 
-        let [_, long_peak, _] = am_interface.read();
+        let [_, long_peak, _] = am_interface.read_raw();
         assert_eq!(long_peak, [3.5, 1.2]);
     }
 
@@ -172,7 +209,7 @@ mod tests {
 
         am.report(&input, 4.0);
 
-        let [_, long_peak, _] = am_interface.read();
+        let [_, long_peak, _] = am_interface.read_raw();
         assert_eq!(long_peak, [3.5, 1.2]);
     }
 }
