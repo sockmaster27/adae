@@ -113,7 +113,11 @@ impl AudioThread {
         let tone1 = self.test_tone1.output(self.sample_rate, buffer_size);
         let tone2 = self.test_tone2.output(self.sample_rate, buffer_size);
         self.delay.next(tone2);
-        let buffer = self.mixer.mix(&[tone1, tone2]);
+
+        self.mixer.reset();
+        self.mixer.add(tone1);
+        self.mixer.add(tone2);
+        let buffer = self.mixer.get().unwrap();
         debug_assert_eq!(buffer.len(), data.len());
 
         self.audio_meter.report(buffer, self.sample_rate as f32);
