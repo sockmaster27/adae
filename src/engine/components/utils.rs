@@ -2,6 +2,14 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use super::super::{Sample, CHANNELS};
 
+#[macro_export]
+/// Macro for conveniently initializing a static array of a given size, of a type that is not [`Copy`].
+macro_rules! non_copy_array {
+    ($initial:expr; $size:expr) => {
+        [(); $size].map(|_| $initial)
+    };
+}
+
 /// Atomic supporting storing and loading of an f32, via the raw bits of a u32.
 pub struct AtomicF32 {
     inner: AtomicU32,

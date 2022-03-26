@@ -1,22 +1,22 @@
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
+use crate::non_copy_array;
+
 use super::super::{Sample, CHANNELS};
 use super::utils::{rms, AtomicF32, MovingAverage};
 
 /// Creates a corresponding pair of [`AudioMeterInterface`] and [`AudioMeter`].
 /// [`AudioMeter`] should live on the audio thread, while [`AudioMeterInterface`] can live wherever else.
 pub fn new_audio_meter() -> (AudioMeterInterface, AudioMeter) {
-    let peak1 = Arc::new([AtomicF32::new(0.0), AtomicF32::new(0.0)]);
+    let peak1 = Arc::new(non_copy_array![AtomicF32::new(0.0); CHANNELS]);
     let peak2 = Arc::clone(&peak1);
 
-    let long_peak1 = Arc::new([AtomicF32::new(0.0), AtomicF32::new(0.0)]);
+    let long_peak1 = Arc::new(non_copy_array![AtomicF32::new(0.0); CHANNELS]);
     let long_peak2 = Arc::clone(&long_peak1);
 
-    let rms1 = Arc::new([AtomicF32::new(0.0), AtomicF32::new(0.0)]);
+    let rms1 = Arc::new(non_copy_array![AtomicF32::new(0.0); CHANNELS]);
     let rms2 = Arc::clone(&rms1);
-
-    const SMOOTH_LENGHT: usize = 7;
 
     (
         AudioMeterInterface {
@@ -24,20 +24,7 @@ pub fn new_audio_meter() -> (AudioMeterInterface, AudioMeter) {
             long_peak: long_peak1,
             rms: rms1,
 
-            smoothing: [
-                [
-                    MovingAverage::new(0.0, SMOOTH_LENGHT),
-                    MovingAverage::new(0.0, SMOOTH_LENGHT),
-                ],
-                [
-                    MovingAverage::new(0.0, SMOOTH_LENGHT),
-                    MovingAverage::new(0.0, SMOOTH_LENGHT),
-                ],
-                [
-                    MovingAverage::new(0.0, SMOOTH_LENGHT),
-                    MovingAverage::new(0.0, SMOOTH_LENGHT),
-                ],
-            ],
+            smoothing: non_copy_array![non_copy_array![MovingAverage::new(0.0, 7); CHANNELS]; 3],
         },
         AudioMeter {
             peak: peak2,
