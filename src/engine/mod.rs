@@ -106,7 +106,7 @@ impl Engine {
     /// Return an array of the signals current peak, long-term peak and RMS-level for each channel in the form:
     /// - `[peak: [left, right], long_peak: [left, right], rms: [left, right]]`
     pub fn get_meter(&mut self) -> [[Sample; CHANNELS]; 3] {
-        self.audio_thread_interface.audio_meter.read()
+        self.audio_thread_interface.get_audio_meter()
     }
 }
 

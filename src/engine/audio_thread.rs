@@ -1,8 +1,6 @@
 use cpal::StreamConfig;
 
-use super::components::audio_meter::{new_audio_meter, AudioMeter, AudioMeterInterface};
-use super::components::test_tone::{new_test_tone, TestTone, TestToneInterface};
-use super::components::{DelayPoint, MixPoint};
+use super::components::mixer::{new_mixer, Mixer, MixerInterface};
 use super::{Sample, CHANNELS};
 #[cfg(feature = "record_output")]
 use crate::wav_recorder::WavRecorder;
@@ -16,25 +14,18 @@ pub fn new_audio_thread(
 ) -> (AudioThreadInterface, AudioThread) {
     let sample_rate = stream_config.sample_rate.0;
 
-    let (test_tone_interface1, test_tone1) = new_test_tone(1.0, max_buffer_size);
-    let (_, test_tone2) = new_test_tone(0.5, max_buffer_size);
-    let (audio_meter_interface, audio_meter) = new_audio_meter();
+    let (mixer_interface, mixer) = new_mixer(max_buffer_size);
 
     (
         AudioThreadInterface {
-            tone: test_tone_interface1,
-            audio_meter: audio_meter_interface,
+            mixer: mixer_interface,
         },
         AudioThread {
             output_channels: stream_config.channels,
             sample_rate,
             max_buffer_size,
 
-            test_tone1,
-            test_tone2,
-            delay: DelayPoint::new(48000),
-            mixer: MixPoint::new(max_buffer_size),
-            audio_meter,
+            mixer,
 
             #[cfg(feature = "record_output")]
             recorder: WavRecorder::new(CHANNELS as u16, sample_rate),
@@ -45,12 +36,15 @@ pub fn new_audio_thread(
 /// The interface to the audio thread, living elsewhere.
 /// Should somehwat mirror the [`AudioThread`].
 pub struct AudioThreadInterface {
-    tone: TestToneInterface,
-    pub audio_meter: AudioMeterInterface,
+    mixer: MixerInterface,
 }
 impl AudioThreadInterface {
     pub fn set_volume(&self, value: f32) {
-        self.tone.volume.set(value);
+        self.mixer.tracks[0].volume.set(value);
+    }
+
+    pub fn get_audio_meter(&mut self) -> [[Sample; CHANNELS]; 3] {
+        self.mixer.tracks[0].meter.read()
     }
 }
 
@@ -60,12 +54,7 @@ pub struct AudioThread {
     sample_rate: u32,
     max_buffer_size: usize,
 
-    test_tone1: TestTone,
-    test_tone2: TestTone,
-    delay: DelayPoint,
-    mixer: MixPoint,
-
-    audio_meter: AudioMeter,
+    mixer: Mixer,
 
     #[cfg(feature = "record_output")]
     recorder: WavRecorder,
@@ -80,17 +69,7 @@ impl AudioThread {
             panic!("A buffer of size {} was requested, which exceeds the biggest producible size of {}.", buffer_size, self.max_buffer_size);
         }
 
-        let tone1 = self.test_tone1.output(self.sample_rate, buffer_size);
-        let tone2 = self.test_tone2.output(self.sample_rate, buffer_size);
-        self.delay.next(tone2);
-
-        self.mixer.reset();
-        self.mixer.add(tone1);
-        self.mixer.add(tone2);
-        let buffer = self.mixer.get().unwrap();
-        debug_assert_eq!(buffer.len(), data.len());
-
-        self.audio_meter.report(buffer, self.sample_rate as f32);
+        let buffer = self.mixer.output(self.sample_rate, buffer_size);
 
         Self::clip(buffer);
 

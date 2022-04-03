@@ -5,7 +5,7 @@ use super::parameter::{new_f32_parameter, F32Parameter, F32ParameterInterface};
 use super::test_tone::{new_test_tone, TestTone};
 
 pub fn new_mixer_track(max_buffer_size: usize) -> (MixerTrackInterface, MixerTrack) {
-    let (test_tone_interface, test_tone) = new_test_tone(1.0, max_buffer_size);
+    let (_test_tone_interface, test_tone) = new_test_tone(1.0, max_buffer_size);
     let (panning_interface, panning) = new_f32_parameter(0.0, max_buffer_size);
     let (volume_interface, volume) = new_f32_parameter(1.0, max_buffer_size);
     let (meter_interface, meter) = new_audio_meter();

@@ -65,7 +65,7 @@ impl Mixer {
         // TODO: Drop old_vec in another thread?
     }
 
-    pub fn output(&mut self, sample_rate: u32, buffer_size: usize) -> &[Sample] {
+    pub fn output(&mut self, sample_rate: u32, buffer_size: usize) -> &mut [Sample] {
         self.mix_point.reset();
         for track in self.tracks.iter_mut() {
             let buffer = track.output(sample_rate, buffer_size);
@@ -73,13 +73,13 @@ impl Mixer {
         }
         match self.mix_point.get() {
             Ok(buffer) => buffer,
-            Err(buffer) => &buffer[..buffer_size],
+            Err(buffer) => &mut buffer[..buffer_size],
         }
     }
 }
 
 pub struct MixerInterface {
-    tracks: Vec<MixerTrackInterface>,
+    pub tracks: Vec<MixerTrackInterface>,
 
     cap: usize,
     new_vec: Arc<AtomicOptionBox<Vec<MixerTrack>>>,
