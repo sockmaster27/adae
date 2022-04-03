@@ -99,8 +99,12 @@ impl Engine {
         Ok(stream)
     }
 
-    pub fn set_volume(&mut self, value: f32) {
+    pub fn set_volume(&self, value: f32) {
         self.audio_thread_interface.set_volume(value);
+    }
+
+    pub fn set_panning(&self, value: f32) {
+        self.audio_thread_interface.set_panning(value);
     }
 
     /// Return an array of the signals current peak, long-term peak and RMS-level for each channel in the form:

@@ -43,6 +43,10 @@ impl AudioThreadInterface {
         self.mixer.tracks[0].volume.set(value);
     }
 
+    pub fn set_panning(&self, value: f32) {
+        self.mixer.tracks[0].panning.set(value);
+    }
+
     pub fn get_audio_meter(&mut self) -> [[Sample; CHANNELS]; 3] {
         self.mixer.tracks[0].meter.read()
     }
