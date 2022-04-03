@@ -27,7 +27,7 @@ impl MixPoint {
     }
 
     /// Add buffer to the 64-bit sum.
-    /// With debug assertions enabled, his will panic if buffers of different sizes are added inbetween resets.
+    /// With debug assertions enabled, this will panic if buffers of different sizes are added inbetween resets.
     pub fn add(&mut self, input_buffer: &[Sample]) {
         if let Some(buffer_size) = self.buffer_size {
             // Assert that all buffers added between resets are of equal size.
