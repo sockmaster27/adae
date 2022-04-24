@@ -3,3 +3,5 @@ mod wav_recorder;
 
 mod engine;
 pub use engine::Engine;
+
+pub use engine::MixerTrack;

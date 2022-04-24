@@ -1,4 +1,7 @@
-use std::sync::{atomic::Ordering, Arc};
+use std::{
+    fmt::Debug,
+    sync::{atomic::Ordering, Arc},
+};
 
 use super::utils::{AtomicF32, MovingAverage};
 
@@ -22,6 +25,7 @@ pub fn new_f32_parameter(
 /// Representes a numeric value, controlled by the user - by a knob or slider for example.
 ///
 /// The value is smoothed (via simple moving average), to avoid distortion and clicking in the sound.
+#[derive(Debug)]
 pub struct F32Parameter {
     buffer: Vec<f32>,
 
@@ -34,13 +38,14 @@ impl F32Parameter {
 
         for point in self.buffer[..buffer_size].iter_mut() {
             self.moving_average.push(desired);
-            *point = self.moving_average.get_average();
+            *point = self.moving_average.average();
         }
 
         &mut self.buffer[..buffer_size]
     }
 }
 
+#[derive(Debug)]
 pub struct F32ParameterInterface {
     desired: Arc<AtomicF32>,
 }

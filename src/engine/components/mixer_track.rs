@@ -4,7 +4,7 @@ use super::audio_meter::{new_audio_meter, AudioMeter, AudioMeterInterface};
 use super::parameter::{new_f32_parameter, F32Parameter, F32ParameterInterface};
 use super::test_tone::{new_test_tone, TestTone};
 
-pub fn new_mixer_track(max_buffer_size: usize) -> (MixerTrackInterface, MixerTrack) {
+pub fn new_mixer_track(key: u32, max_buffer_size: usize) -> (MixerTrackInterface, MixerTrack) {
     let (_test_tone_interface, test_tone) = new_test_tone(1.0, max_buffer_size);
     let (panning_interface, panning) = new_f32_parameter(0.0, max_buffer_size);
     let (volume_interface, volume) = new_f32_parameter(1.0, max_buffer_size);
@@ -14,6 +14,8 @@ pub fn new_mixer_track(max_buffer_size: usize) -> (MixerTrackInterface, MixerTra
             panning: panning_interface,
             volume: volume_interface,
             meter: meter_interface,
+
+            key,
         },
         MixerTrack {
             test_tone,
@@ -24,6 +26,7 @@ pub fn new_mixer_track(max_buffer_size: usize) -> (MixerTrackInterface, MixerTra
     )
 }
 
+#[derive(Debug)]
 pub struct MixerTrack {
     test_tone: TestTone,
     panning: F32Parameter,
@@ -73,10 +76,18 @@ impl MixerTrack {
     }
 }
 
+#[derive(Debug)]
 pub struct MixerTrackInterface {
     pub panning: F32ParameterInterface,
     pub volume: F32ParameterInterface,
     pub meter: AudioMeterInterface,
+
+    key: u32,
+}
+impl MixerTrackInterface {
+    pub fn key(&self) -> u32 {
+        self.key
+    }
 }
 
 #[cfg(test)]

@@ -11,6 +11,7 @@ macro_rules! non_copy_array {
 }
 
 /// Atomic supporting storing and loading of an f32, via the raw bits of a u32.
+#[derive(Debug)]
 pub struct AtomicF32 {
     inner: AtomicU32,
 }
@@ -46,6 +47,7 @@ pub fn rms(buffer: &[Sample]) -> [f32; CHANNELS] {
 }
 
 /// Calculates simple moving average with an internal history buffer.
+#[derive(Debug)]
 pub struct MovingAverage {
     average: f64,
     history: CircularArray<f32>,
@@ -67,13 +69,14 @@ impl MovingAverage {
         self.average += new_value as f64 / window_size;
     }
 
-    pub fn get_average(&self) -> f32 {
+    pub fn average(&self) -> f32 {
         self.average as f32
     }
 }
 
 /// A ringbuffer-like queue, where the length is always the same, i.e. it only has one pointer.
 // Please correct me if this has a better name.
+#[derive(Debug)]
 pub struct CircularArray<T> {
     queue: Vec<T>,
     position: usize,
@@ -135,7 +138,7 @@ mod tests {
             ma.push(3.0);
         }
 
-        assert_eq!(ma.get_average(), 2.0);
+        assert_eq!(ma.average(), 2.0);
     }
 
     #[test]

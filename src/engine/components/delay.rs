@@ -1,8 +1,11 @@
+// Module temporarily out of use
+#![allow(dead_code)]
+
 use super::super::{Sample, CHANNELS};
 
 use super::utils::CircularArray;
 
-/// Circular sample delay.
+/// Circular sample delay
 pub struct DelayPoint {
     history: CircularArray<Sample>,
 }

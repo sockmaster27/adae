@@ -38,6 +38,7 @@ pub fn new_audio_meter() -> (AudioMeterInterface, AudioMeter) {
 }
 
 /// Acquired via the [`new_audio_meter`] function.
+#[derive(Debug)]
 pub struct AudioMeter {
     peak: Arc<[AtomicF32; CHANNELS]>,
 
@@ -107,6 +108,7 @@ impl AudioMeter {
 }
 
 /// Acquired via the [`new_audio_meter`] function.
+#[derive(Debug)]
 pub struct AudioMeterInterface {
     peak: Arc<[AtomicF32; CHANNELS]>,
     long_peak: Arc<[AtomicF32; CHANNELS]>,
@@ -127,7 +129,7 @@ impl AudioMeterInterface {
         for (stats, avgs) in result.iter_mut().zip(&mut self.smoothing) {
             for (stat, avg) in &mut stats.iter_mut().zip(avgs.iter_mut()) {
                 avg.push(*stat);
-                *stat = avg.get_average();
+                *stat = avg.average();
             }
         }
 

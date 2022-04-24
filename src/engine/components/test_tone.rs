@@ -18,6 +18,7 @@ pub fn new_test_tone(initial_volume: f32, max_buffer_size: usize) -> (TestToneIn
 }
 
 /// Generates a 440 Hz sine wave.
+#[derive(Debug)]
 pub struct TestTone {
     pub volume: F32Parameter,
 

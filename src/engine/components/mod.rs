@@ -4,6 +4,7 @@ mod delay;
 pub use delay::DelayPoint;
 
 mod mixer_track;
+pub use mixer_track::MixerTrackInterface as MixerTrack;
 
 pub mod mixer;
 

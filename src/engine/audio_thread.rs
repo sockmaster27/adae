@@ -36,20 +36,7 @@ pub fn new_audio_thread(
 /// The interface to the audio thread, living elsewhere.
 /// Should somehwat mirror the [`AudioThread`].
 pub struct AudioThreadInterface {
-    mixer: MixerInterface,
-}
-impl AudioThreadInterface {
-    pub fn set_volume(&self, value: f32) {
-        self.mixer.tracks[0].volume.set(value);
-    }
-
-    pub fn set_panning(&self, value: f32) {
-        self.mixer.tracks[0].panning.set(value);
-    }
-
-    pub fn get_audio_meter(&mut self) -> [[Sample; CHANNELS]; 3] {
-        self.mixer.tracks[0].meter.read()
-    }
+    pub mixer: MixerInterface,
 }
 
 /// Contatins all data that should persist from one buffer output to the next.
@@ -73,6 +60,7 @@ impl AudioThread {
             panic!("A buffer of size {} was requested, which exceeds the biggest producible size of {}.", buffer_size, self.max_buffer_size);
         }
 
+        self.mixer.poll();
         let buffer = self.mixer.output(self.sample_rate, buffer_size);
 
         Self::clip(buffer);

@@ -6,9 +6,11 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
 mod components;
+pub use components::MixerTrack;
 
 mod audio_thread;
 use self::audio_thread::{new_audio_thread, AudioThread, AudioThreadInterface};
+use self::components::mixer::{InvalidTrackError, TrackOverflowError};
 
 /// Internally used sample format.
 type Sample = f32;
@@ -99,18 +101,22 @@ impl Engine {
         Ok(stream)
     }
 
-    pub fn set_volume(&self, value: f32) {
-        self.audio_thread_interface.set_volume(value);
+    pub fn tracks(&self) -> Vec<&MixerTrack> {
+        self.audio_thread_interface.mixer.tracks()
     }
 
-    pub fn set_panning(&self, value: f32) {
-        self.audio_thread_interface.set_panning(value);
+    pub fn track(&self, key: u32) -> Result<&MixerTrack, InvalidTrackError> {
+        self.audio_thread_interface.mixer.track(key)
+    }
+    pub fn track_mut(&mut self, key: u32) -> Result<&mut MixerTrack, InvalidTrackError> {
+        self.audio_thread_interface.mixer.track_mut(key)
     }
 
-    /// Return an array of the signals current peak, long-term peak and RMS-level for each channel in the form:
-    /// - `[peak: [left, right], long_peak: [left, right], rms: [left, right]]`
-    pub fn get_meter(&mut self) -> [[Sample; CHANNELS]; 3] {
-        self.audio_thread_interface.get_audio_meter()
+    pub fn add_track(&mut self) -> Result<&mut MixerTrack, TrackOverflowError> {
+        self.audio_thread_interface.mixer.add_track()
+    }
+    pub fn delete_track(&mut self, key: u32) -> Result<(), InvalidTrackError> {
+        self.audio_thread_interface.mixer.delete_track(key)
     }
 }
 
