@@ -5,9 +5,23 @@ use super::parameter::{new_f32_parameter, F32Parameter, F32ParameterInterface};
 use super::test_tone::{new_test_tone, TestTone};
 
 pub fn new_mixer_track(key: u32, max_buffer_size: usize) -> (MixerTrackInterface, MixerTrack) {
+    mixer_track_from_data(
+        max_buffer_size,
+        MixerTrackData {
+            panning: 0.0,
+            volume: 1.0,
+            key,
+        },
+    )
+}
+
+pub fn mixer_track_from_data(
+    max_buffer_size: usize,
+    data: MixerTrackData,
+) -> (MixerTrackInterface, MixerTrack) {
     let (_test_tone_interface, test_tone) = new_test_tone(1.0, max_buffer_size);
-    let (panning_interface, panning) = new_f32_parameter(0.0, max_buffer_size);
-    let (volume_interface, volume) = new_f32_parameter(1.0, max_buffer_size);
+    let (panning_interface, panning) = new_f32_parameter(data.panning, max_buffer_size);
+    let (volume_interface, volume) = new_f32_parameter(data.volume, max_buffer_size);
     let (meter_interface, meter) = new_audio_meter();
     (
         MixerTrackInterface {
@@ -15,7 +29,7 @@ pub fn new_mixer_track(key: u32, max_buffer_size: usize) -> (MixerTrackInterface
             volume: volume_interface,
             meter: meter_interface,
 
-            key,
+            key: data.key,
         },
         MixerTrack {
             test_tone,
@@ -88,6 +102,24 @@ impl MixerTrackInterface {
     pub fn key(&self) -> u32 {
         self.key
     }
+
+    /// Takes a snapshot of the current state of the track
+    pub fn data(&self) -> MixerTrackData {
+        MixerTrackData {
+            panning: self.panning.get(),
+            volume: self.volume.get(),
+            key: self.key(),
+        }
+    }
+}
+
+/// Contains all info about the tracks state,
+/// that is relevant to reconstructing it
+pub struct MixerTrackData {
+    pub panning: f32,
+    pub volume: f32,
+
+    pub key: u32,
 }
 
 #[cfg(test)]

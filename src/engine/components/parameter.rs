@@ -53,4 +53,9 @@ impl F32ParameterInterface {
     pub fn set(&self, new_value: f32) {
         self.desired.store(new_value, Ordering::Relaxed);
     }
+
+    /// Get last value passed to [`Self::set`]
+    pub fn get(&self) -> f32 {
+        self.desired.load(Ordering::Relaxed)
+    }
 }
