@@ -3,7 +3,7 @@ use std::{
     sync::{atomic::Ordering, Arc},
 };
 
-use super::utils::{AtomicF32, MovingAverage};
+use super::super::utils::{AtomicF32, MovingAverage};
 
 pub fn new_f32_parameter(
     initial: f32,

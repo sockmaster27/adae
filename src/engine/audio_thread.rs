@@ -1,3 +1,5 @@
+use crate::zip;
+
 use cpal::StreamConfig;
 
 use super::components::mixer::{new_mixer, Mixer, MixerInterface};
@@ -71,7 +73,7 @@ impl AudioThread {
         // TODO: Scale channel counts.
         debug_assert_eq!(CHANNELS, self.output_channels as usize);
         // Convert to stream's sample type.
-        for (in_sample, out_sample) in buffer.iter().zip(data) {
+        for (in_sample, out_sample) in zip!(buffer, data) {
             *out_sample = T::from(in_sample);
         }
     }

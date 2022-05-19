@@ -1,12 +1,25 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use super::super::{Sample, CHANNELS};
+use super::{Sample, CHANNELS};
 
-#[macro_export]
 /// Macro for conveniently initializing a static array of a given size, of a type that is not [`Copy`].
+#[macro_export(crate)]
 macro_rules! non_copy_array {
     ($initial:expr; $size:expr) => {
         [(); $size].map(|_| $initial)
+    };
+}
+
+/// Macro for more ergonomically zipping together multiple `IntoIterator`s.
+///
+/// Tuple isn't flattened though, so it's like:
+///
+/// `zip!(as, bs, cs, ds) -> (((a, b), c), d)`
+#[macro_export(crate)]
+macro_rules! zip {
+    ($first:expr, $($rest:expr),+) => { {
+        ($first.into_iter())$(.zip($rest.into_iter()))+
+    }
     };
 }
 
@@ -37,7 +50,7 @@ pub fn rms(buffer: &[Sample]) -> [f32; CHANNELS] {
     let mut averages = [0.0; CHANNELS];
 
     for frame in buffer.chunks(CHANNELS) {
-        for (sample, average) in frame.iter().zip(&mut averages) {
+        for (sample, average) in zip!(frame, &mut averages) {
             *average += sample.powf(2.0) as f64 / buffer_size;
         }
     }
@@ -109,6 +122,17 @@ impl<T: Copy> CircularArray<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn zip_macro() {
+        let first = [1, 4, 7];
+        let second = [2, 5, 8];
+        let third = [3, 6, 9];
+
+        let zipped: Vec<((i32, i32), i32)> = zip!(first, second, third).collect();
+
+        assert_eq!(zipped, vec![((1, 2), 3), ((4, 5), 6), ((7, 8), 9)])
+    }
 
     // Just a surface-level test, no concurrency or anything.
     #[test]

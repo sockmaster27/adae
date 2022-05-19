@@ -6,11 +6,12 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
 mod components;
-pub use components::MixerTrack;
+mod utils;
+pub use components::{MixerTrack, MixerTrackData};
 
 mod audio_thread;
 use self::audio_thread::{new_audio_thread, AudioThread, AudioThreadInterface};
-use self::components::mixer::{InvalidTrackError, TrackOverflowError};
+use self::components::mixer::{InvalidTrackError, TrackOverflowError, TrackReconstructionError};
 
 /// Internally used sample format.
 type Sample = f32;
@@ -114,6 +115,12 @@ impl Engine {
 
     pub fn add_track(&mut self) -> Result<&mut MixerTrack, TrackOverflowError> {
         self.audio_thread_interface.mixer.add_track()
+    }
+    pub fn reconstruct_track(
+        &mut self,
+        data: &MixerTrackData,
+    ) -> Result<&mut MixerTrack, TrackReconstructionError> {
+        self.audio_thread_interface.mixer.reconstruct_track(data)
     }
     pub fn delete_track(&mut self, key: u32) -> Result<(), InvalidTrackError> {
         self.audio_thread_interface.mixer.delete_track(key)

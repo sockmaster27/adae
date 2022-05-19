@@ -1,3 +1,5 @@
+use crate::zip;
+
 use super::super::{Sample, CHANNELS};
 
 use super::audio_meter::{new_audio_meter, AudioMeter, AudioMeterInterface};
@@ -7,7 +9,7 @@ use super::test_tone::{new_test_tone, TestTone};
 pub fn new_mixer_track(key: u32, max_buffer_size: usize) -> (MixerTrackInterface, MixerTrack) {
     mixer_track_from_data(
         max_buffer_size,
-        MixerTrackData {
+        &MixerTrackData {
             panning: 0.0,
             volume: 1.0,
             key,
@@ -17,7 +19,7 @@ pub fn new_mixer_track(key: u32, max_buffer_size: usize) -> (MixerTrackInterface
 
 pub fn mixer_track_from_data(
     max_buffer_size: usize,
-    data: MixerTrackData,
+    data: &MixerTrackData,
 ) -> (MixerTrackInterface, MixerTrack) {
     let (_test_tone_interface, test_tone) = new_test_tone(1.0, max_buffer_size);
     let (panning_interface, panning) = new_f32_parameter(data.panning, max_buffer_size);
@@ -54,10 +56,8 @@ impl MixerTrack {
         let volume_buffer = self.volume.get(buffer_size);
         let panning_buffer = self.panning.get(buffer_size);
 
-        for ((frame, &mut volume), &mut panning) in buffer
-            .chunks_mut(CHANNELS)
-            .zip(volume_buffer)
-            .zip(panning_buffer)
+        for ((frame, &mut volume), &mut panning) in
+            zip!(buffer.chunks_mut(CHANNELS), volume_buffer, panning_buffer)
         {
             for sample in frame.iter_mut() {
                 *sample *= volume;

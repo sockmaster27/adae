@@ -3,7 +3,7 @@
 
 use super::super::{Sample, CHANNELS};
 
-use super::utils::CircularArray;
+use super::super::utils::CircularArray;
 
 /// Circular sample delay
 pub struct DelayPoint {

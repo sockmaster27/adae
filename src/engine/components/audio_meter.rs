@@ -1,10 +1,10 @@
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
-use crate::non_copy_array;
+use crate::{non_copy_array, zip};
 
+use super::super::utils::{rms, AtomicF32, MovingAverage};
 use super::super::{Sample, CHANNELS};
-use super::utils::{rms, AtomicF32, MovingAverage};
 
 /// Creates a corresponding pair of [`AudioMeterInterface`] and [`AudioMeter`].
 /// [`AudioMeter`] should live on the audio thread, while [`AudioMeterInterface`] can live wherever else.
@@ -58,25 +58,24 @@ impl AudioMeter {
     fn peak(&mut self, buffer: &[Sample]) {
         let mut max_values = [0.0, 0.0];
         for frame in buffer.chunks(2) {
-            for (max, &value) in max_values.iter_mut().zip(frame) {
+            for (max, &value) in zip!(max_values.iter_mut(), frame) {
                 if value.abs() > *max {
                     *max = value.abs();
                 }
             }
         }
-        for (peak, max) in self.peak.iter().zip(max_values) {
+        for (peak, max) in zip!(self.peak.iter(), max_values) {
             peak.store(max, Ordering::Relaxed);
         }
     }
 
     /// Holds the peak for 1 second, before letting it fall.
     fn long_peak(&mut self, buffer: &[Sample], sample_rate: f32) {
-        for ((a_long_peak, a_peak), since_last_peak) in self
-            .long_peak
-            .iter()
-            .zip(self.peak.iter())
-            .zip(&mut self.since_last_peak)
-        {
+        for ((a_long_peak, a_peak), since_last_peak) in zip!(
+            self.long_peak.iter(),
+            self.peak.iter(),
+            &mut self.since_last_peak
+        ) {
             let peak = a_peak.load(Ordering::Relaxed);
             let long_peak = a_long_peak.load(Ordering::Relaxed);
             if peak >= long_peak {
@@ -101,7 +100,7 @@ impl AudioMeter {
         let rms_values = rms(buffer);
 
         // Output to atomics
-        for (rms_atomic, rms_value) in self.rms.iter().zip(rms_values) {
+        for (rms_atomic, rms_value) in zip!(self.rms.iter(), rms_values) {
             rms_atomic.store(rms_value, Ordering::Relaxed);
         }
     }
@@ -126,8 +125,8 @@ impl AudioMeterInterface {
         let mut result = self.read_raw();
 
         // Smooth
-        for (stats, avgs) in result.iter_mut().zip(&mut self.smoothing) {
-            for (stat, avg) in &mut stats.iter_mut().zip(avgs.iter_mut()) {
+        for (stats, avgs) in zip!(result.iter_mut(), &mut self.smoothing) {
+            for (stat, avg) in &mut zip!(stats.iter_mut(), avgs.iter_mut()) {
                 avg.push(*stat);
                 *stat = avg.average();
             }
@@ -140,11 +139,9 @@ impl AudioMeterInterface {
     pub fn read_raw(&self) -> [[Sample; CHANNELS]; 3] {
         let mut result = [[0.0; CHANNELS]; 3];
         for (result_frame, atomic_frame) in
-            result
-                .iter_mut()
-                .zip([&self.peak, &self.long_peak, &self.rms])
+            zip!(result.iter_mut(), [&self.peak, &self.long_peak, &self.rms])
         {
-            for (result, atomic) in result_frame.iter_mut().zip(atomic_frame.iter()) {
+            for (result, atomic) in zip!(result_frame.iter_mut(), atomic_frame.iter()) {
                 *result = atomic.load(Ordering::Relaxed);
             }
         }

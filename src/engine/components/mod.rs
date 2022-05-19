@@ -4,7 +4,7 @@ mod delay;
 pub use delay::DelayPoint;
 
 mod mixer_track;
-pub use mixer_track::MixerTrackInterface as MixerTrack;
+pub use mixer_track::{MixerTrackData, MixerTrackInterface as MixerTrack};
 
 pub mod mixer;
 
@@ -14,4 +14,3 @@ pub use mixing::MixPoint;
 pub mod test_tone;
 
 mod parameter;
-mod utils;

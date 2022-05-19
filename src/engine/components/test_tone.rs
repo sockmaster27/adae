@@ -1,3 +1,5 @@
+use crate::zip;
+
 use super::super::{Sample, CHANNELS};
 use super::parameter::{new_f32_parameter, F32Parameter, F32ParameterInterface};
 
@@ -33,10 +35,10 @@ impl TestTone {
 
         let volume_buffer = self.volume.get(buffer_size);
 
-        for (frame, &mut volume) in self.buffer[..buffer_size * CHANNELS]
-            .chunks_mut(CHANNELS)
-            .zip(volume_buffer)
-        {
+        for (frame, &mut volume) in zip!(
+            self.buffer[..buffer_size * CHANNELS].chunks_mut(CHANNELS),
+            volume_buffer
+        ) {
             self.sample_clock += 1.0;
             self.sample_clock %= phase_length;
 

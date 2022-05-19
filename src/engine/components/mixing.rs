@@ -1,3 +1,5 @@
+use crate::zip;
+
 use super::super::{Sample, CHANNELS};
 
 /// Component for the simple addition of signals.
@@ -44,7 +46,7 @@ impl MixPoint {
         }
 
         // Sum
-        for (sum_sample, &input_sample) in self.sum_buffer.iter_mut().zip(input_buffer) {
+        for (sum_sample, &input_sample) in zip!(self.sum_buffer.iter_mut(), input_buffer) {
             *sum_sample += input_sample as f64;
         }
     }
@@ -56,10 +58,10 @@ impl MixPoint {
     pub fn get(&mut self) -> Result<&mut [Sample], &mut [Sample]> {
         if let Some(buffer_size) = self.buffer_size {
             // Convert back to original sample format.
-            for (output_sample, &sum_sample) in self.output_buffer[..buffer_size]
-                .iter_mut()
-                .zip(self.sum_buffer.iter())
-            {
+            for (output_sample, &sum_sample) in zip!(
+                self.output_buffer[..buffer_size].iter_mut(),
+                self.sum_buffer.iter()
+            ) {
                 *output_sample = sum_sample as Sample;
             }
 
