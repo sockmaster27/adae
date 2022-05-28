@@ -11,8 +11,13 @@ cpal = "0.13.4"
 atomicbox = "0.4.0"
 ringbuf = "0.2.8"
 hound = { version = "3.4.0", optional = true }
+lazy_static = { version = "1.4.0", optional = true }
 
 [features]
-# Record output for debug purposes.
+# Record output for debug purposes
 record_output = ["hound"]
+
+# Print all debug info to custom function
+custom_debug_output = ["lazy_static"]
+
 # default = ["record_output"]
