@@ -119,6 +119,9 @@ impl MixerInterface {
     pub fn tracks(&self) -> Vec<&MixerTrackInterface> {
         self.tracks.values().collect()
     }
+    pub fn tracks_mut(&mut self) -> Vec<&mut MixerTrackInterface> {
+        self.tracks.values_mut().collect()
+    }
 
     pub fn track(&self, key: u32) -> Result<&MixerTrackInterface, InvalidTrackError> {
         self.tracks.get(&key).ok_or(InvalidTrackError { key })

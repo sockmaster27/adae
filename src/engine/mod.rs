@@ -105,6 +105,9 @@ impl Engine {
     pub fn tracks(&self) -> Vec<&MixerTrack> {
         self.audio_thread_interface.mixer.tracks()
     }
+    pub fn tracks_mut(&mut self) -> Vec<&mut MixerTrack> {
+        self.audio_thread_interface.mixer.tracks_mut()
+    }
 
     pub fn track(&self, key: u32) -> Result<&MixerTrack, InvalidTrackError> {
         self.audio_thread_interface.mixer.track(key)
