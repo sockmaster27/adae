@@ -14,10 +14,10 @@ macro_rules! non_copy_array {
 ///
 /// Tuple isn't flattened though, so it's like:
 ///
-/// `zip!(as, bs, cs, ds) -> (((a, b), c), d)`
+/// `zip!(a, b, c, d) -> (((a, b), c), d)`
 #[macro_export(crate)]
 macro_rules! zip {
-    ($first:expr, $($rest:expr),+) => { {
+    ($first:expr, $($rest:expr),+ $(,)?) => { {
         ($first.into_iter())$(.zip($rest.into_iter()))+
     }
     };

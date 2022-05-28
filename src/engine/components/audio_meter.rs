@@ -1,9 +1,11 @@
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::time::Instant;
 
+use crate::engine::utils::MovingAverage;
 use crate::{non_copy_array, zip};
 
-use super::super::utils::{rms, AtomicF32, MovingAverage};
+use super::super::utils::{rms, AtomicF32};
 use super::super::{Sample, CHANNELS};
 
 /// Creates a corresponding pair of [`AudioMeterInterface`] and [`AudioMeter`].
@@ -21,10 +23,15 @@ pub fn new_audio_meter() -> (AudioMeterInterface, AudioMeter) {
     (
         AudioMeterInterface {
             peak: peak1,
-            long_peak: long_peak1,
-            rms: rms1,
+            last_peak_top: [0.0; CHANNELS],
+            since_peak_top: [Instant::now(); CHANNELS],
 
-            smoothing: non_copy_array![non_copy_array![MovingAverage::new(0.0, 7); CHANNELS]; 3],
+            long_peak: long_peak1,
+            last_long_peak_top: [0.0; CHANNELS],
+            since_long_peak_top: [Instant::now(); CHANNELS],
+
+            rms: rms1,
+            rms_avg: non_copy_array![MovingAverage::new(0.0, 20); CHANNELS],
         },
         AudioMeter {
             peak: peak2,
@@ -42,6 +49,9 @@ pub fn new_audio_meter() -> (AudioMeterInterface, AudioMeter) {
 pub struct AudioMeter {
     peak: Arc<[AtomicF32; CHANNELS]>,
 
+    /// Long peak simply holds the highest observed peak for 1 second.
+    /// This guarantees that it's observed correctly,
+    /// even if peak is checked less frequently than it is updated.
     long_peak: Arc<[AtomicF32; CHANNELS]>,
     since_last_peak: [f32; CHANNELS],
 
@@ -50,7 +60,7 @@ pub struct AudioMeter {
 impl AudioMeter {
     pub fn report(&mut self, buffer: &[Sample], sample_rate: f32) {
         self.peak(buffer);
-        self.long_peak(buffer, sample_rate);
+        self.long_peak(buffer.len() as f32, sample_rate);
         self.rms(buffer);
     }
 
@@ -64,13 +74,17 @@ impl AudioMeter {
                 }
             }
         }
+
         for (peak, max) in zip!(self.peak.iter(), max_values) {
             peak.store(max, Ordering::Relaxed);
         }
     }
 
     /// Holds the peak for 1 second, before letting it fall.
-    fn long_peak(&mut self, buffer: &[Sample], sample_rate: f32) {
+    fn long_peak(&mut self, buffer_size: f32, sample_rate: f32) {
+        // How long the peak is held in seconds
+        const HOLD: f32 = 1.0;
+
         for ((a_long_peak, a_peak), since_last_peak) in zip!(
             self.long_peak.iter(),
             self.peak.iter(),
@@ -78,19 +92,13 @@ impl AudioMeter {
         ) {
             let peak = a_peak.load(Ordering::Relaxed);
             let long_peak = a_long_peak.load(Ordering::Relaxed);
-            if peak >= long_peak {
-                a_long_peak.store(peak, Ordering::Relaxed);
+
+            *since_last_peak += buffer_size / sample_rate;
+
+            if peak >= long_peak || *since_last_peak > HOLD {
                 *since_last_peak = 0.0;
+                a_long_peak.store(peak, Ordering::Relaxed);
             } else {
-                let elapsed = (buffer.len() / CHANNELS) as f32 / sample_rate;
-                *since_last_peak += elapsed;
-                if *since_last_peak > 1.0 {
-                    let mut new_long_peak = long_peak - elapsed;
-                    if new_long_peak < 0.0 {
-                        new_long_peak = 0.0;
-                    }
-                    a_long_peak.store(new_long_peak, Ordering::Relaxed);
-                }
             }
         }
     }
@@ -110,10 +118,15 @@ impl AudioMeter {
 #[derive(Debug)]
 pub struct AudioMeterInterface {
     peak: Arc<[AtomicF32; CHANNELS]>,
-    long_peak: Arc<[AtomicF32; CHANNELS]>,
-    rms: Arc<[AtomicF32; CHANNELS]>,
+    last_peak_top: [f32; CHANNELS],
+    since_peak_top: [Instant; CHANNELS],
 
-    smoothing: [[MovingAverage; CHANNELS]; 3],
+    long_peak: Arc<[AtomicF32; CHANNELS]>,
+    last_long_peak_top: [f32; CHANNELS],
+    since_long_peak_top: [Instant; CHANNELS],
+
+    rms: Arc<[AtomicF32; CHANNELS]>,
+    rms_avg: [MovingAverage; CHANNELS],
 }
 impl AudioMeterInterface {
     /// Return an array of the signals current peak, long-term peak and RMS-level for each channel in the form:
@@ -122,20 +135,55 @@ impl AudioMeterInterface {
     /// Results are smoothed to avoid jittering, suitable for reading every frame.
     /// If this is not desirable see [`AudioMeterInterface::read_raw`].
     pub fn read(&mut self) -> [[Sample; CHANNELS]; 3] {
-        let mut result = self.read_raw();
+        let mut peak = [0.0; CHANNELS];
+        let mut long_peak = [0.0; CHANNELS];
+        let mut rms = [0.0; CHANNELS];
 
-        // Smooth
-        for (stats, avgs) in zip!(result.iter_mut(), &mut self.smoothing) {
-            for (stat, avg) in &mut zip!(stats.iter_mut(), avgs.iter_mut()) {
-                avg.push(*stat);
-                *stat = avg.average();
-            }
+        // Iterating through all channels of all stats:
+        let channel_iter = zip!(
+            self.peak.iter(),
+            self.last_peak_top.iter_mut(),
+            self.since_peak_top.iter_mut(),
+            peak.iter_mut(),
+        )
+        .chain(zip!(
+            self.long_peak.iter(),
+            self.last_long_peak_top.iter_mut(),
+            self.since_long_peak_top.iter_mut(),
+            long_peak.iter_mut(),
+        ));
+
+        // Falling slowly
+        for (((stat, last_top), since_last_top), result) in channel_iter {
+            let stat = stat.load(Ordering::Relaxed);
+
+            const DURATION: f32 = 0.3;
+            let elapsed = since_last_top.elapsed().as_secs_f32();
+            let progress = elapsed / DURATION;
+            let fallen = *last_top * (-progress.powf(2.0) + 1.0);
+
+            *result = if stat >= fallen {
+                *last_top = stat;
+                *since_last_top = Instant::now();
+                stat
+            } else {
+                fallen
+            };
         }
 
-        result
+        // Averaged
+        for ((rms, avg), result) in zip!(self.rms.iter(), self.rms_avg.iter_mut(), rms.iter_mut()) {
+            let rms = rms.load(Ordering::Relaxed);
+            avg.push(rms);
+            *result = avg.average();
+        }
+
+        [peak, long_peak, rms]
     }
 
     /// Same as [`AudioMeterInterface::read`], except results are not smoothed.
+    ///
+    /// Long peak stays in place for 1 second since it was last changed, before snapping to the current peak.
     pub fn read_raw(&self) -> [[Sample; CHANNELS]; 3] {
         let mut result = [[0.0; CHANNELS]; 3];
         for (result_frame, atomic_frame) in
@@ -156,10 +204,11 @@ mod tests {
 
     #[test]
     fn peak() {
+        let sample_rate = 1.0;
         let (am_interface, mut am) = new_audio_meter();
         let input = [0.0, 3.5, -6.4, 0.2, -0.3, 0.4];
 
-        am.report(&input, 1.0);
+        am.report(&input, sample_rate);
 
         let [peak, _, _] = am_interface.read_raw();
         assert_eq!(peak, [6.4, 3.5]);
@@ -167,10 +216,11 @@ mod tests {
 
     #[test]
     fn long_peak_reflects_peak() {
+        let sample_rate = 3.0;
         let (am_interface, mut am) = new_audio_meter();
         let input = [0.0, 3.5, -6.4, 0.2, -0.3, 0.4];
 
-        am.report(&input, 3.0);
+        am.report(&input, sample_rate);
 
         let [_, long_peak, _] = am_interface.read_raw();
         assert_eq!(long_peak, [6.4, 3.5]);
@@ -178,11 +228,14 @@ mod tests {
 
     #[test]
     fn long_peak_stays_for_a_bit() {
+        let sample_rate = 4.0;
         let (am_interface, mut am) = new_audio_meter();
-        let input = [3.5, -1.2, 0.0, 0.0, 0.0, 0.0];
+        let input1 = [-3.5, 1.2, 0.4, -1.1];
+        let input2 = [0.0, 0.0, 0.0, 0.0];
 
         // Since the long_peak should stay in place for 1 second
-        am.report(&input, 3.0);
+        am.report(&input1, sample_rate);
+        am.report(&input2, sample_rate);
 
         let [_, long_peak, _] = am_interface.read_raw();
         assert_eq!(long_peak, [3.5, 1.2]);
@@ -190,12 +243,15 @@ mod tests {
 
     #[test]
     fn long_peak_falls() {
+        let sample_rate = 3.0;
         let (am_interface, mut am) = new_audio_meter();
-        let input = [-3.5, 1.2, 0.0, 0.0, 0.0, 0.0];
+        let input1 = [-3.5, 1.2, 0.4, -1.1];
+        let input2 = [0.0, 0.0, 0.0, 0.0];
 
-        am.report(&input, 4.0);
+        am.report(&input1, sample_rate);
+        am.report(&input2, sample_rate);
 
         let [_, long_peak, _] = am_interface.read_raw();
-        assert_eq!(long_peak, [3.5, 1.2]);
+        assert_eq!(long_peak, [0.0, 0.0]);
     }
 }
