@@ -1,5 +1,8 @@
 use crate::zip;
 
+use std::fmt::Debug;
+
+use super::super::utils::format_truncate_list;
 use super::super::{Sample, CHANNELS};
 use super::parameter::{new_f32_parameter, F32Parameter, F32ParameterInterface};
 
@@ -20,7 +23,6 @@ pub fn new_test_tone(initial_volume: f32, max_buffer_size: usize) -> (TestToneIn
 }
 
 /// Generates a 440 Hz sine wave.
-#[derive(Debug)]
 pub struct TestTone {
     pub volume: F32Parameter,
 
@@ -49,6 +51,17 @@ impl TestTone {
             }
         }
         &mut self.buffer[..buffer_size * CHANNELS]
+    }
+}
+impl Debug for TestTone {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "TestTone {{ volume: {:?}, buffer: {}, sample_clock: {:?} }}",
+            self.volume,
+            format_truncate_list(5, &self.buffer[..]),
+            self.sample_clock,
+        )
     }
 }
 

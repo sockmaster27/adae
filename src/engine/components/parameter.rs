@@ -3,6 +3,8 @@ use std::{
     sync::{atomic::Ordering, Arc},
 };
 
+use crate::engine::utils::format_truncate_list;
+
 use super::super::utils::{AtomicF32, MovingAverage};
 
 pub fn new_f32_parameter(
@@ -14,10 +16,10 @@ pub fn new_f32_parameter(
     (
         F32ParameterInterface { desired: desired1 },
         F32Parameter {
-            buffer: vec![0.0; max_buffer_size],
-
             desired: desired2,
             moving_average: MovingAverage::new(initial, max_buffer_size),
+
+            buffer: vec![0.0; max_buffer_size],
         },
     )
 }
@@ -25,12 +27,11 @@ pub fn new_f32_parameter(
 /// Representes a numeric value, controlled by the user - by a knob or slider for example.
 ///
 /// The value is smoothed (via simple moving average), to avoid distortion and clicking in the sound.
-#[derive(Debug)]
 pub struct F32Parameter {
-    buffer: Vec<f32>,
-
     desired: Arc<AtomicF32>,
     moving_average: MovingAverage,
+
+    buffer: Vec<f32>,
 }
 impl F32Parameter {
     pub fn get(&mut self, buffer_size: usize) -> &mut [f32] {
@@ -42,6 +43,17 @@ impl F32Parameter {
         }
 
         &mut self.buffer[..buffer_size]
+    }
+}
+impl Debug for F32Parameter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "F32Parameter {{ desired: {:?}, moving_average: {:?}, buffer: {} }}",
+            self.desired,
+            self.moving_average,
+            format_truncate_list(5, &self.buffer[..])
+        )
     }
 }
 

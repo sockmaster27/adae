@@ -1,8 +1,11 @@
+use std::fmt::Debug;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use super::{Sample, CHANNELS};
 
 /// Macro for conveniently initializing a static array of a given size, of a type that is not [`Copy`].
+///
+/// The `initial` exoression is evaluated for each element in the array.
 #[macro_export(crate)]
 macro_rules! non_copy_array {
     ($initial:expr; $size:expr) => {
@@ -24,7 +27,6 @@ macro_rules! zip {
 }
 
 /// Atomic supporting storing and loading of an f32, via the raw bits of a u32.
-#[derive(Debug)]
 pub struct AtomicF32 {
     inner: AtomicU32,
 }
@@ -41,6 +43,11 @@ impl AtomicF32 {
 
     pub fn load(&self, order: Ordering) -> f32 {
         f32::from_bits(self.inner.load(order))
+    }
+}
+impl Debug for AtomicF32 {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Debug::fmt(&self.load(Ordering::SeqCst), f)
     }
 }
 
@@ -89,24 +96,22 @@ impl MovingAverage {
 
 /// A ringbuffer-like queue, where the length is always the same, i.e. it only has one pointer.
 // Please correct me if this has a better name.
-#[derive(Debug)]
 pub struct CircularArray<T> {
-    queue: Vec<T>,
     position: usize,
+    buffer: Vec<T>,
 }
-impl<T: Copy> CircularArray<T> {
+impl<T: Clone> CircularArray<T> {
     /// Create an array of the given size, filled with the `initial` value.
     pub fn new(initial: T, size: usize) -> Self {
         Self {
-            queue: vec![initial; size],
             position: 0,
+            buffer: vec![initial; size],
         }
     }
 
     /// Inserts the value at the back of the queue, and returns the value removed from the front.
     pub fn push_pop(&mut self, value: T) -> T {
-        let removed = self.queue[self.position];
-        self.queue[self.position] = value;
+        let removed = std::mem::replace(&mut self.buffer[self.position], value);
 
         self.position += 1;
         self.position %= self.len();
@@ -115,8 +120,44 @@ impl<T: Copy> CircularArray<T> {
     }
 
     pub fn len(&self) -> usize {
-        self.queue.len()
+        self.buffer.len()
     }
+
+    pub fn iter<'a>(&'a self) -> impl Iterator<Item = &T> + 'a {
+        let first_part = &self.buffer[self.position..];
+        let last_part = &self.buffer[..self.position];
+        first_part.iter().chain(last_part)
+    }
+}
+impl<T: Clone + Debug> Debug for CircularArray<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let ordered_list: Vec<&T> = self.iter().collect();
+        write!(
+            f,
+            "CircularArray {}",
+            format_truncate_list(10, &ordered_list[..])
+        )
+    }
+}
+
+/// Format list truncated like:
+/// `"[0, 1, 2 ... 7, 8, 9]"`
+pub fn format_truncate_list<T: Debug>(max_length: usize, list: &[T]) -> String {
+    fn format_list<'a, T: 'a + Debug>(list: &[T]) -> String {
+        let strings: Vec<String> = list.iter().map(|e| format!("{:?}", *e)).collect();
+        strings.join(", ")
+    }
+
+    let truncated_iter = if list.len() <= max_length {
+        format_list(list)
+    } else {
+        let half_length = max_length / 2;
+        let first_five = format_list(&list[..half_length]);
+        let last_five = format_list(&list[(list.len() - half_length)..]);
+        format!("{} ... {}", first_five, last_five)
+    };
+
+    format!("[{}]", truncated_iter)
 }
 
 #[cfg(test)]
@@ -177,5 +218,18 @@ mod tests {
         // Observe that all initial values are pushed through, plus a single of the supplied ones.
         let expected_output = [1, 1, 1, 1, 1, 2];
         assert_eq!(output, expected_output);
+    }
+
+    #[test]
+    fn format_small_list() {
+        let range: Vec<_> = (0..5).collect();
+        let output = format_truncate_list(5, &range[..]);
+        assert_eq!(output, "[0, 1, 2, 3, 4]");
+    }
+    #[test]
+    fn format_long_list() {
+        let range: Vec<_> = (0..6).collect();
+        let output = format_truncate_list(5, &range[..]);
+        assert_eq!(output, "[0, 1 ... 4, 5]");
     }
 }
