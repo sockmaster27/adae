@@ -2,32 +2,30 @@ use crate::zip;
 
 use cpal::StreamConfig;
 
-use super::components::mixer::{new_mixer, Mixer, MixerInterface};
+use super::components::mixer::{new_mixer, Mixer, MixerProcessor};
 use super::{Sample, CHANNELS};
 #[cfg(feature = "record_output")]
 use crate::wav_recorder::WavRecorder;
 
-/// Creates an corresponding pair of [`AudioThread`] and [`AudioThreadInterface`].
+/// Creates an corresponding pair of [`Processor`] and [`ProcessorInterface`].
 ///
-/// The [`AudioThreadInterface`] should not live on the actual audio thread.
-pub fn new_audio_thread(
+/// The [`Processor`] should live on the audio thread, while the [`ProcessorInterface`] should not.
+pub fn new_processor(
     stream_config: &StreamConfig,
     max_buffer_size: usize,
-) -> (AudioThreadInterface, AudioThread) {
+) -> (ProcessorInterface, Processor) {
     let sample_rate = stream_config.sample_rate.0;
 
-    let (mixer_interface, mixer) = new_mixer(max_buffer_size);
+    let (mixer, mixer_processor) = new_mixer(max_buffer_size);
 
     (
-        AudioThreadInterface {
-            mixer: mixer_interface,
-        },
-        AudioThread {
+        ProcessorInterface { mixer },
+        Processor {
             output_channels: stream_config.channels,
             sample_rate,
             max_buffer_size,
 
-            mixer,
+            mixer: mixer_processor,
 
             #[cfg(feature = "record_output")]
             recorder: WavRecorder::new(CHANNELS as u16, sample_rate),
@@ -35,24 +33,24 @@ pub fn new_audio_thread(
     )
 }
 
-/// The interface to the audio thread, living elsewhere.
-/// Should somehwat mirror the [`AudioThread`].
-pub struct AudioThreadInterface {
-    pub mixer: MixerInterface,
+/// The interface to the processor, living outside of the audio thread.
+/// Should somehwat mirror the [`Processor`].
+pub struct ProcessorInterface {
+    pub mixer: Mixer,
 }
 
 /// Contatins all data that should persist from one buffer output to the next.
-pub struct AudioThread {
+pub struct Processor {
     output_channels: u16,
     sample_rate: u32,
     max_buffer_size: usize,
 
-    mixer: Mixer,
+    mixer: MixerProcessor,
 
     #[cfg(feature = "record_output")]
     recorder: WavRecorder,
 }
-impl AudioThread {
+impl Processor {
     /// The function called to generate each audio buffer.
     pub fn output<T: cpal::Sample>(&mut self, data: &mut [T]) {
         // In some cases the buffer size can vary from one buffer to the next.

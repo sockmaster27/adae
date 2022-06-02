@@ -3,8 +3,8 @@ pub mod audio_meter;
 mod delay;
 pub use delay::DelayPoint;
 
-mod mixer_track;
-pub use mixer_track::{MixerTrackData, MixerTrackInterface as MixerTrack};
+mod track;
+pub use track::{Track, TrackData};
 
 pub mod mixer;
 

@@ -7,32 +7,31 @@ use std::sync::Arc;
 
 use atomicbox::AtomicOptionBox;
 
-use super::mixer_track::{mixer_track_from_data, new_mixer_track, MixerTrack, MixerTrackInterface};
+use super::track::{mixer_track_from_data, new_mixer_track, Track, TrackData, TrackProcessor};
 use super::MixPoint;
 use crate::engine::Sample;
-use crate::MixerTrackData;
 
-pub fn new_mixer(max_buffer_size: usize) -> (MixerInterface, Mixer) {
+pub fn new_mixer(max_buffer_size: usize) -> (Mixer, MixerProcessor) {
     let new_map1 = Arc::new(AtomicOptionBox::none());
     let new_map2 = Arc::clone(&new_map1);
 
     let (new_tracks_p, new_tracks_c) = ringbuf::RingBuffer::new(10).split();
     let (deleted_tracks_p, _deleted_tracks_c) = ringbuf::RingBuffer::new(10).split();
 
-    let (track_interface, track) = new_mixer_track(0, max_buffer_size);
-
-    let mut track_interfaces = HashMap::new();
-    track_interfaces.insert(0, track_interface);
+    let (track, track_processor) = new_mixer_track(0, max_buffer_size);
 
     let mut tracks = HashMap::new();
     tracks.insert(0, track);
-    let cap = tracks.capacity();
+
+    let mut tracks_processor = HashMap::new();
+    tracks_processor.insert(0, track_processor);
+    let cap = tracks_processor.capacity();
 
     (
-        MixerInterface {
+        Mixer {
             max_buffer_size,
 
-            tracks: track_interfaces,
+            tracks: tracks,
             last_key: 0,
 
             cap,
@@ -41,8 +40,8 @@ pub fn new_mixer(max_buffer_size: usize) -> (MixerInterface, Mixer) {
 
             deleted_tracks: deleted_tracks_p,
         },
-        Mixer {
-            tracks,
+        MixerProcessor {
+            tracks: tracks_processor,
             mix_point: MixPoint::new(max_buffer_size),
 
             new_map: new_map2,
@@ -54,15 +53,112 @@ pub fn new_mixer(max_buffer_size: usize) -> (MixerInterface, Mixer) {
 }
 
 pub struct Mixer {
-    tracks: HashMap<u32, MixerTrack>,
+    max_buffer_size: usize,
+
+    tracks: HashMap<u32, Track>,
+    last_key: u32,
+
+    cap: usize,
+    new_map: Arc<AtomicOptionBox<HashMap<u32, TrackProcessor>>>,
+    new_tracks: ringbuf::Producer<(u32, TrackProcessor)>,
+
+    deleted_tracks: ringbuf::Producer<u32>,
+}
+impl Mixer {
+    pub fn tracks(&self) -> Vec<&Track> {
+        self.tracks.values().collect()
+    }
+    pub fn tracks_mut(&mut self) -> Vec<&mut Track> {
+        self.tracks.values_mut().collect()
+    }
+
+    pub fn track(&self, key: u32) -> Result<&Track, InvalidTrackError> {
+        self.tracks.get(&key).ok_or(InvalidTrackError { key })
+    }
+    pub fn track_mut(&mut self, key: u32) -> Result<&mut Track, InvalidTrackError> {
+        self.tracks.get_mut(&key).ok_or(InvalidTrackError { key })
+    }
+
+    pub fn add_track(&mut self) -> Result<&mut Track, TrackOverflowError> {
+        // Find next available key
+        let mut key = self.last_key.wrapping_add(1);
+
+        let mut i = 0;
+        while self.tracks.contains_key(&key) {
+            i += 1;
+            if i == u32::MAX {
+                return Err(TrackOverflowError());
+            }
+
+            key = key.wrapping_add(1);
+        }
+        self.last_key = key;
+
+        let (track, track_processor) = new_mixer_track(key, self.max_buffer_size);
+        self.tracks.insert(key, track);
+
+        // Do the work of reallocating Mixer's HashMap if needed
+        if self.tracks.len() > self.cap {
+            self.cap *= 2;
+            self.new_map.store(
+                Some(Box::new(HashMap::with_capacity(self.cap))),
+                Ordering::SeqCst,
+            );
+        }
+
+        self.new_tracks
+            .push((key, track_processor))
+            .expect("Too many tracks added to mixer inbetween polls");
+
+        let track = self.tracks.get_mut(&key).unwrap();
+        Ok(track)
+    }
+
+    pub fn reconstruct_track(
+        &mut self,
+        data: &TrackData,
+    ) -> Result<&mut Track, TrackReconstructionError> {
+        let key = data.key;
+
+        if self.tracks.contains_key(&key) {
+            return Err(TrackReconstructionError { key });
+        }
+
+        let (track, track_processor) = mixer_track_from_data(self.max_buffer_size, data);
+        self.tracks.insert(key, track);
+
+        self.new_tracks
+            .push((key, track_processor))
+            .expect("Too many tracks added to mixer inbetween polls");
+
+        let track = self.tracks.get_mut(&key).unwrap();
+        Ok(track)
+    }
+
+    pub fn delete_track(&mut self, key: u32) -> Result<(), InvalidTrackError> {
+        let result = self.tracks.remove(&key);
+        if result.is_none() {
+            return Err(InvalidTrackError { key });
+        }
+
+        self.deleted_tracks
+            .push(key)
+            .expect("Too many tracks deleted from mixer inbetween polls");
+
+        Ok(())
+    }
+}
+
+pub struct MixerProcessor {
+    tracks: HashMap<u32, TrackProcessor>,
     mix_point: MixPoint,
 
-    new_map: Arc<AtomicOptionBox<HashMap<u32, MixerTrack>>>,
-    new_tracks: ringbuf::Consumer<(u32, MixerTrack)>,
+    new_map: Arc<AtomicOptionBox<HashMap<u32, TrackProcessor>>>,
+    new_tracks: ringbuf::Consumer<(u32, TrackProcessor)>,
 
     deleted_tracks: ringbuf::Consumer<u32>,
 }
-impl Mixer {
+impl MixerProcessor {
     pub fn poll(&mut self) {
         let new_map = self.new_map.take(Ordering::SeqCst);
         if let Some(new_map) = new_map {
@@ -100,103 +196,6 @@ impl Mixer {
             Ok(buffer) => buffer,
             Err(buffer) => &mut buffer[..buffer_size],
         }
-    }
-}
-
-pub struct MixerInterface {
-    max_buffer_size: usize,
-
-    tracks: HashMap<u32, MixerTrackInterface>,
-    last_key: u32,
-
-    cap: usize,
-    new_map: Arc<AtomicOptionBox<HashMap<u32, MixerTrack>>>,
-    new_tracks: ringbuf::Producer<(u32, MixerTrack)>,
-
-    deleted_tracks: ringbuf::Producer<u32>,
-}
-impl MixerInterface {
-    pub fn tracks(&self) -> Vec<&MixerTrackInterface> {
-        self.tracks.values().collect()
-    }
-    pub fn tracks_mut(&mut self) -> Vec<&mut MixerTrackInterface> {
-        self.tracks.values_mut().collect()
-    }
-
-    pub fn track(&self, key: u32) -> Result<&MixerTrackInterface, InvalidTrackError> {
-        self.tracks.get(&key).ok_or(InvalidTrackError { key })
-    }
-    pub fn track_mut(&mut self, key: u32) -> Result<&mut MixerTrackInterface, InvalidTrackError> {
-        self.tracks.get_mut(&key).ok_or(InvalidTrackError { key })
-    }
-
-    pub fn add_track(&mut self) -> Result<&mut MixerTrackInterface, TrackOverflowError> {
-        // Find next available key
-        let mut key = self.last_key.wrapping_add(1);
-
-        let mut i = 0;
-        while self.tracks.contains_key(&key) {
-            i += 1;
-            if i == u32::MAX {
-                return Err(TrackOverflowError());
-            }
-
-            key = key.wrapping_add(1);
-        }
-        self.last_key = key;
-
-        let (track_interface, track) = new_mixer_track(key, self.max_buffer_size);
-        self.tracks.insert(key, track_interface);
-
-        // Do the work of reallocating Mixer's HashMap if needed
-        if self.tracks.len() > self.cap {
-            self.cap *= 2;
-            self.new_map.store(
-                Some(Box::new(HashMap::with_capacity(self.cap))),
-                Ordering::SeqCst,
-            );
-        }
-
-        self.new_tracks
-            .push((key, track))
-            .expect("Too many tracks added to mixer inbetween polls");
-
-        let track_interface = self.tracks.get_mut(&key).unwrap();
-        Ok(track_interface)
-    }
-
-    pub fn reconstruct_track(
-        &mut self,
-        data: &MixerTrackData,
-    ) -> Result<&mut MixerTrackInterface, TrackReconstructionError> {
-        let key = data.key;
-
-        if self.tracks.contains_key(&key) {
-            return Err(TrackReconstructionError { key });
-        }
-
-        let (track_interface, track) = mixer_track_from_data(self.max_buffer_size, data);
-        self.tracks.insert(key, track_interface);
-
-        self.new_tracks
-            .push((key, track))
-            .expect("Too many tracks added to mixer inbetween polls");
-
-        let track_interface = self.tracks.get_mut(&key).unwrap();
-        Ok(track_interface)
-    }
-
-    pub fn delete_track(&mut self, key: u32) -> Result<(), InvalidTrackError> {
-        let result = self.tracks.remove(&key);
-        if result.is_none() {
-            return Err(InvalidTrackError { key });
-        }
-
-        self.deleted_tracks
-            .push(key)
-            .expect("Too many tracks deleted from mixer inbetween polls");
-
-        Ok(())
     }
 }
 
@@ -238,35 +237,35 @@ mod tests {
     #[test]
     fn add_single_track() {
         let max_buffer_size = 10;
-        let (mut mi, mut m) = new_mixer(max_buffer_size);
+        let (mut m, mut mp) = new_mixer(max_buffer_size);
 
-        mi.add_track().unwrap();
-        m.poll();
+        m.add_track().unwrap();
+        mp.poll();
 
-        assert_eq!(m.tracks.len(), 2);
+        assert_eq!(mp.tracks.len(), 2);
     }
 
     #[test]
     fn add_multiple_tracks() {
         let max_buffer_size = 10;
-        let (mut mi, mut m) = new_mixer(max_buffer_size);
+        let (mut m, mut mp) = new_mixer(max_buffer_size);
 
         for _ in 0..10 {
-            mi.add_track().unwrap();
+            m.add_track().unwrap();
         }
-        m.poll();
+        mp.poll();
 
-        assert_eq!(m.tracks.len(), 11);
+        assert_eq!(mp.tracks.len(), 11);
     }
 
     #[test]
     #[should_panic]
     fn add_too_many_tracks() {
         let max_buffer_size = 10;
-        let (mut mi, _m) = new_mixer(max_buffer_size);
+        let (mut m, _mp) = new_mixer(max_buffer_size);
 
         for _ in 0..11 {
-            mi.add_track().unwrap();
+            m.add_track().unwrap();
         }
     }
 }

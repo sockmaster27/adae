@@ -7,11 +7,11 @@ use std::thread::{self, JoinHandle};
 
 mod components;
 mod utils;
-pub use components::{MixerTrack, MixerTrackData};
+pub use components::{Track, TrackData};
 
-mod audio_thread;
-use self::audio_thread::{new_audio_thread, AudioThread, AudioThreadInterface};
+mod processor;
 use self::components::mixer::{InvalidTrackError, TrackOverflowError, TrackReconstructionError};
+use self::processor::{new_processor, Processor, ProcessorInterface};
 
 /// Internally used sample format.
 type Sample = f32;
@@ -27,7 +27,7 @@ pub struct Engine {
     stopped: Arc<AtomicBool>,
     join_handle: Option<JoinHandle<()>>,
 
-    audio_thread_interface: AudioThreadInterface,
+    processor_interface: ProcessorInterface,
 }
 impl Engine {
     pub fn new() -> Self {
@@ -45,7 +45,7 @@ impl Engine {
             cpal::BufferSize::Fixed(size) => size as usize,
             cpal::BufferSize::Default => MAX_BUFFER_SIZE_DEFAULT,
         };
-        let (audio_thread_interface, audio_thread) = new_audio_thread(&config, max_buffer_size);
+        let (processor_interface, processor) = new_processor(&config, max_buffer_size);
 
         let create_stream = match sample_format {
             SampleFormat::F32 => Self::create_stream::<f32>,
@@ -58,7 +58,7 @@ impl Engine {
         let join_handle = thread::spawn(move || {
             // Since cpal::Stream doesn't implement the Send trait, it has to live in this thread.
 
-            let stream = create_stream(&device, &config, audio_thread).unwrap();
+            let stream = create_stream(&device, &config, processor).unwrap();
             stream.play().unwrap();
 
             println!(
@@ -83,7 +83,7 @@ impl Engine {
         Engine {
             stopped,
             join_handle,
-            audio_thread_interface,
+            processor_interface,
         }
     }
 
@@ -91,42 +91,42 @@ impl Engine {
     fn create_stream<T: 'static + cpal::Sample>(
         device: &Device,
         config: &StreamConfig,
-        mut audio_thread: AudioThread,
+        mut processor: Processor,
     ) -> Result<Stream, BuildStreamError> {
         let stream = device.build_output_stream(
             config,
-            move |data: &mut [T], _info| audio_thread.output(data),
+            move |data: &mut [T], _info| processor.output(data),
             |err| panic!("{}", err),
         )?;
 
         Ok(stream)
     }
 
-    pub fn tracks(&self) -> Vec<&MixerTrack> {
-        self.audio_thread_interface.mixer.tracks()
+    pub fn tracks(&self) -> Vec<&Track> {
+        self.processor_interface.mixer.tracks()
     }
-    pub fn tracks_mut(&mut self) -> Vec<&mut MixerTrack> {
-        self.audio_thread_interface.mixer.tracks_mut()
-    }
-
-    pub fn track(&self, key: u32) -> Result<&MixerTrack, InvalidTrackError> {
-        self.audio_thread_interface.mixer.track(key)
-    }
-    pub fn track_mut(&mut self, key: u32) -> Result<&mut MixerTrack, InvalidTrackError> {
-        self.audio_thread_interface.mixer.track_mut(key)
+    pub fn tracks_mut(&mut self) -> Vec<&mut Track> {
+        self.processor_interface.mixer.tracks_mut()
     }
 
-    pub fn add_track(&mut self) -> Result<&mut MixerTrack, TrackOverflowError> {
-        self.audio_thread_interface.mixer.add_track()
+    pub fn track(&self, key: u32) -> Result<&Track, InvalidTrackError> {
+        self.processor_interface.mixer.track(key)
+    }
+    pub fn track_mut(&mut self, key: u32) -> Result<&mut Track, InvalidTrackError> {
+        self.processor_interface.mixer.track_mut(key)
+    }
+
+    pub fn add_track(&mut self) -> Result<&mut Track, TrackOverflowError> {
+        self.processor_interface.mixer.add_track()
     }
     pub fn reconstruct_track(
         &mut self,
-        data: &MixerTrackData,
-    ) -> Result<&mut MixerTrack, TrackReconstructionError> {
-        self.audio_thread_interface.mixer.reconstruct_track(data)
+        data: &TrackData,
+    ) -> Result<&mut Track, TrackReconstructionError> {
+        self.processor_interface.mixer.reconstruct_track(data)
     }
     pub fn delete_track(&mut self, key: u32) -> Result<(), InvalidTrackError> {
-        self.audio_thread_interface.mixer.delete_track(key)
+        self.processor_interface.mixer.delete_track(key)
     }
 }
 
