@@ -3,11 +3,12 @@ use crate::zip;
 use super::super::{Sample, CHANNELS};
 
 use super::audio_meter::{new_audio_meter, AudioMeter, AudioMeterProcessor};
+use super::mixer::TrackKey;
 use super::parameter::{new_f32_parameter, F32Parameter, F32ParameterProcessor};
 use super::test_tone::TestTone;
 
-pub fn new_mixer_track(key: u32, max_buffer_size: usize) -> (Track, TrackProcessor) {
-    mixer_track_from_data(
+pub fn new_track(key: TrackKey, max_buffer_size: usize) -> (Track, TrackProcessor) {
+    track_from_data(
         max_buffer_size,
         &TrackData {
             panning: 0.0,
@@ -17,7 +18,7 @@ pub fn new_mixer_track(key: u32, max_buffer_size: usize) -> (Track, TrackProcess
     )
 }
 
-pub fn mixer_track_from_data(max_buffer_size: usize, data: &TrackData) -> (Track, TrackProcessor) {
+pub fn track_from_data(max_buffer_size: usize, data: &TrackData) -> (Track, TrackProcessor) {
     let test_tone = TestTone::new(max_buffer_size);
     let (panning, panning_processor) = new_f32_parameter(data.panning, max_buffer_size);
     let (volume, volume_processor) = new_f32_parameter(data.volume, max_buffer_size);
@@ -45,10 +46,10 @@ pub struct Track {
     pub volume: F32Parameter,
     pub meter: AudioMeter,
 
-    key: u32,
+    key: TrackKey,
 }
 impl Track {
-    pub fn key(&self) -> u32 {
+    pub fn key(&self) -> TrackKey {
         self.key
     }
 
@@ -64,11 +65,12 @@ impl Track {
 
 /// Contains all info about the tracks state,
 /// that is relevant to reconstructing it
+#[derive(Clone)]
 pub struct TrackData {
     pub panning: f32,
     pub volume: f32,
 
-    pub key: u32,
+    pub key: TrackKey,
 }
 
 #[derive(Debug)]
@@ -79,7 +81,7 @@ pub struct TrackProcessor {
     meter: AudioMeterProcessor,
 }
 impl TrackProcessor {
-    pub fn output(&mut self, sample_rate: u32, buffer_size: usize) -> &mut [Sample] {
+    pub fn output(&mut self, sample_rate: TrackKey, buffer_size: usize) -> &mut [Sample] {
         let buffer = self.test_tone.output(sample_rate, buffer_size);
 
         let volume_buffer = self.volume.get(buffer_size);

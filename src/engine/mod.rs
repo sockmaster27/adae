@@ -5,12 +5,15 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
-mod components;
 mod utils;
+
+mod components;
+use self::components::mixer::{
+    InvalidTrackError, TrackKey, TrackOverflowError, TrackReconstructionError,
+};
 pub use components::{Track, TrackData};
 
 mod processor;
-use self::components::mixer::{InvalidTrackError, TrackOverflowError, TrackReconstructionError};
 use self::processor::{new_processor, Processor, ProcessorInterface};
 
 /// Internally used sample format.
@@ -109,24 +112,38 @@ impl Engine {
         self.processor_interface.mixer.tracks_mut()
     }
 
-    pub fn track(&self, key: u32) -> Result<&Track, InvalidTrackError> {
+    pub fn track(&self, key: TrackKey) -> Result<&Track, InvalidTrackError> {
         self.processor_interface.mixer.track(key)
     }
-    pub fn track_mut(&mut self, key: u32) -> Result<&mut Track, InvalidTrackError> {
+    pub fn track_mut(&mut self, key: TrackKey) -> Result<&mut Track, InvalidTrackError> {
         self.processor_interface.mixer.track_mut(key)
     }
 
-    pub fn add_track(&mut self) -> Result<&mut Track, TrackOverflowError> {
+    pub fn add_track(&mut self) -> Result<TrackKey, TrackOverflowError> {
         self.processor_interface.mixer.add_track()
     }
+    pub fn add_tracks(&mut self, count: TrackKey) -> Result<Vec<TrackKey>, TrackOverflowError> {
+        self.processor_interface.mixer.add_tracks(count)
+    }
+
     pub fn reconstruct_track(
         &mut self,
         data: &TrackData,
-    ) -> Result<&mut Track, TrackReconstructionError> {
+    ) -> Result<TrackKey, TrackReconstructionError> {
         self.processor_interface.mixer.reconstruct_track(data)
     }
-    pub fn delete_track(&mut self, key: u32) -> Result<(), InvalidTrackError> {
+    pub fn reconstruct_tracks<'a>(
+        &mut self,
+        data: impl Iterator<Item = &'a TrackData>,
+    ) -> Result<Vec<TrackKey>, TrackReconstructionError> {
+        self.processor_interface.mixer.reconstruct_tracks(data)
+    }
+
+    pub fn delete_track(&mut self, key: TrackKey) -> Result<(), InvalidTrackError> {
         self.processor_interface.mixer.delete_track(key)
+    }
+    pub fn delete_tracks(&mut self, keys: Vec<TrackKey>) -> Result<(), InvalidTrackError> {
+        self.processor_interface.mixer.delete_tracks(keys)
     }
 }
 
