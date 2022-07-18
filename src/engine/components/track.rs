@@ -42,15 +42,51 @@ pub fn track_from_data(max_buffer_size: usize, data: &TrackData) -> (Track, Trac
 
 #[derive(Debug)]
 pub struct Track {
-    pub panning: F32Parameter,
-    pub volume: F32Parameter,
-    pub meter: AudioMeter,
+    panning: F32Parameter,
+    volume: F32Parameter,
+    meter: AudioMeter,
 
     key: TrackKey,
 }
 impl Track {
     pub fn key(&self) -> TrackKey {
         self.key
+    }
+
+    pub fn panning(&self) -> Sample {
+        self.panning.get()
+    }
+    pub fn set_panning(&self, value: Sample) {
+        self.panning.set(value)
+    }
+
+    pub fn volume(&self) -> Sample {
+        self.volume.get()
+    }
+    pub fn set_volume(&self, value: Sample) {
+        self.volume.set(value)
+    }
+
+    /// Returns an array of the signals current peak, long-term peak and RMS-level for each channel in the form:
+    /// - `[peak: [left, right], long_peak: [left, right], rms: [left, right]]`
+    ///
+    /// Results are scaled and smoothed to avoid jittering, suitable for reading every frame.
+    /// If this is not desirable see [`Self::read_meter_raw`].
+    pub fn read_meter(&mut self) -> [[Sample; CHANNELS]; 3] {
+        self.meter.read()
+    }
+    /// Same as [`Self::read_meter`], except results are not smoothed or scaled.
+    ///
+    /// Long peak stays in place for 1 second since it was last changed, before snapping to the current peak.
+    pub fn read_meter_raw(&self) -> [[Sample; CHANNELS]; 3] {
+        self.meter.read_raw()
+    }
+    /// Snap smoothed rms value to its current unsmoothed equivalent.
+    ///
+    /// Should be called before [`Self::read_meter`] is called the first time or after a long break,
+    /// to avoid meter sliding in place from zero or a very old value.
+    pub fn snap_rms(&mut self) {
+        self.meter.snap_rms();
     }
 
     /// Takes a snapshot of the current state of the track
@@ -103,20 +139,10 @@ impl TrackProcessor {
 
     fn pan(panning: f32, frame: &mut [Sample]) {
         // TODO: Pan laws
-        let mut left_multiplier = -panning + 1.0;
-        left_multiplier = if left_multiplier > 1.0 {
-            1.0
-        } else {
-            left_multiplier
-        };
+        let left_multiplier = (-panning + 1.0).clamp(0.0, 1.0);
         frame[0] *= left_multiplier;
 
-        let mut right_multiplier = panning + 1.0;
-        right_multiplier = if right_multiplier > 1.0 {
-            1.0
-        } else {
-            right_multiplier
-        };
+        let right_multiplier = (panning + 1.0).clamp(0.0, 1.0);
         frame[1] *= right_multiplier;
     }
 }
