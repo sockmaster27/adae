@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use crate::engine::utils::MovingAverage;
-use crate::{non_copy_array, zip};
+use crate::{meter_scale, non_copy_array, zip};
 
 use super::super::utils::{rms, AtomicF32};
 use super::super::{Sample, CHANNELS};
@@ -57,17 +57,17 @@ pub struct AudioMeter {
     rms_avg: [MovingAverage; CHANNELS],
 }
 impl AudioMeter {
-    /// Return an array of the signals current peak, long-term peak and RMS-level for each channel in the form:
+    /// Returns an array of the signals current peak, long-term peak and RMS-level for each channel in the form:
     /// - `[peak: [left, right], long_peak: [left, right], rms: [left, right]]`
     ///
-    /// Results are smoothed to avoid jittering, suitable for reading every frame.
+    /// Results are scaled and smoothed to avoid jittering, suitable for reading every frame.
     /// If this is not desirable see [`AudioMeter::read_raw`].
     pub fn read(&mut self) -> [[Sample; CHANNELS]; 3] {
         let mut peak = [0.0; CHANNELS];
         let mut long_peak = [0.0; CHANNELS];
         let mut rms = [0.0; CHANNELS];
 
-        // Iterating through all channels of all stats:
+        // Iterating through all channels of the first two:
         let channel_iter = zip!(
             self.peak.iter(),
             self.last_peak_top.iter_mut(),
@@ -84,16 +84,17 @@ impl AudioMeter {
         // Falling slowly
         for (((stat, last_top), since_last_top), result) in channel_iter {
             let stat = stat.load(Ordering::Relaxed);
+            let scaled = meter_scale(stat);
 
             const DURATION: f32 = 0.3;
             let elapsed = since_last_top.elapsed().as_secs_f32();
             let progress = elapsed / DURATION;
             let fallen = *last_top * (-progress.powf(2.0) + 1.0);
 
-            *result = if stat >= fallen {
-                *last_top = stat;
+            *result = if scaled >= fallen {
+                *last_top = scaled;
                 *since_last_top = Instant::now();
-                stat
+                scaled
             } else {
                 fallen
             };
@@ -102,14 +103,28 @@ impl AudioMeter {
         // Averaged
         for ((rms, avg), result) in zip!(self.rms.iter(), self.rms_avg.iter_mut(), rms.iter_mut()) {
             let rms = rms.load(Ordering::Relaxed);
-            avg.push(rms);
+            let scaled = meter_scale(rms);
+            avg.push(scaled);
             *result = avg.average();
         }
 
         [peak, long_peak, rms]
     }
 
-    /// Same as [`AudioMeter::read`], except results are not smoothed.
+    /// Snap smoothed rms value to its current unsmoothed equivalent.
+    ///
+    /// Should be called before [`Self::read`] is called the first time or after a long break,
+    /// to avoid meter sliding in place from zero or a very old value.
+    pub fn snap_rms(&mut self) {
+        for (rms, rms_avg) in zip!(self.rms.iter(), self.rms_avg.iter_mut()) {
+            let rms = rms.load(Ordering::Relaxed);
+            let scaled = meter_scale(rms);
+
+            rms_avg.fill(scaled);
+        }
+    }
+
+    /// Same as [`AudioMeter::read`], except results are not smoothed or scaled.
     ///
     /// Long peak stays in place for 1 second since it was last changed, before snapping to the current peak.
     pub fn read_raw(&self) -> [[Sample; CHANNELS]; 3] {

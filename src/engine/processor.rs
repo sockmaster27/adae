@@ -80,13 +80,7 @@ impl Processor {
     /// This should only be done right before outputting.
     fn clip(buffer: &mut [Sample]) {
         for sample in buffer.iter_mut() {
-            *sample = if *sample > 1.0 {
-                1.0
-            } else if *sample < -1.0 {
-                -1.0
-            } else {
-                *sample
-            };
+            *sample = sample.clamp(-1.0, 1.0);
         }
     }
 }

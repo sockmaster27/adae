@@ -89,6 +89,12 @@ impl MovingAverage {
         self.average += new_value as f64 / window_size;
     }
 
+    /// Swap out entire contents with `value`
+    pub fn fill(&mut self, value: f32) {
+        self.history.fill(value);
+        self.average = value as f64;
+    }
+
     pub fn average(&self) -> f32 {
         self.average as f32
     }
@@ -117,6 +123,10 @@ impl<T: Clone> CircularArray<T> {
         self.position %= self.len();
 
         removed
+    }
+
+    pub fn fill(&mut self, value: T) {
+        self.buffer.fill(value)
     }
 
     pub fn len(&self) -> usize {

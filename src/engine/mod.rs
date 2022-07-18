@@ -158,3 +158,16 @@ impl Drop for Engine {
         join_handle.join().unwrap();
     }
 }
+
+/// Scaling used by [`Track::read_meter`]
+///
+/// `∛|sample / 2|`
+pub fn meter_scale(sample: Sample) -> Sample {
+    (sample / 2.0).abs().powf(1.0 / 3.0)
+}
+/// Approximate inverse of scaling used by [`Track::read_meter`]
+///
+/// `2 ⋅ value³`
+pub fn inverse_meter_scale(value: Sample) -> Sample {
+    value.powi(3) * 2.0
+}

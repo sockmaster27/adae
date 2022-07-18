@@ -12,4 +12,4 @@ pub use custom_output::set_output;
 mod wav_recorder;
 
 mod engine;
-pub use engine::{Engine, Track, TrackData};
+pub use engine::{inverse_meter_scale, meter_scale, Engine, Track, TrackData};
