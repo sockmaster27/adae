@@ -28,7 +28,12 @@ pub fn new_processor(
             mixer: mixer_processor,
 
             #[cfg(feature = "record_output")]
-            recorder: WavRecorder::new(CHANNELS as u16, sample_rate),
+            recorder: WavRecorder::new(
+                CHANNELS
+                    .try_into()
+                    .expect("Too many channels to record to .wav"),
+                sample_rate,
+            ),
         },
     )
 }
@@ -54,7 +59,7 @@ impl Processor {
     /// The function called to generate each audio buffer.
     pub fn output<T: cpal::Sample>(&mut self, data: &mut [T]) {
         // In some cases the buffer size can vary from one buffer to the next.
-        let buffer_size = data.len() / self.output_channels as usize;
+        let buffer_size = data.len() / usize::from(self.output_channels);
         #[cfg(debug_assertions)]
         if buffer_size > self.max_buffer_size {
             panic!("A buffer of size {} was requested, which exceeds the biggest producible size of {}.", buffer_size, self.max_buffer_size);
@@ -69,7 +74,7 @@ impl Processor {
         self.recorder.record(buffer);
 
         // TODO: Scale channel counts.
-        debug_assert_eq!(CHANNELS, self.output_channels as usize);
+        debug_assert_eq!(CHANNELS, self.output_channels.into());
         // Convert to stream's sample type.
         for (in_sample, out_sample) in zip!(buffer, data) {
             *out_sample = T::from(in_sample);

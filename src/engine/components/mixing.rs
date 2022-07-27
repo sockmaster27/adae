@@ -47,7 +47,7 @@ impl MixPoint {
 
         // Sum
         for (sum_sample, &input_sample) in zip!(self.sum_buffer.iter_mut(), input_buffer) {
-            *sum_sample += input_sample as f64;
+            *sum_sample += f64::from(input_sample);
         }
     }
 

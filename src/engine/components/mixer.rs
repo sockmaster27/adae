@@ -106,8 +106,9 @@ impl Mixer {
         Ok(key)
     }
     pub fn add_tracks(&mut self, count: TrackKey) -> Result<Vec<TrackKey>, TrackOverflowError> {
+        let count = count.try_into().or(Err(TrackOverflowError {}))?;
         let keys = self.next_keys(count)?;
-        let mut tracks = Vec::with_capacity(count as usize);
+        let mut tracks = Vec::with_capacity(count);
         for &key in &keys {
             let track = new_track(key, self.max_buffer_size);
             tracks.push(track);
@@ -204,8 +205,8 @@ impl Mixer {
         self.last_key = key;
         Ok(key)
     }
-    fn next_keys(&mut self, count: TrackKey) -> Result<Vec<TrackKey>, TrackOverflowError> {
-        let mut keys = Vec::with_capacity(count as usize);
+    fn next_keys(&mut self, count: usize) -> Result<Vec<TrackKey>, TrackOverflowError> {
+        let mut keys = Vec::with_capacity(count);
         let mut last_key = self.last_key;
         for _ in 0..count {
             let key = self.next_key_after(last_key)?;

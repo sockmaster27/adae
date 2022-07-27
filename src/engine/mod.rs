@@ -45,7 +45,8 @@ impl Engine {
         // Since buffer sizes can vary from output to output,
         // `max_buffer_size` denotes how much space each intermediate buffer should be initialized with.
         let max_buffer_size = match config.buffer_size {
-            cpal::BufferSize::Fixed(size) => size as usize,
+            // If usize is smaller than our buffersize we have bigger problems
+            cpal::BufferSize::Fixed(size) => size.try_into().expect("Buffer size overflows usize"),
             cpal::BufferSize::Default => MAX_BUFFER_SIZE_DEFAULT,
         };
         let (processor_interface, processor) = new_processor(&config, max_buffer_size);

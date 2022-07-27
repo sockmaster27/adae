@@ -58,7 +58,7 @@ pub fn rms(buffer: &[Sample]) -> [f32; CHANNELS] {
 
     for frame in buffer.chunks(CHANNELS) {
         for (sample, average) in zip!(frame, &mut averages) {
-            *average += sample.powf(2.0) as f64 / buffer_size;
+            *average += f64::from(sample.powi(2)) / buffer_size;
         }
     }
 
@@ -75,7 +75,7 @@ pub struct MovingAverage {
 impl MovingAverage {
     pub fn new(initial: f32, window_size: usize) -> Self {
         Self {
-            average: initial as f64,
+            average: initial.into(),
             history: CircularArray::new(initial, window_size),
         }
     }
@@ -85,14 +85,14 @@ impl MovingAverage {
 
         // Storing the average as an f64 ensures far greater accuracy.
         let window_size = self.history.len() as f64;
-        self.average -= removed_value as f64 / window_size;
-        self.average += new_value as f64 / window_size;
+        let delta = f64::from(new_value - removed_value) / window_size;
+        self.average += delta;
     }
 
     /// Swap out entire contents with `value`
     pub fn fill(&mut self, value: f32) {
         self.history.fill(value);
-        self.average = value as f64;
+        self.average = value.into();
     }
 
     pub fn average(&self) -> f32 {
