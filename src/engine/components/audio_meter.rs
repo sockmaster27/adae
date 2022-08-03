@@ -5,8 +5,8 @@ use std::time::Instant;
 use crate::engine::utils::MovingAverage;
 use crate::{meter_scale, non_copy_array, zip};
 
-use super::super::utils::{rms, AtomicF32};
-use super::super::{Sample, CHANNELS};
+use crate::engine::utils::{rms, AtomicF32};
+use crate::engine::{Sample, CHANNELS};
 
 pub fn new_audio_meter() -> (AudioMeter, AudioMeterProcessor) {
     let peak1 = Arc::new(non_copy_array![AtomicF32::new(0.0); CHANNELS]);

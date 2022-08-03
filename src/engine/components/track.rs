@@ -1,11 +1,17 @@
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
+
+use atomicbox::AtomicOptionBox;
+
 use crate::zip;
 
-use super::super::{Sample, CHANNELS};
+use crate::engine::{Sample, CHANNELS};
 
 use super::audio_meter::{new_audio_meter, AudioMeter, AudioMeterProcessor};
 use super::mixer::TrackKey;
 use super::parameter::{new_f32_parameter, F32Parameter, F32ParameterProcessor};
 use super::test_tone::TestTone;
+use crate::engine::traits::{Info, Source};
 
 pub fn new_track(key: TrackKey, max_buffer_size: usize) -> (Track, TrackProcessor) {
     track_from_data(
@@ -20,37 +26,56 @@ pub fn new_track(key: TrackKey, max_buffer_size: usize) -> (Track, TrackProcesso
 
 pub fn track_from_data(max_buffer_size: usize, data: &TrackData) -> (Track, TrackProcessor) {
     let test_tone = TestTone::new(max_buffer_size);
+    let source = Box::new(test_tone);
+
     let (panning, panning_processor) = new_f32_parameter(data.panning, max_buffer_size);
     let (volume, volume_processor) = new_f32_parameter(data.volume, max_buffer_size);
     let (meter, meter_processor) = new_audio_meter();
+
+    let new_source1 = Arc::new(AtomicOptionBox::none());
+    let new_source2 = Arc::clone(&new_source1);
+
     (
         Track {
-            panning: panning,
-            volume: volume,
-            meter: meter,
-
             key: data.key,
+
+            panning,
+            volume,
+            meter,
+
+            new_source: new_source1,
         },
         TrackProcessor {
-            test_tone: test_tone,
+            source,
+
             panning: panning_processor,
             volume: volume_processor,
             meter: meter_processor,
+
+            new_source: new_source2,
         },
     )
 }
 
-#[derive(Debug)]
+// #[derive(Debug)]
 pub struct Track {
+    key: TrackKey,
+
     panning: F32Parameter,
     volume: F32Parameter,
     meter: AudioMeter,
 
-    key: TrackKey,
+    // Double-boxed because inner box holds a fat pointer, which can't be atomic
+    new_source: Arc<AtomicOptionBox<Box<dyn Source>>>,
 }
 impl Track {
     pub fn key(&self) -> TrackKey {
         self.key
+    }
+
+    pub fn set_source(&self, source: Box<dyn Source>) {
+        self.new_source
+            .store(Some(Box::new(source)), Ordering::SeqCst);
     }
 
     pub fn panning(&self) -> Sample {
@@ -111,14 +136,29 @@ pub struct TrackData {
 
 #[derive(Debug)]
 pub struct TrackProcessor {
-    test_tone: TestTone,
+    source: Box<dyn Source>,
+
     panning: F32ParameterProcessor,
     volume: F32ParameterProcessor,
     meter: AudioMeterProcessor,
+
+    new_source: Arc<AtomicOptionBox<Box<dyn Source>>>,
 }
 impl TrackProcessor {
-    pub fn output(&mut self, sample_rate: TrackKey, buffer_size: usize) -> &mut [Sample] {
-        let buffer = self.test_tone.output(sample_rate, buffer_size);
+    pub fn poll(&mut self) {
+        let source_option = self.new_source.take(Ordering::SeqCst);
+        if let Some(source_box) = source_option {
+            self.source = *source_box;
+        }
+
+        self.source.poll();
+    }
+
+    pub fn output(&mut self, sample_rate: u32, buffer_size: usize) -> &mut [Sample] {
+        let buffer = self.source.output(Info {
+            sample_rate,
+            buffer_size,
+        });
 
         let volume_buffer = self.volume.get(buffer_size);
         let panning_buffer = self.panning.get(buffer_size);

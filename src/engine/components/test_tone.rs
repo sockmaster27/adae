@@ -1,7 +1,8 @@
 use std::fmt::Debug;
 
-use super::super::utils::format_truncate_list;
-use super::super::{Sample, CHANNELS};
+use crate::engine::traits::{Info, Source};
+use crate::engine::utils::format_truncate_list;
+use crate::engine::{Sample, CHANNELS};
 
 /// Generates a 440 Hz sine wave.
 pub struct TestTone {
@@ -15,8 +16,16 @@ impl TestTone {
             sample_clock: 0.0,
         }
     }
+}
+impl Source for TestTone {
+    fn poll(&mut self) {}
 
-    pub fn output(&mut self, sample_rate: u32, buffer_size: usize) -> &mut [Sample] {
+    fn output(&mut self, info: Info) -> &mut [Sample] {
+        let Info {
+            sample_rate,
+            buffer_size,
+        } = info;
+
         const FREQUENCY: f32 = 440.0;
         let sample_rate = sample_rate as f32;
         let phase_length = sample_rate / FREQUENCY;

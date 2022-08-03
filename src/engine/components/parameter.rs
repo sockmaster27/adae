@@ -5,7 +5,7 @@ use std::{
 
 use crate::engine::utils::format_truncate_list;
 
-use super::super::utils::{AtomicF32, MovingAverage};
+use crate::engine::utils::{AtomicF32, MovingAverage};
 
 pub fn new_f32_parameter(
     initial: f32,

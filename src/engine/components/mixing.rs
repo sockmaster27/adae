@@ -1,6 +1,6 @@
 use crate::zip;
 
-use super::super::{Sample, CHANNELS};
+use crate::engine::{Sample, CHANNELS};
 
 /// Component for the simple addition of signals.
 ///

@@ -1,8 +1,8 @@
+use core::sync::atomic::Ordering;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::Display;
 use std::mem;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use atomicbox::AtomicOptionBox;
@@ -42,7 +42,7 @@ pub fn new_mixer(max_buffer_size: usize) -> (Mixer, MixerProcessor) {
         Mixer {
             max_buffer_size,
 
-            tracks: tracks,
+            tracks,
             last_key: 0,
 
             added_tracks: added_tracks_p,
@@ -312,6 +312,10 @@ impl MixerProcessor {
             },
             None,
         );
+
+        for track in self.tracks.values_mut() {
+            track.poll();
+        }
 
         // TODO: Drop old_map and batches in another thread?
     }

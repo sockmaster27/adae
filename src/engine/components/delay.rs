@@ -1,9 +1,9 @@
 // Module temporarily out of use
 #![allow(dead_code)]
 
-use super::super::{Sample, CHANNELS};
+use crate::engine::{Sample, CHANNELS};
 
-use super::super::utils::CircularArray;
+use crate::engine::utils::CircularArray;
 
 /// Circular sample delay
 pub struct DelayPoint {
