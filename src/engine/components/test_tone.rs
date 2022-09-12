@@ -18,8 +18,6 @@ impl TestTone {
     }
 }
 impl Source for TestTone {
-    fn poll(&mut self) {}
-
     fn output(&mut self, info: Info) -> &mut [Sample] {
         let Info {
             sample_rate,
