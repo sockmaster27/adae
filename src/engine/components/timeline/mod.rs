@@ -1,59 +1,56 @@
 mod audio_clip;
 mod audio_clip_store;
+mod track;
+
+pub use track::{new_timeline_track, TimelineTrack};
 
 use std::{
     cell::Cell,
     ops::{Add, Sub},
+    sync::{atomic::AtomicU64, Arc},
 };
 
+use crate::engine::{traits::Info, Sample};
 use audio_clip::AudioClip;
 
-use crate::{
-    engine::{
-        traits::{Info, Source},
-        Sample,
-    },
-    zip,
-};
-
+const UNITS_PER_BEAT: u64 = 1024;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct Timestamp {
-    milli_beats: u64,
+    /// 1 beat = 1024 beat units, making it highly divisible by powers of 2
+    beat_units: u64,
 }
 impl Timestamp {
-    fn from_milli_beats(milli_beats: u64) -> Self {
-        Self { milli_beats }
+    /// 1 beat = 1024 beat units
+    fn from_beat_units(beat_units: u64) -> Self {
+        Self { beat_units }
     }
     fn from_beats(beats: u64) -> Self {
         Self {
-            milli_beats: beats * 1000,
+            beat_units: beats * UNITS_PER_BEAT,
         }
     }
     fn from_samples(samples: u128, sample_rate: u128, bpm: u128) -> Self {
-        let micro_seconds = samples * 10_000 / sample_rate;
-        let milli_beats = micro_seconds * bpm / (60 * 10);
+        let beat_units = (samples * bpm * UNITS_PER_BEAT as u128) / (sample_rate * 60);
         Self {
-            milli_beats: milli_beats.try_into().expect("Overflow"),
+            beat_units: beat_units.try_into().expect("Overflow"),
         }
     }
 
-    fn milli_beats(&self) -> u64 {
-        self.milli_beats
+    fn beat_units(&self) -> u64 {
+        self.beat_units
     }
     fn beats(&self) -> u64 {
-        self.milli_beats / 1000
+        self.beat_units / UNITS_PER_BEAT
     }
     fn samples(&self, sample_rate: u128, bpm: u128) -> u128 {
-        let milli_beats: u128 = self.milli_beats.into();
-        let micro_seconds = (milli_beats * 60 * 10) / bpm;
-        sample_rate * micro_seconds / 10_000
+        (self.beat_units as u128 * sample_rate * 60) / (bpm * UNITS_PER_BEAT as u128)
     }
 }
 impl Add for Timestamp {
     type Output = Self;
     fn add(self, rhs: Self) -> Self::Output {
         Self {
-            milli_beats: self.milli_beats + rhs.milli_beats,
+            beat_units: self.beat_units + rhs.beat_units,
         }
     }
 }
@@ -61,7 +58,7 @@ impl Sub for Timestamp {
     type Output = Self;
     fn sub(self, rhs: Self) -> Self::Output {
         Self {
-            milli_beats: self.milli_beats - rhs.milli_beats,
+            beat_units: self.beat_units - rhs.beat_units,
         }
     }
 }
@@ -110,53 +107,32 @@ impl TimelineClip {
     }
 }
 
-#[derive(Debug)]
-pub struct TimelineTrack {
-    clips: Vec<TimelineClip>,
-    relevant_clip: usize,
-    position: u64,
+pub fn new_timeline() -> (Timeline, TimelineProcessor) {
+    let sync_position1 = Arc::new(AtomicU64::new(0));
+    let sync_position2 = Arc::clone(&sync_position1);
 
-    output_buffer: Vec<Sample>,
-}
-impl Source for TimelineTrack {
-    fn output(&mut self, info: Info) -> &mut [Sample] {
-        let Info {
-            sample_rate,
-            buffer_size,
-        } = info;
-
-        let mut samples = 0;
-        while samples < buffer_size {
-            let relevant_clip = &mut self.clips[self.relevant_clip];
-            let output = relevant_clip.output(Info {
-                sample_rate,
-                buffer_size: buffer_size - samples,
-            });
-            for (&mut sample, sample_out) in zip!(output, self.output_buffer[samples..].iter_mut())
-            {
-                *sample_out = sample;
-            }
-            samples += output.len();
-
-            if output.len() < buffer_size {
-                self.relevant_clip += 1;
-            }
-        }
-
-        &mut self.output_buffer[..buffer_size]
-    }
+    (
+        Timeline {
+            sync_position: sync_position1,
+        },
+        TimelineProcessor {
+            sync_position: sync_position2,
+            position: Cell::new(0),
+        },
+    )
 }
 
 #[derive(Debug)]
 pub struct Timeline {
-    tracks: Vec<TimelineTrack>,
-    position: u64,
+    sync_position: Arc<AtomicU64>,
+}
+pub struct TimelineProcessor {
+    sync_position: Arc<AtomicU64>,
+    position: Cell<u64>,
 }
 
 #[cfg(test)]
 mod tests {
-    use std::result;
-
     use super::*;
 
     #[test]
@@ -165,25 +141,25 @@ mod tests {
         assert_eq!(ts.beats(), 8605);
     }
     #[test]
-    fn timestamp_beats_to_milli_beats() {
+    fn timestamp_beats_to_beat_units() {
         let ts = Timestamp::from_beats(8605);
-        assert_eq!(ts.milli_beats(), 8605_000);
+        assert_eq!(ts.beat_units(), 8_811_520);
     }
     #[test]
-    fn timestamp_milli_beats_to_beats() {
-        let ts = Timestamp::from_milli_beats(8605_982);
+    fn timestamp_beat_units_to_beats() {
+        let ts = Timestamp::from_beat_units(8_812_520);
         assert_eq!(ts.beats(), 8605);
     }
     #[test]
-    fn timestamp_milli_beats_to_samples() {
-        let ts = Timestamp::from_milli_beats(1_000_000);
+    fn timestamp_beat_units_to_samples() {
+        let ts = Timestamp::from_beat_units(1_024_000);
         let result = ts.samples(40_000, 100);
         assert_eq!(result, 24_000_000);
     }
     #[test]
     fn timestamp_max_milli_beats_to_samples() {
-        let ts = Timestamp::from_milli_beats(u64::MAX);
+        let ts = Timestamp::from_beat_units(u64::MAX);
         let result = ts.samples(40_000, 100);
-        assert_eq!(result, 442_721_857_769_029_238_760);
+        assert_eq!(result, 432_345_564_227_567_615_976);
     }
 }

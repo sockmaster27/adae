@@ -1,42 +1,28 @@
-use core::sync::atomic::Ordering;
 use std::collections::HashMap;
 use std::error::Error;
+use std::fmt::Debug;
 use std::fmt::Display;
-use std::mem;
-use std::sync::Arc;
 
-use atomicbox::AtomicOptionBox;
-
+use super::event_queue::EventConsumer;
+use super::event_queue::EventQueue;
 use super::track::{new_track, track_from_data, Track, TrackData, TrackProcessor};
 use super::MixPoint;
+use crate::engine::traits::{Component, Info, Source};
+use crate::engine::utils::remote_push::RemotePushable;
+use crate::engine::utils::remote_push::{RemotePushedHashMap, RemotePusherHashMap};
 use crate::engine::Sample;
 
 pub type TrackKey = u32;
 
-/// Size of all ringbuffers. Determines how many times `Mixer::add_track(s)`
-/// and `Mixer::delete_track(s)` can each be called inbetween polls (buffer outputs).
-const CAPACITY: usize = 64;
-
-pub fn new_mixer(max_buffer_size: usize) -> (Mixer, MixerProcessor) {
-    let new_map1 = Arc::new(AtomicOptionBox::none());
-    let new_map2 = Arc::clone(&new_map1);
-
-    let (added_tracks_p, added_tracks_c) = ringbuf::RingBuffer::new(CAPACITY).split();
-    let (added_tracks_batches_p, added_tracks_batches_c) =
-        ringbuf::RingBuffer::new(CAPACITY).split();
-
-    let (deleted_tracks_p, deleted_tracks_c) = ringbuf::RingBuffer::new(CAPACITY).split();
-    let (deleted_track_batches_p, deleted_track_batches_c) =
-        ringbuf::RingBuffer::new(CAPACITY).split();
-
+pub fn new_mixer(event_queue: &mut EventQueue, max_buffer_size: usize) -> (Mixer, MixerProcessor) {
     let (track, track_processor) = new_track(0, max_buffer_size);
 
     let mut tracks = HashMap::new();
     tracks.insert(0, track);
 
-    let mut tracks_processor = HashMap::new();
-    tracks_processor.insert(0, track_processor);
-    let proc_tracks_cap = tracks_processor.capacity();
+    let (track_processors_pusher, mut track_processors_pushed) =
+        HashMap::new_remote_push(event_queue);
+    track_processors_pushed.insert(0, track_processor);
 
     (
         Mixer {
@@ -45,26 +31,11 @@ pub fn new_mixer(max_buffer_size: usize) -> (Mixer, MixerProcessor) {
             tracks,
             last_key: 0,
 
-            added_tracks: added_tracks_p,
-            added_track_batches: added_tracks_batches_p,
-
-            deleted_tracks: deleted_tracks_p,
-            deleted_track_batches: deleted_track_batches_p,
-
-            proc_tracks_cap,
-            new_proc_tracks: new_map1,
+            track_processors: track_processors_pusher,
         },
         MixerProcessor {
-            tracks: tracks_processor,
+            tracks: track_processors_pushed,
             mix_point: MixPoint::new(max_buffer_size),
-
-            added_tracks: added_tracks_c,
-            added_track_batches: added_tracks_batches_c,
-
-            deleted_tracks: deleted_tracks_c,
-            deleted_track_batches: deleted_track_batches_c,
-
-            new_map: new_map2,
         },
     )
 }
@@ -75,14 +46,7 @@ pub struct Mixer {
     tracks: HashMap<TrackKey, Track>,
     last_key: TrackKey,
 
-    added_tracks: ringbuf::Producer<(TrackKey, TrackProcessor)>,
-    added_track_batches: ringbuf::Producer<Vec<(TrackKey, TrackProcessor)>>,
-
-    deleted_tracks: ringbuf::Producer<TrackKey>,
-    deleted_track_batches: ringbuf::Producer<Vec<TrackKey>>,
-
-    proc_tracks_cap: usize,
-    new_proc_tracks: Arc<AtomicOptionBox<HashMap<TrackKey, TrackProcessor>>>,
+    track_processors: RemotePusherHashMap<TrackKey, TrackProcessor>,
 }
 impl Mixer {
     pub fn tracks(&self) -> Vec<&Track> {
@@ -164,9 +128,7 @@ impl Mixer {
             return Err(InvalidTrackError { key });
         }
 
-        self.deleted_tracks
-            .push(key)
-            .expect("`Mixer::delete_track` was called too many times inbetween polls. See `Mixer::delete_tracks`");
+        self.track_processors.remove(key);
 
         Ok(())
     }
@@ -179,9 +141,7 @@ impl Mixer {
         for key in &keys {
             self.tracks.remove(key);
         }
-        self.deleted_track_batches
-            .push(keys)
-            .expect("`Mixer::delete_tracks` was called too many times inbetween polls");
+        self.track_processors.remove_multiple(keys);
         Ok(())
     }
 
@@ -222,16 +182,11 @@ impl Mixer {
     fn push_track(&mut self, track: (Track, TrackProcessor)) {
         let (track, track_processor) = track;
         let key = track.key();
-
-        self.ensure_capacity(1);
-
         self.tracks.insert(key, track);
-        self.added_tracks.push((key, track_processor))
-            .expect("`Mixer::push_track` was called too many times inbetween polls. See `Mixer::push_tracks`");
+        self.track_processors.push((key, track_processor))
     }
     fn push_tracks(&mut self, tracks: Vec<(Track, TrackProcessor)>) {
         let count = tracks.len();
-        self.ensure_capacity(count);
 
         let mut track_processors = Vec::with_capacity(count);
         for track in tracks {
@@ -240,90 +195,34 @@ impl Mixer {
             self.tracks.insert(key, track);
             track_processors.push((key, track_processor));
         }
-        self.added_track_batches
-            .push(track_processors)
-            .expect("`Mixer::push_tracks` was called too many times inbetween polls");
-    }
-
-    /// Do the work of reallocating `MixerProcessor`'s `tracks` if needed
-    fn ensure_capacity(&mut self, new_track_count: usize) {
-        if self.tracks.len() + new_track_count > self.proc_tracks_cap {
-            self.proc_tracks_cap *= 2;
-            self.new_proc_tracks.store(
-                Some(Box::new(HashMap::with_capacity(self.proc_tracks_cap))),
-                Ordering::SeqCst,
-            );
-        }
+        self.track_processors.push_multiple(track_processors);
     }
 }
 
 pub struct MixerProcessor {
-    tracks: HashMap<TrackKey, TrackProcessor>,
+    tracks: RemotePushedHashMap<TrackKey, TrackProcessor>,
     mix_point: MixPoint,
-
-    added_tracks: ringbuf::Consumer<(TrackKey, TrackProcessor)>,
-    added_track_batches: ringbuf::Consumer<Vec<(TrackKey, TrackProcessor)>>,
-
-    deleted_tracks: ringbuf::Consumer<TrackKey>,
-    deleted_track_batches: ringbuf::Consumer<Vec<TrackKey>>,
-
-    new_map: Arc<AtomicOptionBox<HashMap<TrackKey, TrackProcessor>>>,
 }
-impl MixerProcessor {
-    pub fn poll(&mut self) {
-        let new_map = self.new_map.take(Ordering::SeqCst);
-        if let Some(new_map) = new_map {
-            let old_map = mem::replace(&mut self.tracks, *new_map);
-            for (key, track) in old_map {
-                self.tracks.insert(key, track);
-            }
-        }
-
-        self.added_tracks.pop_each(
-            |(key, track)| {
-                self.tracks.insert(key, track);
-                true
-            },
-            None,
-        );
-        self.added_track_batches.pop_each(
-            |batch| {
-                for (key, track) in batch {
-                    self.tracks.insert(key, track);
-                }
-                true
-            },
-            None,
-        );
-
-        self.deleted_tracks.pop_each(
-            |key| {
-                self.tracks.remove(&key);
-                true
-            },
-            None,
-        );
-        self.deleted_track_batches.pop_each(
-            |batch| {
-                for key in batch {
-                    self.tracks.remove(&key);
-                }
-                true
-            },
-            None,
-        );
-
-        for track in self.tracks.values_mut() {
-            track.poll();
-        }
-
-        // TODO: Drop old_map and batches in another thread?
+impl Debug for MixerProcessor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "MixerProcessor {{tracks: {:?}, ...}}", self.tracks)
     }
+}
+impl Component for MixerProcessor {
+    fn poll<'a, 'b>(&'a mut self, event_consumer: &mut EventConsumer<'a, 'b>) {
+        self.tracks.poll(event_consumer);
+    }
+}
+impl Source for MixerProcessor {
+    fn output(&mut self, info: &Info) -> &mut [Sample] {
+        let Info {
+            sample_rate: _,
+            buffer_size,
+        } = *info;
 
-    pub fn output(&mut self, sample_rate: TrackKey, buffer_size: usize) -> &mut [Sample] {
         self.mix_point.reset();
         for track in self.tracks.values_mut() {
-            let buffer = track.output(sample_rate, buffer_size);
+            let buffer = track.output(info);
             self.mix_point.add(buffer);
         }
         match self.mix_point.get() {
@@ -366,57 +265,48 @@ impl Error for TrackReconstructionError {}
 
 #[cfg(test)]
 mod tests {
+    use crate::engine::components::event_queue::new_event_queue;
+
     use super::*;
 
     #[test]
     fn add_track() {
-        let (mut m, mut mp) = new_mixer(10);
+        let (mut eq, mut eqp) = new_event_queue();
+        let (mut m, mut mp) = new_mixer(&mut eq, 10);
 
-        for _ in 0..CAPACITY {
+        for _ in 0..50 {
             m.add_track().unwrap();
         }
-        mp.poll();
+        let mut ec = eqp.event_consumer();
+        mp.poll(&mut ec);
+        ec.poll();
 
-        assert_eq!(m.tracks.len(), CAPACITY + 1);
-        assert_eq!(mp.tracks.len(), CAPACITY + 1);
-    }
-    #[test]
-    #[should_panic]
-    fn add_track_too_many_times() {
-        let (mut m, _mp) = new_mixer(10);
-
-        for _ in 0..CAPACITY + 1 {
-            m.add_track().unwrap();
-        }
+        assert_eq!(m.tracks.len(), 51);
+        assert_eq!(mp.tracks.len(), 51);
     }
 
     #[test]
     fn add_tracks() {
-        let (mut m, mut mp) = new_mixer(10);
+        let (mut eq, mut eqp) = new_event_queue();
+        let (mut m, mut mp) = new_mixer(&mut eq, 10);
 
-        for _ in 0..CAPACITY {
+        for _ in 0..50 {
             m.add_tracks(5).unwrap();
         }
-        mp.poll();
+        let mut ec = eqp.event_consumer();
+        mp.poll(&mut ec);
+        ec.poll();
 
-        assert_eq!(m.tracks.len(), CAPACITY * 5 + 1);
-        assert_eq!(mp.tracks.len(), CAPACITY * 5 + 1);
-    }
-    #[test]
-    #[should_panic]
-    fn add_tracks_too_many_times() {
-        let (mut m, _mp) = new_mixer(10);
-
-        for _ in 0..CAPACITY + 1 {
-            m.add_tracks(5).unwrap();
-        }
+        assert_eq!(m.tracks.len(), 50 * 5 + 1);
+        assert_eq!(mp.tracks.len(), 50 * 5 + 1);
     }
 
     #[test]
     fn reconstruct_track() {
-        let (mut m, mut mp) = new_mixer(10);
+        let (mut eq, mut eqp) = new_event_queue();
+        let (mut m, mut mp) = new_mixer(&mut eq, 10);
 
-        for key in 1..CAPACITY + 1 {
+        for key in 1..50 + 1 {
             m.reconstruct_track(&TrackData {
                 panning: 0.0,
                 volume: 1.0,
@@ -424,27 +314,16 @@ mod tests {
             })
             .unwrap();
         }
-        mp.poll();
+        let mut ec = eqp.event_consumer();
+        mp.poll(&mut ec);
+        ec.poll();
 
-        assert_eq!(mp.tracks.len(), CAPACITY + 1);
-    }
-    #[test]
-    #[should_panic]
-    fn reconstruct_track_too_many_times() {
-        let (mut m, _mp) = new_mixer(10);
-
-        for key in 1..CAPACITY + 2 {
-            m.reconstruct_track(&TrackData {
-                panning: 0.0,
-                volume: 1.0,
-                key: key as TrackKey,
-            })
-            .unwrap();
-        }
+        assert_eq!(mp.tracks.len(), 50 + 1);
     }
     #[test]
     fn reconstruct_existing_track() {
-        let (mut m, mut mp) = new_mixer(10);
+        let (mut eq, mut eqp) = new_event_queue();
+        let (mut m, mut mp) = new_mixer(&mut eq, 10);
 
         let result = m.reconstruct_track(&TrackData {
             panning: 0.0,
@@ -454,7 +333,9 @@ mod tests {
             key: 0,
         });
 
-        mp.poll();
+        let mut ec = eqp.event_consumer();
+        mp.poll(&mut ec);
+        ec.poll();
 
         assert_eq!(result, Err(TrackReconstructionError { key: 0 }));
         assert_eq!(m.tracks.len(), 1);
@@ -463,11 +344,12 @@ mod tests {
 
     #[test]
     fn reconstruct_tracks() {
-        let (mut m, mut mp) = new_mixer(10);
+        let (mut eq, mut eqp) = new_event_queue();
+        let (mut m, mut mp) = new_mixer(&mut eq, 10);
 
         let batch_size = 5;
 
-        let data: Vec<TrackData> = (1..CAPACITY * batch_size + 1)
+        let data: Vec<TrackData> = (1..50 * batch_size + 1)
             .map(|key| TrackData {
                 panning: 0.0,
                 volume: 1.0,
@@ -478,8 +360,10 @@ mod tests {
         for data in data.chunks(batch_size) {
             m.reconstruct_tracks(data.iter()).unwrap();
         }
-        mp.poll();
+        let mut ec = eqp.event_consumer();
+        mp.poll(&mut ec);
+        ec.poll();
 
-        assert_eq!(mp.tracks.len(), CAPACITY * batch_size + 1);
+        assert_eq!(mp.tracks.len(), 50 * batch_size + 1);
     }
 }

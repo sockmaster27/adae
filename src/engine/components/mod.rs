@@ -6,6 +6,7 @@ pub use track::{Track, TrackData};
 pub mod mixer;
 mod mixing;
 pub use mixing::MixPoint;
+pub mod event_queue;
 mod parameter;
 pub mod test_tone;
-mod timeline;
+pub mod timeline;

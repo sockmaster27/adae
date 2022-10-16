@@ -8,10 +8,12 @@ use crate::zip;
 use crate::engine::{Sample, CHANNELS};
 
 use super::audio_meter::{new_audio_meter, AudioMeter, AudioMeterProcessor};
+use super::event_queue::EventConsumer;
 use super::mixer::TrackKey;
 use super::parameter::{new_f32_parameter, F32Parameter, F32ParameterProcessor};
 use super::test_tone::TestTone;
-use crate::engine::traits::{Info, Source};
+use super::timeline::{new_timeline_track, TimelineTrack};
+use crate::engine::traits::{Component, Info, Source};
 
 pub fn new_track(key: TrackKey, max_buffer_size: usize) -> (Track, TrackProcessor) {
     track_from_data(
@@ -37,6 +39,8 @@ pub fn track_from_data(max_buffer_size: usize, data: &TrackData) -> (Track, Trac
 
     (
         Track {
+            max_buffer_size,
+
             key: data.key,
 
             panning,
@@ -59,6 +63,8 @@ pub fn track_from_data(max_buffer_size: usize, data: &TrackData) -> (Track, Trac
 
 // #[derive(Debug)]
 pub struct Track {
+    max_buffer_size: usize,
+
     key: TrackKey,
 
     panning: F32Parameter,
@@ -90,6 +96,12 @@ impl Track {
     }
     pub fn set_volume(&self, value: Sample) {
         self.volume.set(value)
+    }
+
+    pub fn add_timeline(&self) -> TimelineTrack {
+        let (timeline_track, timeline_track_processor) = new_timeline_track(self.max_buffer_size);
+        self.set_source(Box::new(timeline_track_processor));
+        timeline_track
     }
 
     /// Returns an array of the signals current peak, long-term peak and RMS-level for each channel in the form:
@@ -145,20 +157,33 @@ pub struct TrackProcessor {
     new_source: Arc<AtomicOptionBox<Box<dyn Source>>>,
 }
 impl TrackProcessor {
-    pub fn poll(&mut self) {
+    fn pan(panning: f32, frame: &mut [Sample]) {
+        // TODO: Pan laws
+        let left_multiplier = (-panning + 1.0).clamp(0.0, 1.0);
+        frame[0] *= left_multiplier;
+
+        let right_multiplier = (panning + 1.0).clamp(0.0, 1.0);
+        frame[1] *= right_multiplier;
+    }
+}
+impl Component for TrackProcessor {
+    fn poll<'a, 'b>(&'a mut self, event_consumer: &mut EventConsumer<'a, 'b>) {
         let source_option = self.new_source.take(Ordering::SeqCst);
         if let Some(source_box) = source_option {
             self.source = *source_box;
         }
 
-        self.source.poll();
+        self.source.poll(event_consumer);
     }
-
-    pub fn output(&mut self, sample_rate: u32, buffer_size: usize) -> &mut [Sample] {
-        let buffer = self.source.output(Info {
+}
+impl Source for TrackProcessor {
+    fn output(&mut self, info: &Info) -> &mut [Sample] {
+        let Info {
             sample_rate,
             buffer_size,
-        });
+        } = *info;
+
+        let buffer = self.source.output(info);
 
         let volume_buffer = self.volume.get(buffer_size);
         let panning_buffer = self.panning.get(buffer_size);
@@ -175,15 +200,6 @@ impl TrackProcessor {
 
         self.meter.report(&buffer, sample_rate as f32);
         buffer
-    }
-
-    fn pan(panning: f32, frame: &mut [Sample]) {
-        // TODO: Pan laws
-        let left_multiplier = (-panning + 1.0).clamp(0.0, 1.0);
-        frame[0] *= left_multiplier;
-
-        let right_multiplier = (panning + 1.0).clamp(0.0, 1.0);
-        frame[1] *= right_multiplier;
     }
 }
 

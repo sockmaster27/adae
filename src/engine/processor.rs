@@ -2,7 +2,14 @@ use crate::zip;
 
 use cpal::StreamConfig;
 
-use super::components::mixer::{new_mixer, Mixer, MixerProcessor};
+use super::{
+    components::{
+        event_queue::{new_event_queue, EventQueue, EventQueueProcessor},
+        mixer::{new_mixer, Mixer, MixerProcessor},
+        timeline::{new_timeline, Timeline, TimelineProcessor},
+    },
+    traits::{Component, Info, Source},
+};
 use super::{Sample, CHANNELS};
 #[cfg(feature = "record_output")]
 use crate::wav_recorder::WavRecorder;
@@ -16,16 +23,24 @@ pub fn new_processor(
 ) -> (ProcessorInterface, Processor) {
     let sample_rate = stream_config.sample_rate.0;
 
-    let (mixer, mixer_processor) = new_mixer(max_buffer_size);
+    let (mut global_events, global_events_processor) = new_event_queue();
+    let (timeline, timeline_processor) = new_timeline();
+    let (mixer, mixer_processor) = new_mixer(&mut global_events, max_buffer_size);
 
     (
-        ProcessorInterface { mixer },
+        ProcessorInterface {
+            global_events,
+            mixer,
+            timeline,
+        },
         Processor {
             output_channels: stream_config.channels,
             sample_rate,
             max_buffer_size,
 
+            global_events: global_events_processor,
             mixer: mixer_processor,
+            timeline: timeline_processor,
 
             #[cfg(feature = "record_output")]
             recorder: WavRecorder::new(
@@ -41,7 +56,9 @@ pub fn new_processor(
 /// The interface to the processor, living outside of the audio thread.
 /// Should somehwat mirror the [`Processor`].
 pub struct ProcessorInterface {
+    pub global_events: EventQueue,
     pub mixer: Mixer,
+    pub timeline: Timeline,
 }
 
 /// Contatins all data that should persist from one buffer output to the next.
@@ -50,7 +67,9 @@ pub struct Processor {
     sample_rate: u32,
     max_buffer_size: usize,
 
+    global_events: EventQueueProcessor,
     mixer: MixerProcessor,
+    timeline: TimelineProcessor,
 
     #[cfg(feature = "record_output")]
     recorder: WavRecorder,
@@ -60,25 +79,35 @@ impl Processor {
     pub fn output<T: cpal::Sample>(&mut self, data: &mut [T]) {
         // In some cases the buffer size can vary from one buffer to the next.
         let buffer_size = data.len() / usize::from(self.output_channels);
+
+        let buffer = self.output_samples(buffer_size);
+
+        // Convert to stream's sample type.
+        for (in_sample, out_sample) in zip!(buffer, data) {
+            *out_sample = T::from(in_sample);
+        }
+        // TODO: Scale channel counts.
+        debug_assert_eq!(CHANNELS, self.output_channels.into());
+    }
+
+    fn output_samples(&mut self, buffer_size: usize) -> &mut [Sample] {
         #[cfg(debug_assertions)]
         if buffer_size > self.max_buffer_size {
             panic!("A buffer of size {} was requested, which exceeds the biggest producible size of {}.", buffer_size, self.max_buffer_size);
         }
 
-        self.mixer.poll();
-        let buffer = self.mixer.output(self.sample_rate, buffer_size);
+        let mut event_consumer = self.global_events.event_consumer();
+        self.mixer.poll(&mut event_consumer);
+        event_consumer.poll();
+
+        let buffer = self.mixer.output(&Info::new(self.sample_rate, buffer_size));
 
         Self::clip(buffer);
 
         #[cfg(feature = "record_output")]
         self.recorder.record(buffer);
 
-        // TODO: Scale channel counts.
-        debug_assert_eq!(CHANNELS, self.output_channels.into());
-        // Convert to stream's sample type.
-        for (in_sample, out_sample) in zip!(buffer, data) {
-            *out_sample = T::from(in_sample);
-        }
+        buffer
     }
 
     /// Clips the data, limiting its range from -1.0 to 1.0.
