@@ -186,6 +186,14 @@ impl<E: Send, K: Send, C: RemotePushable<E, K>> RemotePushed<E, K, C> {
                 mem::swap(new, &mut self.inner);
             }
         }
+
+        // unsafe {
+        //     drop(mem::transmute::<&mut Event<E, K, C>, Box<Event<E, K, C>>>(
+        //         event,
+        //     ));
+        // }
+
+        // TODO: Drop event
     }
 
     fn push(&mut self, e: &mut Option<E>) {

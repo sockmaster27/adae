@@ -1,19 +1,18 @@
 use core::sync::atomic::Ordering;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{BuildStreamError, Device, SampleFormat, Stream, StreamConfig};
+
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
+mod components;
 mod traits;
 mod utils;
-
-mod components;
 use self::components::mixer::{
     InvalidTrackError, TrackKey, TrackOverflowError, TrackReconstructionError,
 };
 pub use components::{Track, TrackData};
-
 mod processor;
 use self::processor::{new_processor, Processor, ProcessorInterface};
 
@@ -100,7 +99,7 @@ impl Engine {
     ) -> Result<Stream, BuildStreamError> {
         let stream = device.build_output_stream(
             config,
-            move |data: &mut [T], _info| processor.output(data),
+            move |data: &mut [T], _info| no_heap! {{processor.output(data)}},
             |err| panic!("{}", err),
         )?;
 

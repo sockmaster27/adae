@@ -1,7 +1,6 @@
 use std::sync::RwLock;
 
-pub static ERR_MSG: &'static str =
-    "A panic has previously ocurred while trying to set output function";
+pub const ERR_MSG: &str = "A panic has previously ocurred while trying to set output function";
 
 lazy_static! {
     pub static ref OUTPUTTER: RwLock<fn(String)> = RwLock::new(|_| {});
@@ -13,7 +12,7 @@ macro_rules! print {
         use $crate::custom_output::*;
 
         let msg = std::format!($($arg)*);
-        let outputter = OUTPUTTER.read().expect(ERR_MSG);
+        let outputter = crate::custom_output::OUTPUTTER.read().expect(ERR_MSG);
         outputter(msg);
     }};
 }
@@ -23,6 +22,22 @@ macro_rules! println {
     ($($arg:tt)*) => {{
         let msg = std::format!($($arg)*);
         print!("{}\n", msg);
+    }};
+}
+
+#[macro_export(crate)]
+macro_rules! eprint {
+    ($($arg:tt)*) => {{
+        let msg = std::format!($($arg)*);
+        print!("ERROR: {}", msg);
+    }};
+}
+
+#[macro_export(crate)]
+macro_rules! eprintln {
+    ($($arg:tt)*) => {{
+        let msg = std::format!($($arg)*);
+        eprint!("{}\n", msg);
     }};
 }
 
