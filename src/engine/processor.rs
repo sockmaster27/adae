@@ -8,6 +8,7 @@ use super::{
         mixer::{new_mixer, Mixer, MixerProcessor},
         timeline::{new_timeline, Timeline, TimelineProcessor},
     },
+    dropper::Dropper,
     traits::{Component, Info, Source},
 };
 use super::{Sample, CHANNELS};
@@ -21,11 +22,12 @@ pub fn new_processor(
     stream_config: &StreamConfig,
     max_buffer_size: usize,
 ) -> (ProcessorInterface, Processor) {
+    let output_channels = stream_config.channels;
     let sample_rate = stream_config.sample_rate.0;
-
+    let dropper = Dropper::new();
     let (mut global_events, global_events_processor) = new_event_queue();
     let (timeline, timeline_processor) = new_timeline();
-    let (mixer, mixer_processor) = new_mixer(&mut global_events, max_buffer_size);
+    let (mixer, mixer_processor) = new_mixer(&mut global_events, max_buffer_size, dropper);
 
     (
         ProcessorInterface {
@@ -34,11 +36,13 @@ pub fn new_processor(
             timeline,
         },
         Processor {
-            output_channels: stream_config.channels,
+            output_channels,
             sample_rate,
             max_buffer_size,
 
             global_events: global_events_processor,
+            dropper,
+
             mixer: mixer_processor,
             timeline: timeline_processor,
 
@@ -68,6 +72,8 @@ pub struct Processor {
     max_buffer_size: usize,
 
     global_events: EventQueueProcessor,
+    dropper: Dropper,
+
     mixer: MixerProcessor,
     timeline: TimelineProcessor,
 
@@ -98,7 +104,7 @@ impl Processor {
 
         let mut event_consumer = self.global_events.event_consumer();
         self.mixer.poll(&mut event_consumer);
-        event_consumer.poll();
+        event_consumer.poll(&mut self.dropper);
 
         let buffer = self.mixer.output(&Info::new(self.sample_rate, buffer_size));
 

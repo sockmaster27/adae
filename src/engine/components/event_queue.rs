@@ -1,6 +1,7 @@
 use std::{
-    collections::HashMap,
-    fmt::Debug,
+    collections::{HashMap, HashSet},
+    error::Error,
+    fmt::{Debug, Display},
     marker::PhantomData,
     mem,
     sync::{Arc, Mutex},
@@ -8,23 +9,31 @@ use std::{
 
 use ringbuf::RingBuffer;
 
+use crate::engine::dropper::{DBox, Dropper};
+
 type ComponentId = u32;
 
 // For use with arbitrary (void) pointers
 type Unknown = u8;
 
-#[derive(Debug)]
 struct Event {
     id: ComponentId,
-    inner: *mut Unknown,
+    inner: Box<dyn Send>,
 }
-unsafe impl Send for Event {}
+impl Debug for Event {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Event {{ id: {:?}, inner: Box<dyn Send> }}", self.id)
+    }
+}
 
 pub fn new_event_queue() -> (EventQueue, EventQueueProcessor) {
     let (producer, consumer) = RingBuffer::new(256).split();
     (
         EventQueue {
+            // id 0 is used by the queue itself
+            ids: HashSet::from([0]),
             last_id: 0,
+
             events: Arc::new(Mutex::new(producer)),
         },
         EventQueueProcessor {
@@ -35,15 +44,17 @@ pub fn new_event_queue() -> (EventQueue, EventQueueProcessor) {
 }
 
 pub struct EventQueue {
+    ids: HashSet<ComponentId>,
     last_id: ComponentId,
     events: Arc<Mutex<ringbuf::Producer<Event>>>,
 }
 impl EventQueue {
-    pub fn add_component<E: Send>(&mut self) -> (EventProducer<E>, EventProducerId<E>) {
-        let id = self.last_id.wrapping_add(1);
-        self.last_id = id;
+    pub fn add_component<E: Send>(
+        &mut self,
+    ) -> Result<(EventProducer<E>, EventProducerId<E>), ComponentOverflowError> {
+        let id = self.next_id()?;
 
-        (
+        Ok((
             EventProducer {
                 id,
                 events: Arc::clone(&self.events),
@@ -53,14 +64,26 @@ impl EventQueue {
                 id,
                 phantom: PhantomData,
             },
-        )
+        ))
+    }
+
+    fn next_id(&mut self) -> Result<ComponentId, ComponentOverflowError> {
+        for i in 1..ComponentId::MAX {
+            let id = self.last_id.wrapping_add(i);
+            if !self.ids.contains(&id) {
+                self.last_id = id;
+                return Ok(id);
+            }
+        }
+
+        Err(ComponentOverflowError)
     }
 }
 unsafe impl Send for EventQueue {}
 
 pub struct EventQueueProcessor {
     events: ringbuf::Consumer<Event>,
-    processors: HashMap<ComponentId, (*mut Unknown, fn(*mut Unknown, *mut Unknown))>,
+    processors: HashMap<ComponentId, (*mut Unknown, fn(*mut Unknown, DBox<Unknown>))>,
 }
 impl EventQueueProcessor {
     pub fn event_consumer<'a, 'b>(&'b mut self) -> EventConsumer<'a, 'b> {
@@ -78,14 +101,17 @@ pub struct EventProducer<E> {
 
     phantom: PhantomData<E>,
 }
-impl<'a, T> EventProducer<T> {
+impl<'a, T> EventProducer<T>
+where
+    T: Send + 'static,
+{
     pub fn send_box(&self, event: Box<T>) {
         self.events
             .lock()
             .unwrap()
             .push(Event {
                 id: self.id,
-                inner: Box::into_raw(event) as *mut Unknown,
+                inner: event,
             })
             .unwrap();
     }
@@ -122,8 +148,10 @@ impl<'a, 'b> EventConsumer<'a, 'b> {
         &mut self,
         id: EventProducerId<E>,
         component: &'a mut C,
-        callback: fn(&mut C, &mut E),
-    ) {
+        callback: fn(&mut C, DBox<E>),
+    ) where
+        E: Send + 'static,
+    {
         // Safety:
         //
         // It should be safe to cast `component` from &mut C to *mut Unknown,
@@ -145,16 +173,19 @@ impl<'a, 'b> EventConsumer<'a, 'b> {
         });
     }
 
-    pub fn poll(self) {
+    pub fn poll(self, dropper: &mut Dropper) {
         self.parent.events.pop_each(
-            |event| {
+            |mut event| {
                 let (component, process) = self
                     .parent
                     .processors
                     .get(&event.id)
                     .expect("No processor registered for given id");
 
-                process(*component, event.inner);
+                let event_box =
+                    unsafe { Box::from_raw(Box::into_raw(event.inner) as *mut Unknown) };
+                let event_dbox = dropper.dbox(event_box);
+                process(*component, event_dbox);
 
                 true
             },
@@ -168,6 +199,15 @@ impl<'a, 'b> Drop for EventConsumer<'a, 'b> {
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+struct ComponentOverflowError;
+impl Display for ComponentOverflowError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "The max number of components has been exceeded")
+    }
+}
+impl Error for ComponentOverflowError {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -175,16 +215,20 @@ mod tests {
     #[test]
     fn test() {
         let (mut eq, mut eqp) = new_event_queue();
-        let (ep, epi) = eq.add_component::<u32>();
+        let (ep, epi) = eq.add_component::<u32>().unwrap();
+        let mut d = Dropper::dummy();
 
         ep.send(2);
-        let mut ec = eqp.event_consumer();
-        let mut comp = 5;
 
-        ec.register(epi, &mut comp, |&mut comp, &mut number| {
-            assert_eq!(comp, 5);
-            assert_eq!(number, 2);
-        });
-        ec.poll();
+        no_heap! {{
+            let mut ec = eqp.event_consumer();
+            let mut comp = 5;
+
+            ec.register(epi, &mut comp, |&mut comp, number| {
+                assert_eq!(comp, 5);
+                assert_eq!(*number, 2);
+            });
+            ec.poll(&mut d);
+        }}
     }
 }

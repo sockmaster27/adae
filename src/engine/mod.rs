@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
 mod components;
+mod dropper;
 mod traits;
 mod utils;
 use self::components::mixer::{
@@ -57,8 +58,8 @@ impl Engine {
             SampleFormat::U16 => Self::create_stream::<u16>,
         };
 
-        let stopped = Arc::new(AtomicBool::new(false));
-        let stopped2 = Arc::clone(&stopped);
+        let stopped1 = Arc::new(AtomicBool::new(false));
+        let stopped2 = Arc::clone(&stopped1);
         let join_handle = thread::spawn(move || {
             // Since cpal::Stream doesn't implement the Send trait, it has to live in this thread.
 
@@ -85,7 +86,7 @@ impl Engine {
         let join_handle = Some(join_handle);
 
         Engine {
-            stopped,
+            stopped: stopped1,
             join_handle,
             processor_interface,
         }

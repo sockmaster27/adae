@@ -7,6 +7,7 @@ use super::event_queue::EventConsumer;
 use super::event_queue::EventQueue;
 use super::track::{new_track, track_from_data, Track, TrackData, TrackProcessor};
 use super::MixPoint;
+use crate::engine::dropper::Dropper;
 use crate::engine::traits::{Component, Info, Source};
 use crate::engine::utils::remote_push::RemotePushable;
 use crate::engine::utils::remote_push::{RemotePushedHashMap, RemotePusherHashMap};
@@ -14,14 +15,18 @@ use crate::engine::Sample;
 
 pub type TrackKey = u32;
 
-pub fn new_mixer(event_queue: &mut EventQueue, max_buffer_size: usize) -> (Mixer, MixerProcessor) {
+pub fn new_mixer(
+    event_queue: &mut EventQueue,
+    max_buffer_size: usize,
+    dropper: Dropper,
+) -> (Mixer, MixerProcessor) {
     let (track, track_processor) = new_track(0, max_buffer_size);
 
     let mut tracks = HashMap::new();
     tracks.insert(0, track);
 
     let (track_processors_pusher, mut track_processors_pushed) =
-        HashMap::new_remote_push(event_queue);
+        HashMap::new_remote_push(event_queue, dropper);
     track_processors_pushed.insert(0, track_processor);
 
     (
@@ -265,7 +270,7 @@ impl Error for TrackReconstructionError {}
 
 #[cfg(test)]
 mod tests {
-    use crate::engine::components::event_queue::new_event_queue;
+    use crate::engine::{components::event_queue::new_event_queue, dropper::Dropper};
 
     use super::*;
 
@@ -273,13 +278,14 @@ mod tests {
     fn add_track() {
         let (mut eq, mut eqp) = new_event_queue();
         let (mut m, mut mp) = new_mixer(&mut eq, 10);
+        let mut d = Dropper::dummy();
 
         for _ in 0..50 {
             m.add_track().unwrap();
         }
         let mut ec = eqp.event_consumer();
         mp.poll(&mut ec);
-        ec.poll();
+        ec.poll(&mut d);
 
         assert_eq!(m.tracks.len(), 51);
         assert_eq!(mp.tracks.len(), 51);
@@ -289,13 +295,14 @@ mod tests {
     fn add_tracks() {
         let (mut eq, mut eqp) = new_event_queue();
         let (mut m, mut mp) = new_mixer(&mut eq, 10);
+        let mut d = Dropper::dummy();
 
         for _ in 0..50 {
             m.add_tracks(5).unwrap();
         }
         let mut ec = eqp.event_consumer();
         mp.poll(&mut ec);
-        ec.poll();
+        ec.poll(&mut d);
 
         assert_eq!(m.tracks.len(), 50 * 5 + 1);
         assert_eq!(mp.tracks.len(), 50 * 5 + 1);
@@ -305,6 +312,7 @@ mod tests {
     fn reconstruct_track() {
         let (mut eq, mut eqp) = new_event_queue();
         let (mut m, mut mp) = new_mixer(&mut eq, 10);
+        let mut d = Dropper::dummy();
 
         for key in 1..50 + 1 {
             m.reconstruct_track(&TrackData {
@@ -316,7 +324,7 @@ mod tests {
         }
         let mut ec = eqp.event_consumer();
         mp.poll(&mut ec);
-        ec.poll();
+        ec.poll(&mut d);
 
         assert_eq!(mp.tracks.len(), 50 + 1);
     }
@@ -324,6 +332,7 @@ mod tests {
     fn reconstruct_existing_track() {
         let (mut eq, mut eqp) = new_event_queue();
         let (mut m, mut mp) = new_mixer(&mut eq, 10);
+        let mut d = Dropper::dummy();
 
         let result = m.reconstruct_track(&TrackData {
             panning: 0.0,
@@ -335,7 +344,7 @@ mod tests {
 
         let mut ec = eqp.event_consumer();
         mp.poll(&mut ec);
-        ec.poll();
+        ec.poll(&mut d);
 
         assert_eq!(result, Err(TrackReconstructionError { key: 0 }));
         assert_eq!(m.tracks.len(), 1);
@@ -346,6 +355,7 @@ mod tests {
     fn reconstruct_tracks() {
         let (mut eq, mut eqp) = new_event_queue();
         let (mut m, mut mp) = new_mixer(&mut eq, 10);
+        let mut d = Dropper::dummy();
 
         let batch_size = 5;
 
@@ -362,7 +372,7 @@ mod tests {
         }
         let mut ec = eqp.event_consumer();
         mp.poll(&mut ec);
-        ec.poll();
+        ec.poll(&mut d);
 
         assert_eq!(mp.tracks.len(), 50 * batch_size + 1);
     }
