@@ -8,11 +8,17 @@ mod custom_output;
 #[cfg(feature = "custom_debug_output")]
 pub use custom_output::set_output;
 
-#[cfg(any(feature = "test_alloc", test))]
+#[cfg(any(debug_assertions, test))]
 #[macro_use]
 mod test_alloc;
-#[cfg(not(any(feature = "test_alloc", test)))]
+#[cfg(not(any(debug_assertions, test)))]
 macro_rules! no_heap {
+    ($body:block) => {
+        $body
+    };
+}
+#[cfg(not(any(debug_assertions, test)))]
+macro_rules! allow_heap {
     ($body:block) => {
         $body
     };

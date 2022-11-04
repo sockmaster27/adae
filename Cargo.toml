@@ -22,10 +22,4 @@ record_output = ["hound"]
 # Print all debug info to custom function
 custom_debug_output = ["lazy_static"]
 
-# Print error if heap (de)allocations happen on the audio thread
-# If compiled as 'test', this will automatically be activatated, together with 'panic_alloc'
-test_alloc = []
-# Same as 'test_alloc', except a panic will occur instead of an eprint
-panic_alloc = ["test_alloc"]
-
-# default = ["test_alloc", "custom_debug_output"]
+# default = ["custom_debug_output"]

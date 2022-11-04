@@ -2,17 +2,18 @@ use std::{
     alloc::{GlobalAlloc, System},
     cell::RefCell,
     marker::PhantomData,
+    thread,
 };
 
 use backtrace::Backtrace;
 
-#[cfg(not(any(feature = "panic_alloc", test)))]
+#[cfg(not(test))]
 #[global_allocator]
 static GLOBAL: TestAlloc<PrintError> = TestAlloc {
     inner: System,
     error: PhantomData,
 };
-#[cfg(any(feature = "panic_alloc", test))]
+#[cfg(test)]
 #[global_allocator]
 static GLOBAL: TestAlloc<PanicError> = TestAlloc {
     inner: System,
@@ -23,10 +24,19 @@ thread_local!(static ALLOWED: RefCell<bool> = RefCell::new(true));
 
 macro_rules! no_heap {
     {$body:block} => {{
-        let g = crate::test_alloc::NoHeapGuard::new();
-        let r = $body;
-        drop(g);
-        r
+        let _g = crate::test_alloc::HeapGuard::new(false);
+        let _r = $body;
+        drop(_g);
+        _r
+    }}
+}
+
+macro_rules! allow_heap {
+    {$body:block} => {{
+        let _g = crate::test_alloc::HeapGuard::new(true);
+        let _r = $body;
+        drop(_g);
+        _r
     }}
 }
 
@@ -74,15 +84,15 @@ where
 unsafe impl<E> Send for TestAlloc<E> where E: ErrorHandler {}
 unsafe impl<E> Sync for TestAlloc<E> where E: ErrorHandler {}
 
-pub struct NoHeapGuard(bool);
-impl NoHeapGuard {
-    pub fn new() -> Self {
+pub struct HeapGuard(bool);
+impl HeapGuard {
+    pub fn new(allowed: bool) -> Self {
         let before = is_allowed();
-        set_allowed(false);
+        set_allowed(allowed);
         Self(before)
     }
 }
-impl Drop for NoHeapGuard {
+impl Drop for HeapGuard {
     fn drop(&mut self) {
         set_allowed(self.0);
     }
@@ -102,7 +112,9 @@ impl ErrorHandler for PrintError {
 pub struct PanicError;
 impl ErrorHandler for PanicError {
     fn error(msg: &str) {
-        panic!("{}", msg);
+        if !thread::panicking() {
+            panic!("{}", msg);
+        }
     }
 }
 
@@ -153,5 +165,41 @@ mod tests {
         let b = t.join().unwrap();
         assert_eq!(*b, 6);
         drop(b);
+    }
+
+    #[test]
+    fn allow_inside() {
+        let mut b = Box::new(5);
+        no_heap! {{
+            *b += 1;
+            allow_heap! {{
+                b = Box::new(2);
+            }}
+            *b += 1;
+        }}
+        assert_eq!(*b, 3)
+    }
+
+    #[test]
+    #[should_panic]
+    fn allow_disallow() {
+        let mut b = Box::new(5);
+        no_heap! {{
+            allow_heap! {{
+                *b += 1;
+            }}
+            drop(b);
+        }}
+    }
+
+    #[test]
+    #[should_panic]
+    fn no_double_panic() {
+        #[allow(unreachable_code)]
+        {
+            no_heap! {{
+                panic!("123")
+            }}
+        }
     }
 }
