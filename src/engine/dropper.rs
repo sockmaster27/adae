@@ -10,48 +10,54 @@ use std::{
     thread::{self, JoinHandle},
 };
 
-use ringbuf::RingBuffer;
+use atomicbox::AtomicOptionBox;
 
-/// A Box whose content will autoatically be dropped in another thread
+use super::utils::ringbuffer::{self, ringbuffer};
+
+thread_local! {
+    static DROPPER: RefCell<Option<Box<Dropper>>> = RefCell::new(None);
+}
+
+static INITTED_DROPPER: AtomicOptionBox<Dropper> = AtomicOptionBox::none();
+
+/// Construct a dropper and put it in the global reserve spot,
+/// where it can be claimed by any single thread to use
 ///
-/// Obtained though [`Dropper::dbox`]
-#[derive(Debug)]
-pub struct DBox<T>
-where
-    T: Send + 'static,
-{
-    inner: Option<Box<T>>,
-    dropper: Dropper,
+/// The reserve spot is static and only has room for one dropper at a time
+pub fn init() {
+    let new = Box::new(Dropper::new());
+    INITTED_DROPPER.store(Some(new), Ordering::SeqCst);
 }
-impl<T> Deref for DBox<T>
-where
-    T: Send + 'static,
-{
-    type Target = T;
-    fn deref(&self) -> &Self::Target {
-        &self.inner.expect("DBox is empty")
-    }
-}
-impl<T> DerefMut for DBox<T>
-where
-    T: Send + 'static,
-{
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.inner.expect("DBox is empty")
-    }
-}
-impl<T> Drop for DBox<T>
-where
-    T: Send + 'static,
-{
-    fn drop(&mut self) {
-        self.dropper.send(self.inner.take().expect("DBox is empty"));
-    }
+
+/// Send a box to another thread to be dropped
+///
+/// # Panics
+/// Will panic if [`init()`] hasn't been called and project is not built as test
+pub fn send(element: Box<dyn Send>) {
+    DROPPER.with(|dropper| {
+        let mut dropper_option = dropper.borrow_mut();
+        let inner_dropper = dropper_option.get_or_insert_with(|| {
+            let initted_dropper = INITTED_DROPPER.take(Ordering::SeqCst);
+            if let Some(initted_dropper) = initted_dropper {
+                initted_dropper
+            } else {
+                #[cfg(not(test))]
+                let d = Box::new(Dropper::new());
+
+                #[cfg(test)]
+                let d = allow_heap! {{
+                    Box::new(Dropper::new())
+                }};
+
+                d
+            }
+        });
+        inner_dropper.send(Event::Drop(element));
+    })
 }
 
 enum Event {
     Drop(Box<dyn Send>),
-    Reallocated(ringbuf::Consumer<Event>),
     Done,
 }
 impl Debug for Event {
@@ -61,135 +67,122 @@ impl Debug for Event {
             "{}",
             match self {
                 Event::Drop(_) => "Event::Drop(...)",
-                Event::Reallocated(_) => "Event::Reallocated(...)",
                 Event::Done => "Event::Done",
             }
         )
     }
 }
 
-/// Channel for sending values to be dropped in another thread
-pub struct Dropper {
-    inner: Arc<RefCell<DropperInner>>,
+/// Construct for dropping things in another thread
+struct Dropper {
+    sender: ringbuffer::Sender<Event>,
+    sleep: Arc<AtomicBool>,
+    handle: Option<JoinHandle<()>>,
 }
 impl Dropper {
-    pub fn new() -> Self {
-        let (producer, mut consumer) = RingBuffer::new(256).split();
+    fn new() -> Self {
+        let (sender, mut receiver) = ringbuffer();
 
         let sleep1 = Arc::new(AtomicBool::new(true));
         let sleep2 = Arc::clone(&sleep1);
 
-        let handle = thread::spawn(move || {
-            let mut done = false;
-            while !done {
-                while sleep1.load(Ordering::Acquire) {
-                    thread::park();
+        let handle = thread::spawn(move || loop {
+            for event in receiver.iter() {
+                match event {
+                    Event::Drop(e) => drop(e),
+                    Event::Done => return,
                 }
+            }
 
-                let mut new_consumer = None;
-                consumer.pop_each(
-                    |event| {
-                        match event {
-                            Event::Drop(e) => drop(e),
-                            Event::Reallocated(new) => new_consumer = Some(new),
-                            Event::Done => done = true,
-                        }
-
-                        true
-                    },
-                    None,
-                );
-
-                if let Some(new) = new_consumer {
-                    consumer = new;
-                }
-
-                sleep1.store(true, Ordering::Release);
+            sleep1.store(true, Ordering::SeqCst);
+            while sleep1.load(Ordering::SeqCst) {
+                thread::park();
             }
         });
 
         Dropper {
-            inner: Arc::new(DropperInner {
-                producer,
-                sleep: sleep2,
-                handle: Some(handle),
-            }),
+            sender,
+            sleep: sleep2,
+
+            handle: Some(handle),
         }
     }
 
-    pub fn dummy() -> Self {
-        let (producer, _) = RingBuffer::new(0).split();
-
-        Dropper {
-            inner: Arc::new(DropperInner {
-                producer,
-                sleep: Arc::new(AtomicBool::new(true)),
-                handle: None,
-            }),
-        }
+    fn send(&mut self, event: Event) {
+        let handle = self.handle.as_ref().expect("No connected thread");
+        self.sender.send(event);
+        self.sleep.store(false, Ordering::SeqCst);
+        handle.thread().unpark();
     }
+}
+impl Drop for Dropper {
+    fn drop(&mut self) {
+        // There should always be at least one slot left
+        self.send(Event::Done);
 
-    pub fn send(&mut self, element: Box<dyn Send>) {
-        self.inner.send(element)
-    }
-
-    pub fn dbox<T>(&self, element: Box<T>) -> DBox<T>
-    where
-        T: Send + 'static,
-    {
-        DBox {
-            inner: Some(element),
-            dropper: Dropper {
-                inner: Arc::clone(&self.inner),
-            },
-        }
+        // handle.join() doesn't work reliably here, when this is stored in a thread_local,
+        // so we'll just have to trust that the thread exists succesfully
     }
 }
 impl Debug for Dropper {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "Dropper {{ inner: {:#16x} }}",
-            Arc::as_ptr(&self.inner) as usize
-        )
+        write!(f, "Dropper {{ handle: {:?} }}", self.handle)
     }
 }
 
-struct DropperInner {
-    producer: ringbuf::Producer<Event>,
-    sleep: Arc<AtomicBool>,
-    handle: Option<JoinHandle<()>>,
+/// A Box whose content will autoatically be dropped in another thread
+#[derive(Debug)]
+pub struct DBox<T>
+where
+    T: Send + 'static,
+{
+    inner: Option<Box<T>>,
 }
-impl DropperInner {
-    fn send(&mut self, element: Box<dyn Send>) {
-        // In the case of missing space in the ringbuffer, it will be reallocated on the heap :(
-        if self.producer.remaining() == 1 {
-            let (new_producer, new_consumer) =
-                RingBuffer::new(2 * self.producer.capacity()).split();
 
-            self.send_event(Event::Reallocated(new_consumer));
-            self.producer = new_producer;
-        }
-
-        self.send_event(Event::Drop(element));
-    }
-
-    fn send_event(&mut self, event: Event) {
-        if let Some(handle) = self.handle.as_ref() {
-            self.producer.push(event).unwrap();
-            self.sleep.store(false, Ordering::Release);
-            handle.thread().unpark();
+impl<T> DBox<T>
+where
+    T: Send + 'static,
+{
+    pub fn new(element: T) -> Self {
+        DBox {
+            inner: Some(Box::new(element)),
         }
     }
 }
-impl Drop for DropperInner {
+
+impl<T> From<Box<T>> for DBox<T>
+where
+    T: Send + 'static,
+{
+    fn from(b: Box<T>) -> Self {
+        DBox { inner: Some(b) }
+    }
+}
+
+impl<T> Deref for DBox<T>
+where
+    T: Send + 'static,
+{
+    type Target = T;
+    fn deref(&self) -> &Self::Target {
+        self.inner.as_ref().expect("DBox is empty")
+    }
+}
+impl<T> DerefMut for DBox<T>
+where
+    T: Send + 'static,
+{
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.inner.as_mut().expect("DBox is empty")
+    }
+}
+
+impl<T> Drop for DBox<T>
+where
+    T: Send + 'static,
+{
     fn drop(&mut self) {
-        // There should always be at least one slot left
-        self.send_event(Event::Done);
-
-        if let Some(handle) = self.handle.take() {
-            handle.join().unwrap();
-        }
+        send(self.inner.take().expect("DBox is empty"));
     }
 }
 
@@ -198,11 +191,55 @@ mod tests {
     use super::*;
 
     #[test]
-    fn send() {
-        let d = Dropper::new();
+    fn send_one() {
         let e = Box::new(5);
         no_heap! {{
-            d.send(e);
+            send(e);
+        }}
+    }
+
+    #[test]
+    fn send_multiple() {
+        for _ in 0..5 {
+            let e = Box::new(5);
+            no_heap! {{
+                send(e);
+            }}
+        }
+    }
+
+    #[test]
+    fn dbox_from() {
+        let b = Box::new(5);
+        no_heap! {{
+            let d = DBox::from(b);
+            drop(d);
+        }}
+    }
+
+    #[test]
+    fn multiple_dbox_from() {
+        let b1 = Box::new(1);
+        let b2 = Box::new(2);
+        let b3 = Box::new(3);
+        let b4 = Box::new(4);
+        no_heap! {{
+            let d1 = DBox::from(b1);
+            let d2 = DBox::from(b2);
+            let d3 = DBox::from(b3);
+            let d4 = DBox::from(b4);
+            drop(d1);
+            drop(d2);
+            drop(d3);
+            drop(d4);
+        }}
+    }
+
+    #[test]
+    fn dbox_new() {
+        let d = DBox::new(5);
+        no_heap! {{
+            drop(d);
         }}
     }
 }

@@ -8,7 +8,7 @@ use crate::zip;
 use crate::engine::{Sample, CHANNELS};
 
 use super::audio_meter::{new_audio_meter, AudioMeter, AudioMeterProcessor};
-use super::event_queue::EventConsumer;
+use super::event_queue::EventReceiver;
 use super::mixer::TrackKey;
 use super::parameter::{new_f32_parameter, F32Parameter, F32ParameterProcessor};
 use super::test_tone::TestTone;
@@ -61,7 +61,6 @@ pub fn track_from_data(max_buffer_size: usize, data: &TrackData) -> (Track, Trac
     )
 }
 
-// #[derive(Debug)]
 pub struct Track {
     max_buffer_size: usize,
 
@@ -167,13 +166,13 @@ impl TrackProcessor {
     }
 }
 impl Component for TrackProcessor {
-    fn poll<'a, 'b>(&'a mut self, event_consumer: &mut EventConsumer<'a, 'b>) {
+    fn poll<'a, 'b>(&'a mut self, event_receiver: &mut EventReceiver<'a, 'b>) {
         let source_option = self.new_source.take(Ordering::SeqCst);
         if let Some(source_box) = source_option {
             self.source = *source_box;
         }
 
-        self.source.poll(event_consumer);
+        self.source.poll(event_receiver);
     }
 }
 impl Source for TrackProcessor {

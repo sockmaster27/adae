@@ -7,10 +7,12 @@ use std::{
 };
 
 use crate::engine::{
-    components::event_queue::{EventConsumer, EventProducer, EventProducerId, EventQueue},
-    dropper::{DBox, Dropper},
+    components::event_queue::{EventQueue, EventReceiver, EventSender, EventSenderId},
+    dropper::DBox,
     traits::Component,
 };
+
+use super::smallest_pow2;
 
 pub trait RemotePushable<E: Send, K: Send>: Send + Debug + Sized {
     fn new_with_capacity(capacity: usize) -> Self;
@@ -21,28 +23,25 @@ pub trait RemotePushable<E: Send, K: Send>: Send + Debug + Sized {
     fn new_remote_push_with_capacity(
         initial_capacity: usize,
         event_queue: &mut EventQueue,
-        dropper: Dropper,
     ) -> (RemotePusher<E, K, Self>, RemotePushed<E, K, Self>) {
-        let (event_producer, event_producer_id) = event_queue.add_component().unwrap();
+        let (event_sender, event_sender_id) = event_queue.add_component().unwrap();
         (
             RemotePusher {
                 length: 0,
                 capacity: initial_capacity,
-                event_producer,
+                event_sender,
             },
             RemotePushed {
-                inner: dropper.dbox(Box::new(Self::new_with_capacity(initial_capacity))),
-                event_producer_id,
-                dropper,
+                inner: DBox::new(Self::new_with_capacity(initial_capacity)),
+                event_sender_id,
             },
         )
     }
 
     fn new_remote_push(
         event_queue: &mut EventQueue,
-        dropper: Dropper,
     ) -> (RemotePusher<E, K, Self>, RemotePushed<E, K, Self>) {
-        Self::new_remote_push_with_capacity(16, event_queue, dropper)
+        Self::new_remote_push_with_capacity(16, event_queue)
     }
 }
 
@@ -128,7 +127,7 @@ where
     /// (possibly the one stored in `self.new_inner`)
     capacity: usize,
 
-    event_producer: EventProducer<Event<E, K, C>>,
+    event_sender: EventSender<Event<E, K, C>>,
 }
 impl<'a, E, K, C> RemotePusher<E, K, C>
 where
@@ -139,7 +138,7 @@ where
     pub fn push(&mut self, element: E) {
         self.length += 1;
         self.ensure_capacity(self.length);
-        self.event_producer.send(Event::Push(Some(element)));
+        self.event_sender.send(Event::Push(Some(element)));
     }
     pub fn push_multiple(&mut self, elements: Vec<E>) {
         self.length += elements.len();
@@ -147,17 +146,16 @@ where
 
         let option_elements = elements.into_iter().map(|e| Some(e)).collect();
 
-        self.event_producer
+        self.event_sender
             .send(Event::PushMultiple(Box::new(option_elements)));
     }
 
     fn ensure_capacity(&mut self, needed_capacity: usize) {
         if self.capacity < needed_capacity {
-            // Find next power of 2 fitting needed_capacity
-            let new_capacity = 2usize.pow((needed_capacity as f64).log2().ceil() as u32);
+            let new_capacity = smallest_pow2(needed_capacity as f64);
 
             let new_inner = C::new_with_capacity(new_capacity);
-            self.event_producer
+            self.event_sender
                 .send(Event::Reallocated(Some(Box::new(new_inner))));
 
             self.capacity = new_capacity;
@@ -169,7 +167,7 @@ where
             panic!("Attempted to remove element from empty collection");
         }
 
-        self.event_producer.send(Event::Remove(Some(key)));
+        self.event_sender.send(Event::Remove(Some(key)));
         self.length -= 1;
     }
     pub fn remove_multiple(&mut self, keys: Vec<K>) {
@@ -178,7 +176,7 @@ where
         }
         self.length -= keys.len();
         let option_keys = keys.into_iter().map(|k| Some(k)).collect();
-        self.event_producer
+        self.event_sender
             .send(Event::RemoveMultiple(Box::new(option_keys)));
     }
 }
@@ -190,9 +188,7 @@ where
     C: RemotePushable<E, K> + 'static,
 {
     inner: DBox<C>,
-    event_producer_id: EventProducerId<Event<E, K, C>>,
-
-    dropper: Dropper,
+    event_sender_id: EventSenderId<Event<E, K, C>>,
 }
 impl<E: Send, K: Send, C: RemotePushable<E, K>> RemotePushed<E, K, C> {
     fn process_event(&mut self, mut event: DBox<Event<E, K, C>>) {
@@ -214,7 +210,7 @@ impl<E: Send, K: Send, C: RemotePushable<E, K>> RemotePushed<E, K, C> {
                 }
             }
             Event::Reallocated(ref mut new) => {
-                let mut new = self.dropper.dbox(new.take().unwrap());
+                let mut new = DBox::from(new.take().unwrap());
                 self.inner.transplant(&mut *new);
                 mem::swap(&mut new, &mut self.inner);
             }
@@ -230,8 +226,8 @@ impl<E: Send, K: Send, C: RemotePushable<E, K>> RemotePushed<E, K, C> {
     }
 }
 impl<E: Send, K: Send, C: RemotePushable<E, K>> Component for RemotePushed<E, K, C> {
-    fn poll<'a, 'b>(&'a mut self, event_consumer: &mut EventConsumer<'a, 'b>) {
-        event_consumer.register(self.event_producer_id, self, Self::process_event);
+    fn poll<'a, 'b>(&'a mut self, event_receiver: &mut EventReceiver<'a, 'b>) {
+        event_receiver.register(self.event_sender_id, self, Self::process_event);
     }
 }
 impl<E: Send, K: Send, C> Debug for RemotePushed<E, K, C>
@@ -241,8 +237,8 @@ where
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "RemotePushed {{ event_producer_id: {:?}, inner: {:?} }}",
-            self.event_producer_id, self.inner
+            "RemotePushed {{ event_sender_id: {:?}, inner: {:?} }}",
+            self.event_sender_id, self.inner
         )
     }
 }
@@ -260,10 +256,7 @@ impl<E: Send, K: Send, C: RemotePushable<E, K>> DerefMut for RemotePushed<E, K, 
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        engine::{components::event_queue::new_event_queue, dropper::Dropper},
-        zip,
-    };
+    use crate::{engine::components::event_queue::new_event_queue, zip};
 
     use super::*;
 
@@ -272,69 +265,64 @@ mod tests {
 
         #[test]
         fn push_one() {
-            let mut d = Dropper::dummy();
             let (mut eq, mut eqp) = new_event_queue();
-            let (mut rper, mut rped) = Vec::new_remote_push(&mut eq, d);
+            let (mut rper, mut rped) = Vec::new_remote_push(&mut eq);
 
             rper.push(5);
             let mut ec = eqp.event_consumer();
             rped.poll(&mut ec);
-            ec.poll(&mut d);
+            ec.poll();
 
             assert_eq!(*rped, vec![5]);
         }
 
         #[test]
         fn push_repeatedly() {
-            let mut d = Dropper::dummy();
             let (mut eq, mut eqp) = new_event_queue();
-            let (mut rper, mut rped) = Vec::new_remote_push(&mut eq, d);
+            let (mut rper, mut rped) = Vec::new_remote_push(&mut eq);
 
             rper.push(2);
             rper.push(7);
             rper.push(5);
             let mut ec = eqp.event_consumer();
             rped.poll(&mut ec);
-            ec.poll(&mut d);
+            ec.poll();
 
             assert_eq!(*rped, vec![2, 7, 5]);
         }
 
         #[test]
         fn push_multiple() {
-            let mut d = Dropper::dummy();
             let (mut eq, mut eqp) = new_event_queue();
-            let (mut rper, mut rped) = Vec::new_remote_push(&mut eq, d);
+            let (mut rper, mut rped) = Vec::new_remote_push(&mut eq);
 
             rper.push_multiple(vec![2, 7, 5]);
             let mut ec = eqp.event_consumer();
             rped.poll(&mut ec);
-            ec.poll(&mut d);
+            ec.poll();
 
             assert_eq!(*rped, vec![2, 7, 5]);
         }
 
         #[test]
         fn push_multiple_repeatedly() {
-            let mut d = Dropper::dummy();
             let (mut eq, mut eqp) = new_event_queue();
-            let (mut rper, mut rped) = Vec::new_remote_push(&mut eq, d);
+            let (mut rper, mut rped) = Vec::new_remote_push(&mut eq);
 
             rper.push_multiple(vec![2, 7, 5]);
             rper.push_multiple(vec![8, 16, 1]);
             rper.push_multiple(vec![3, 14, 4]);
             let mut ec = eqp.event_consumer();
             rped.poll(&mut ec);
-            ec.poll(&mut d);
+            ec.poll();
 
             assert_eq!(*rped, vec![2, 7, 5, 8, 16, 1, 3, 14, 4]);
         }
 
         #[test]
         fn reallocate() {
-            let mut d = Dropper::dummy();
             let (mut eq, mut eqp) = new_event_queue();
-            let (mut rper, mut rped) = Vec::new_remote_push_with_capacity(4, &mut eq, d);
+            let (mut rper, mut rped) = Vec::new_remote_push_with_capacity(4, &mut eq);
 
             let pre_cap = rped.capacity();
             for i in 0..5 {
@@ -342,7 +330,7 @@ mod tests {
                 rper.push(i);
                 let mut ec = eqp.event_consumer();
                 rped.poll(&mut ec);
-                ec.poll(&mut d);
+                ec.poll();
             }
             assert_ne!(pre_cap, rped.capacity());
             assert_eq!(*rped, vec![0, 1, 2, 3, 4]);
@@ -354,30 +342,28 @@ mod tests {
 
         #[test]
         fn push_one() {
-            let mut d = Dropper::dummy();
             let (mut eq, mut eqp) = new_event_queue();
-            let (mut rper, mut rped) = HashMap::new_remote_push(&mut eq, d);
+            let (mut rper, mut rped) = HashMap::new_remote_push(&mut eq);
 
             rper.push(("mop", 5));
             let mut ec = eqp.event_consumer();
             rped.poll(&mut ec);
-            ec.poll(&mut d);
+            ec.poll();
 
             assert_eq!(rped.drain().collect::<Vec<(&str, i32)>>(), vec![("mop", 5)]);
         }
 
         #[test]
         fn push_repeatedly() {
-            let mut d = Dropper::dummy();
             let (mut eq, mut eqp) = new_event_queue();
-            let (mut rper, mut rped) = HashMap::new_remote_push(&mut eq, d);
+            let (mut rper, mut rped) = HashMap::new_remote_push(&mut eq);
 
             rper.push(("mop", 2));
             rper.push(("stop", 5));
             rper.push(("flop", 1));
             let mut ec = eqp.event_consumer();
             rped.poll(&mut ec);
-            ec.poll(&mut d);
+            ec.poll();
 
             let mut result: Vec<(&str, i32)> = rped.drain().collect();
             result.sort();
@@ -386,14 +372,13 @@ mod tests {
 
         #[test]
         fn push_multiple() {
-            let mut d = Dropper::dummy();
             let (mut eq, mut eqp) = new_event_queue();
-            let (mut rper, mut rped) = HashMap::new_remote_push(&mut eq, d);
+            let (mut rper, mut rped) = HashMap::new_remote_push(&mut eq);
 
             rper.push_multiple(vec![("mop", 2), ("stop", 5), ("flop", 1)]);
             let mut ec = eqp.event_consumer();
             rped.poll(&mut ec);
-            ec.poll(&mut d);
+            ec.poll();
 
             let mut result: Vec<(&str, i32)> = rped.drain().collect();
             result.sort();
@@ -402,16 +387,15 @@ mod tests {
 
         #[test]
         fn push_multiple_repeatedly() {
-            let mut d = Dropper::dummy();
             let (mut eq, mut eqp) = new_event_queue();
-            let (mut rper, mut rped) = HashMap::new_remote_push(&mut eq, d);
+            let (mut rper, mut rped) = HashMap::new_remote_push(&mut eq);
 
             rper.push_multiple(vec![("mop", 2), ("stop", 5), ("flop", 1)]);
             rper.push_multiple(vec![("glop", 7), ("plop", 13), ("pop", 0)]);
             rper.push_multiple(vec![("blop", -1), ("slop", 8), ("tlop", 4)]);
             let mut ec = eqp.event_consumer();
             rped.poll(&mut ec);
-            ec.poll(&mut d);
+            ec.poll();
 
             let mut result: Vec<(&str, i32)> = rped.drain().collect();
             result.sort();
@@ -433,9 +417,8 @@ mod tests {
 
         #[test]
         fn reallocate() {
-            let mut d = Dropper::dummy();
             let (mut eq, mut eqp) = new_event_queue();
-            let (mut rper, mut rped) = HashMap::new_remote_push_with_capacity(4, &mut eq, d);
+            let (mut rper, mut rped) = HashMap::new_remote_push_with_capacity(4, &mut eq);
 
             let pre_cap = rped.capacity();
             for (k, v) in zip!("abcde".chars(), 0..5) {
@@ -443,7 +426,7 @@ mod tests {
                 rper.push((k, v));
                 let mut ec = eqp.event_consumer();
                 rped.poll(&mut ec);
-                ec.poll(&mut d);
+                ec.poll();
             }
             assert_ne!(pre_cap, rped.capacity());
 

@@ -1,20 +1,24 @@
-use std::borrow::Cow;
-use std::cmp::min;
-use std::error::Error;
-use std::fmt::{Debug, Display};
-use std::fs::File;
-use std::ops::Range;
-use std::path::{Path, PathBuf};
+use std::{
+    borrow::Cow,
+    cmp::min,
+    error::Error,
+    fmt::{Debug, Display},
+    fs::File,
+    ops::Range,
+    path::{Path, PathBuf},
+};
 
-use symphonia::core::audio::{AudioBuffer, AudioBufferRef, Signal};
-use symphonia::core::codecs::DecoderOptions;
-use symphonia::core::conv::IntoSample;
-use symphonia::core::errors::Error as SymphoniaError;
-use symphonia::core::formats::FormatOptions;
-use symphonia::core::io::MediaSourceStream;
-use symphonia::core::meta::MetadataOptions;
-use symphonia::core::probe::Hint;
-use symphonia::core::sample::Sample as SymphoniaSample;
+use symphonia::core::{
+    audio::{AudioBuffer, AudioBufferRef, Signal},
+    codecs::DecoderOptions,
+    conv::IntoSample,
+    errors::Error as SymphoniaError,
+    formats::FormatOptions,
+    io::MediaSourceStream,
+    meta::MetadataOptions,
+    probe::Hint,
+    sample::Sample as SymphoniaSample,
+};
 
 use crate::engine::traits::Info;
 use crate::engine::{Sample, CHANNELS};
@@ -247,7 +251,9 @@ impl Display for ImportError {
             Self::TooManyChannels => {
                 "Files with more than 2 channels are not currently supported".to_owned()
             }
-            Self::Other(msg) => format!("File could not be imported. Failed with error: {}", msg),
+            Self::Other(msg) => {
+                format!("File could not be imported. Failed with error: {}", msg)
+            }
         };
         f.write_str(&msg)
     }

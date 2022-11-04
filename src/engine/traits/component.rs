@@ -1,11 +1,11 @@
 use std::fmt::Debug;
 
 use super::Info;
-use crate::engine::{components::event_queue::EventConsumer, Sample};
+use crate::engine::{components::event_queue::EventReceiver, Sample};
 
 pub trait Component: Send + Debug {
     #[allow(unused_variables)]
-    fn poll<'a, 'b>(&'a mut self, event_consumer: &mut EventConsumer<'a, 'b>) {}
+    fn poll<'a, 'b>(&'a mut self, event_receiver: &mut EventReceiver<'a, 'b>) {}
 }
 
 pub trait Source: Component {
