@@ -1,4 +1,5 @@
 pub mod remote_push;
+pub mod ringbuffer;
 
 use std::fmt::Debug;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -26,6 +27,11 @@ macro_rules! zip {
         ($first.into_iter())$(.zip($rest.into_iter()))+
     }
     };
+}
+
+/// Find smallest power of 2 that is greater than or equal to `x`
+pub fn smallest_pow2(x: f64) -> usize {
+    2usize.pow(x.log2().ceil() as u32)
 }
 
 /// Atomic supporting storing and loading of an f32, via the raw bits of a u32.
