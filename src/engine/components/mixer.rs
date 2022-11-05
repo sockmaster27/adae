@@ -5,7 +5,7 @@ use std::fmt::Display;
 
 use super::event_queue::EventQueue;
 use super::event_queue::EventReceiver;
-use super::track::{new_track, track_from_data, Track, TrackData, TrackProcessor};
+use super::track::{track, track_from_data, Track, TrackData, TrackProcessor};
 use super::MixPoint;
 use crate::engine::traits::{Component, Info, Source};
 use crate::engine::utils::remote_push::RemotePushable;
@@ -14,14 +14,13 @@ use crate::engine::Sample;
 
 pub type TrackKey = u32;
 
-pub fn new_mixer(event_queue: &mut EventQueue, max_buffer_size: usize) -> (Mixer, MixerProcessor) {
-    let (track, track_processor) = new_track(0, max_buffer_size);
+pub fn mixer(event_queue: &mut EventQueue, max_buffer_size: usize) -> (Mixer, MixerProcessor) {
+    let (track, track_processor) = track(0, max_buffer_size);
 
     let mut tracks = HashMap::new();
     tracks.insert(0, track);
 
-    let (track_processors_pusher, mut track_processors_pushed) =
-        HashMap::new_remote_push(event_queue);
+    let (track_processors_pusher, mut track_processors_pushed) = HashMap::remote_push(event_queue);
     track_processors_pushed.insert(0, track_processor);
 
     (
@@ -65,7 +64,7 @@ impl Mixer {
 
     pub fn add_track(&mut self) -> Result<TrackKey, TrackOverflowError> {
         let key = self.next_key()?;
-        let track = new_track(key, self.max_buffer_size);
+        let track = track(key, self.max_buffer_size);
         self.push_track(track);
         Ok(key)
     }
@@ -74,7 +73,7 @@ impl Mixer {
         let keys = self.next_keys(count)?;
         let mut tracks = Vec::with_capacity(count);
         for &key in &keys {
-            let track = new_track(key, self.max_buffer_size);
+            let track = track(key, self.max_buffer_size);
             tracks.push(track);
         }
         self.push_tracks(tracks);
@@ -265,14 +264,14 @@ impl Error for TrackReconstructionError {}
 
 #[cfg(test)]
 mod tests {
-    use crate::engine::components::event_queue::new_event_queue;
+    use crate::engine::components::event_queue::event_queue;
 
     use super::*;
 
     #[test]
     fn add_track() {
-        let (mut eq, mut eqp) = new_event_queue();
-        let (mut m, mut mp) = new_mixer(&mut eq, 10);
+        let (mut eq, mut eqp) = event_queue();
+        let (mut m, mut mp) = mixer(&mut eq, 10);
 
         for _ in 0..50 {
             m.add_track().unwrap();
@@ -287,8 +286,8 @@ mod tests {
 
     #[test]
     fn add_tracks() {
-        let (mut eq, mut eqp) = new_event_queue();
-        let (mut m, mut mp) = new_mixer(&mut eq, 10);
+        let (mut eq, mut eqp) = event_queue();
+        let (mut m, mut mp) = mixer(&mut eq, 10);
 
         for _ in 0..50 {
             m.add_tracks(5).unwrap();
@@ -303,8 +302,8 @@ mod tests {
 
     #[test]
     fn reconstruct_track() {
-        let (mut eq, mut eqp) = new_event_queue();
-        let (mut m, mut mp) = new_mixer(&mut eq, 10);
+        let (mut eq, mut eqp) = event_queue();
+        let (mut m, mut mp) = mixer(&mut eq, 10);
 
         for key in 1..50 + 1 {
             m.reconstruct_track(&TrackData {
@@ -322,8 +321,8 @@ mod tests {
     }
     #[test]
     fn reconstruct_existing_track() {
-        let (mut eq, mut eqp) = new_event_queue();
-        let (mut m, mut mp) = new_mixer(&mut eq, 10);
+        let (mut eq, mut eqp) = event_queue();
+        let (mut m, mut mp) = mixer(&mut eq, 10);
 
         let result = m.reconstruct_track(&TrackData {
             panning: 0.0,
@@ -344,8 +343,8 @@ mod tests {
 
     #[test]
     fn reconstruct_tracks() {
-        let (mut eq, mut eqp) = new_event_queue();
-        let (mut m, mut mp) = new_mixer(&mut eq, 10);
+        let (mut eq, mut eqp) = event_queue();
+        let (mut m, mut mp) = mixer(&mut eq, 10);
 
         let batch_size = 5;
 

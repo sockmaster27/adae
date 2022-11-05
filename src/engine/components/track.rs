@@ -7,15 +7,15 @@ use crate::zip;
 
 use crate::engine::{Sample, CHANNELS};
 
-use super::audio_meter::{new_audio_meter, AudioMeter, AudioMeterProcessor};
+use super::audio_meter::{audio_meter, AudioMeter, AudioMeterProcessor};
 use super::event_queue::EventReceiver;
 use super::mixer::TrackKey;
-use super::parameter::{new_f32_parameter, F32Parameter, F32ParameterProcessor};
+use super::parameter::{f32_parameter, F32Parameter, F32ParameterProcessor};
 use super::test_tone::TestTone;
-use super::timeline::{new_timeline_track, TimelineTrack};
+use super::timeline::{timeline_track, TimelineTrack};
 use crate::engine::traits::{Component, Info, Source};
 
-pub fn new_track(key: TrackKey, max_buffer_size: usize) -> (Track, TrackProcessor) {
+pub fn track(key: TrackKey, max_buffer_size: usize) -> (Track, TrackProcessor) {
     track_from_data(
         max_buffer_size,
         &TrackData {
@@ -30,12 +30,12 @@ pub fn track_from_data(max_buffer_size: usize, data: &TrackData) -> (Track, Trac
     let test_tone = TestTone::new(max_buffer_size);
     let source = Box::new(test_tone);
 
-    let (panning, panning_processor) = new_f32_parameter(data.panning, max_buffer_size);
-    let (volume, volume_processor) = new_f32_parameter(data.volume, max_buffer_size);
-    let (meter, meter_processor) = new_audio_meter();
+    let (panning, panning_processor) = f32_parameter(data.panning, max_buffer_size);
+    let (volume, volume_processor) = f32_parameter(data.volume, max_buffer_size);
+    let (meter, meter_processor) = audio_meter();
 
-    let new_source1 = Arc::new(AtomicOptionBox::none());
-    let new_source2 = Arc::clone(&new_source1);
+    let source1 = Arc::new(AtomicOptionBox::none());
+    let source2 = Arc::clone(&source1);
 
     (
         Track {
@@ -98,7 +98,7 @@ impl Track {
     }
 
     pub fn add_timeline(&self) -> TimelineTrack {
-        let (timeline_track, timeline_track_processor) = new_timeline_track(self.max_buffer_size);
+        let (timeline_track, timeline_track_processor) = timeline_track(self.max_buffer_size);
         self.set_source(Box::new(timeline_track_processor));
         timeline_track
     }

@@ -57,7 +57,7 @@ impl Debug for Event {
     }
 }
 
-pub fn new_event_queue() -> (EventQueue, EventQueueProcessor) {
+pub fn event_queue() -> (EventQueue, EventQueueProcessor) {
     let (sender, receiver) = ringbuffer();
     let processors = Box::new(HashMap::new());
 
@@ -278,7 +278,7 @@ mod tests {
 
     #[test]
     fn send_one() {
-        let (mut eq, mut eqp) = new_event_queue();
+        let (mut eq, mut eqp) = event_queue();
         let (ep, epi) = eq.add_component::<u32>().unwrap();
 
         ep.send(2);

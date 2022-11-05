@@ -3,7 +3,7 @@ use crate::engine::traits::{Component, Info, Source};
 use crate::engine::{Sample, CHANNELS};
 use crate::zip;
 
-pub fn new_timeline_track(max_buffer_size: usize) -> (TimelineTrack, TimelineTrackProcessor) {
+pub fn timeline_track(max_buffer_size: usize) -> (TimelineTrack, TimelineTrackProcessor) {
     (
         TimelineTrack,
         TimelineTrackProcessor {

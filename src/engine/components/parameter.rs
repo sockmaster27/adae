@@ -7,7 +7,7 @@ use crate::engine::utils::format_truncate_list;
 
 use crate::engine::utils::{AtomicF32, MovingAverage};
 
-pub fn new_f32_parameter(
+pub fn f32_parameter(
     initial: f32,
     max_buffer_size: usize,
 ) -> (F32Parameter, F32ParameterProcessor) {
@@ -32,8 +32,8 @@ pub struct F32Parameter {
     desired: Arc<AtomicF32>,
 }
 impl F32Parameter {
-    pub fn set(&self, new_value: f32) {
-        self.desired.store(new_value, Ordering::Relaxed);
+    pub fn set(&self, value: f32) {
+        self.desired.store(value, Ordering::Relaxed);
     }
 
     /// Get last value passed to [`Self::set`]

@@ -15,7 +15,7 @@ use self::components::mixer::{
 };
 pub use components::{Track, TrackData};
 mod processor;
-use self::processor::{new_processor, Processor, ProcessorInterface};
+use self::processor::{processor, Processor, ProcessorInterface};
 
 /// Internally used sample format.
 type Sample = f32;
@@ -50,7 +50,7 @@ impl Engine {
             cpal::BufferSize::Fixed(size) => size.try_into().expect("Buffer size overflows usize"),
             cpal::BufferSize::Default => MAX_BUFFER_SIZE_DEFAULT,
         };
-        let (processor_interface, processor) = new_processor(&config, max_buffer_size);
+        let (processor_interface, processor) = processor(&config, max_buffer_size);
 
         let create_stream = match sample_format {
             SampleFormat::F32 => Self::create_stream::<f32>,

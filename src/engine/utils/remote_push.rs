@@ -15,12 +15,12 @@ use crate::engine::{
 use super::smallest_pow2;
 
 pub trait RemotePushable<E: Send, K: Send>: Send + Debug + Sized {
-    fn new_with_capacity(capacity: usize) -> Self;
+    fn with_capacity(capacity: usize) -> Self;
     fn push(&mut self, element: E);
     fn remove(&mut self, key: K) -> bool;
     fn transplant(&mut self, other: &mut Self);
 
-    fn new_remote_push_with_capacity(
+    fn remote_push_with_capacity(
         initial_capacity: usize,
         event_queue: &mut EventQueue,
     ) -> (RemotePusher<E, K, Self>, RemotePushed<E, K, Self>) {
@@ -32,16 +32,16 @@ pub trait RemotePushable<E: Send, K: Send>: Send + Debug + Sized {
                 event_sender,
             },
             RemotePushed {
-                inner: DBox::new(Self::new_with_capacity(initial_capacity)),
+                inner: DBox::new(Self::with_capacity(initial_capacity)),
                 event_sender_id,
             },
         )
     }
 
-    fn new_remote_push(
+    fn remote_push(
         event_queue: &mut EventQueue,
     ) -> (RemotePusher<E, K, Self>, RemotePushed<E, K, Self>) {
-        Self::new_remote_push_with_capacity(16, event_queue)
+        Self::remote_push_with_capacity(16, event_queue)
     }
 }
 
@@ -51,7 +51,7 @@ impl<E> RemotePushable<E, E> for Vec<E>
 where
     E: Send + Debug + PartialEq,
 {
-    fn new_with_capacity(capacity: usize) -> Self {
+    fn with_capacity(capacity: usize) -> Self {
         Vec::with_capacity(capacity)
     }
 
@@ -82,7 +82,7 @@ where
     K: Send + Debug + Eq + Hash,
     V: Send + Debug,
 {
-    fn new_with_capacity(capacity: usize) -> Self {
+    fn with_capacity(capacity: usize) -> Self {
         HashMap::with_capacity(2 * capacity)
     }
 
@@ -123,8 +123,7 @@ where
 {
     /// Number of elements currently pushed to the collection
     length: usize,
-    /// Number of elements there are space for in the latest allocation of the collection
-    /// (possibly the one stored in `self.new_inner`)
+    /// Number of elements there are room for in the latest allocation of the collection
     capacity: usize,
 
     event_sender: EventSender<Event<E, K, C>>,
@@ -260,7 +259,7 @@ impl<E: Send, K: Send, C: RemotePushable<E, K>> DerefMut for RemotePushed<E, K, 
 
 #[cfg(test)]
 mod tests {
-    use crate::{engine::components::event_queue::new_event_queue, zip};
+    use crate::{engine::components::event_queue::event_queue, zip};
 
     use super::*;
 
@@ -269,8 +268,8 @@ mod tests {
 
         #[test]
         fn push_one() {
-            let (mut eq, mut eqp) = new_event_queue();
-            let (mut rper, mut rped) = Vec::new_remote_push(&mut eq);
+            let (mut eq, mut eqp) = event_queue();
+            let (mut rper, mut rped) = Vec::remote_push(&mut eq);
 
             rper.push(5);
             no_heap! {{
@@ -284,8 +283,8 @@ mod tests {
 
         #[test]
         fn push_repeatedly() {
-            let (mut eq, mut eqp) = new_event_queue();
-            let (mut rper, mut rped) = Vec::new_remote_push(&mut eq);
+            let (mut eq, mut eqp) = event_queue();
+            let (mut rper, mut rped) = Vec::remote_push(&mut eq);
 
             rper.push(2);
             rper.push(7);
@@ -302,8 +301,8 @@ mod tests {
 
         #[test]
         fn push_multiple() {
-            let (mut eq, mut eqp) = new_event_queue();
-            let (mut rper, mut rped) = Vec::new_remote_push(&mut eq);
+            let (mut eq, mut eqp) = event_queue();
+            let (mut rper, mut rped) = Vec::remote_push(&mut eq);
 
             rper.push_multiple(vec![2, 7, 5]);
 
@@ -318,8 +317,8 @@ mod tests {
 
         #[test]
         fn push_multiple_repeatedly() {
-            let (mut eq, mut eqp) = new_event_queue();
-            let (mut rper, mut rped) = Vec::new_remote_push(&mut eq);
+            let (mut eq, mut eqp) = event_queue();
+            let (mut rper, mut rped) = Vec::remote_push(&mut eq);
 
             rper.push_multiple(vec![2, 7, 5]);
             rper.push_multiple(vec![8, 16, 1]);
@@ -336,8 +335,8 @@ mod tests {
 
         #[test]
         fn reallocate() {
-            let (mut eq, mut eqp) = new_event_queue();
-            let (mut rper, mut rped) = Vec::new_remote_push_with_capacity(4, &mut eq);
+            let (mut eq, mut eqp) = event_queue();
+            let (mut rper, mut rped) = Vec::remote_push_with_capacity(4, &mut eq);
 
             let pre_cap = rped.capacity();
             for i in 0..5 {
@@ -360,8 +359,8 @@ mod tests {
 
         #[test]
         fn push_one() {
-            let (mut eq, mut eqp) = new_event_queue();
-            let (mut rper, mut rped) = HashMap::new_remote_push(&mut eq);
+            let (mut eq, mut eqp) = event_queue();
+            let (mut rper, mut rped) = HashMap::remote_push(&mut eq);
 
             rper.push(("mop", 5));
 
@@ -376,8 +375,8 @@ mod tests {
 
         #[test]
         fn push_repeatedly() {
-            let (mut eq, mut eqp) = new_event_queue();
-            let (mut rper, mut rped) = HashMap::new_remote_push(&mut eq);
+            let (mut eq, mut eqp) = event_queue();
+            let (mut rper, mut rped) = HashMap::remote_push(&mut eq);
 
             rper.push(("mop", 2));
             rper.push(("stop", 5));
@@ -396,8 +395,8 @@ mod tests {
 
         #[test]
         fn push_multiple() {
-            let (mut eq, mut eqp) = new_event_queue();
-            let (mut rper, mut rped) = HashMap::new_remote_push(&mut eq);
+            let (mut eq, mut eqp) = event_queue();
+            let (mut rper, mut rped) = HashMap::remote_push(&mut eq);
 
             rper.push_multiple(vec![("mop", 2), ("stop", 5), ("flop", 1)]);
 
@@ -414,8 +413,8 @@ mod tests {
 
         #[test]
         fn push_multiple_repeatedly() {
-            let (mut eq, mut eqp) = new_event_queue();
-            let (mut rper, mut rped) = HashMap::new_remote_push(&mut eq);
+            let (mut eq, mut eqp) = event_queue();
+            let (mut rper, mut rped) = HashMap::remote_push(&mut eq);
 
             rper.push_multiple(vec![("mop", 2), ("stop", 5), ("flop", 1)]);
             rper.push_multiple(vec![("glop", 7), ("plop", 13), ("pop", 0)]);
@@ -447,8 +446,8 @@ mod tests {
 
         #[test]
         fn reallocate() {
-            let (mut eq, mut eqp) = new_event_queue();
-            let (mut rper, mut rped) = HashMap::new_remote_push_with_capacity(4, &mut eq);
+            let (mut eq, mut eqp) = event_queue();
+            let (mut rper, mut rped) = HashMap::remote_push_with_capacity(4, &mut eq);
 
             let pre_cap = rped.capacity();
             for (k, v) in zip!("abcde".chars(), 0..5) {
@@ -473,8 +472,8 @@ mod tests {
 
         #[test]
         fn remove_immediately() {
-            let (mut eq, mut eqp) = new_event_queue();
-            let (mut rper, mut rped) = HashMap::new_remote_push(&mut eq);
+            let (mut eq, mut eqp) = event_queue();
+            let (mut rper, mut rped) = HashMap::remote_push(&mut eq);
 
             rper.push(("mop", 5));
             rper.remove("mop");
@@ -490,8 +489,8 @@ mod tests {
 
         #[test]
         fn remove_delayed() {
-            let (mut eq, mut eqp) = new_event_queue();
-            let (mut rper, mut rped) = HashMap::new_remote_push(&mut eq);
+            let (mut eq, mut eqp) = event_queue();
+            let (mut rper, mut rped) = HashMap::remote_push(&mut eq);
 
             let mut poll = || {
                 no_heap! {{
@@ -513,8 +512,8 @@ mod tests {
         #[test]
         #[should_panic]
         fn remove_invalid() {
-            let (mut eq, mut eqp) = new_event_queue();
-            let (mut rper, mut rped) = HashMap::new_remote_push(&mut eq);
+            let (mut eq, mut eqp) = event_queue();
+            let (mut rper, mut rped) = HashMap::remote_push(&mut eq);
 
             rper.push(("mop", 5));
             rper.remove("slop");

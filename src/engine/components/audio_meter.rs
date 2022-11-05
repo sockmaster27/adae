@@ -8,7 +8,7 @@ use crate::{meter_scale, non_copy_array, zip};
 use crate::engine::utils::{rms, AtomicF32};
 use crate::engine::{Sample, CHANNELS};
 
-pub fn new_audio_meter() -> (AudioMeter, AudioMeterProcessor) {
+pub fn audio_meter() -> (AudioMeter, AudioMeterProcessor) {
     let peak1 = Arc::new(non_copy_array![AtomicF32::new(0.0); CHANNELS]);
     let peak2 = Arc::clone(&peak1);
 
@@ -42,7 +42,7 @@ pub fn new_audio_meter() -> (AudioMeter, AudioMeterProcessor) {
     )
 }
 
-/// Acquired via the [`new_audio_meter`] function.
+/// Acquired via the [`audio_meter`] function.
 #[derive(Debug)]
 pub struct AudioMeter {
     peak: Arc<[AtomicF32; CHANNELS]>,
@@ -141,7 +141,7 @@ impl AudioMeter {
     }
 }
 
-/// Acquired via the [`new_audio_meter`] function.
+/// Acquired via the [`audio_meter`] function.
 #[derive(Debug)]
 pub struct AudioMeterProcessor {
     peak: Arc<[AtomicF32; CHANNELS]>,
@@ -218,7 +218,7 @@ mod tests {
     #[test]
     fn peak() {
         let sample_rate = 1.0;
-        let (am, mut amp) = new_audio_meter();
+        let (am, mut amp) = audio_meter();
         let input = [0.0, 3.5, -6.4, 0.2, -0.3, 0.4];
 
         amp.report(&input, sample_rate);
@@ -230,7 +230,7 @@ mod tests {
     #[test]
     fn long_peak_reflects_peak() {
         let sample_rate = 3.0;
-        let (am, mut amp) = new_audio_meter();
+        let (am, mut amp) = audio_meter();
         let input = [0.0, 3.5, -6.4, 0.2, -0.3, 0.4];
 
         amp.report(&input, sample_rate);
@@ -242,7 +242,7 @@ mod tests {
     #[test]
     fn long_peak_stays_for_a_bit() {
         let sample_rate = 4.0;
-        let (am, mut amp) = new_audio_meter();
+        let (am, mut amp) = audio_meter();
         let input1 = [-3.5, 1.2, 0.4, -1.1];
         let input2 = [0.0, 0.0, 0.0, 0.0];
 
@@ -257,7 +257,7 @@ mod tests {
     #[test]
     fn long_peak_falls() {
         let sample_rate = 3.0;
-        let (am, mut amp) = new_audio_meter();
+        let (am, mut amp) = audio_meter();
         let input1 = [-3.5, 1.2, 0.4, -1.1];
         let input2 = [0.0, 0.0, 0.0, 0.0];
 

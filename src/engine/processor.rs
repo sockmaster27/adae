@@ -4,9 +4,9 @@ use cpal::StreamConfig;
 
 use super::{
     components::{
-        event_queue::{new_event_queue, EventQueue, EventQueueProcessor},
-        mixer::{new_mixer, Mixer, MixerProcessor},
-        timeline::{new_timeline, Timeline, TimelineProcessor},
+        event_queue::{event_queue, EventQueue, EventQueueProcessor},
+        mixer::{mixer, Mixer, MixerProcessor},
+        timeline::{timeline, Timeline, TimelineProcessor},
     },
     dropper,
     traits::{Component, Info, Source},
@@ -18,15 +18,15 @@ use crate::wav_recorder::WavRecorder;
 /// Creates an corresponding pair of [`Processor`] and [`ProcessorInterface`].
 ///
 /// The [`Processor`] should live on the audio thread, while the [`ProcessorInterface`] should not.
-pub fn new_processor(
+pub fn processor(
     stream_config: &StreamConfig,
     max_buffer_size: usize,
 ) -> (ProcessorInterface, Processor) {
     let output_channels = stream_config.channels;
     let sample_rate = stream_config.sample_rate.0;
-    let (mut global_events, global_events_processor) = new_event_queue();
-    let (timeline, timeline_processor) = new_timeline();
-    let (mixer, mixer_processor) = new_mixer(&mut global_events, max_buffer_size);
+    let (mut global_events, global_events_processor) = event_queue();
+    let (timeline, timeline_processor) = timeline();
+    let (mixer, mixer_processor) = mixer(&mut global_events, max_buffer_size);
 
     dropper::init();
 

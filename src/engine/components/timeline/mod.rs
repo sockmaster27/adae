@@ -2,7 +2,7 @@ mod audio_clip;
 mod audio_clip_store;
 mod track;
 
-pub use track::{new_timeline_track, TimelineTrack};
+pub use track::{timeline_track, TimelineTrack};
 
 use std::{
     cell::Cell,
@@ -107,7 +107,7 @@ impl TimelineClip {
     }
 }
 
-pub fn new_timeline() -> (Timeline, TimelineProcessor) {
+pub fn timeline() -> (Timeline, TimelineProcessor) {
     let sync_position1 = Arc::new(AtomicU64::new(0));
     let sync_position2 = Arc::clone(&sync_position1);
 
