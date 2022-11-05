@@ -7,6 +7,7 @@ use super::event_queue::EventQueue;
 use super::event_queue::EventReceiver;
 use super::track::{track, track_from_data, Track, TrackData, TrackProcessor};
 use super::MixPoint;
+use crate::engine::dropper::DBox;
 use crate::engine::traits::{Component, Info, Source};
 use crate::engine::utils::remote_push::RemotePushable;
 use crate::engine::utils::remote_push::{RemotePushedHashMap, RemotePusherHashMap};
@@ -21,7 +22,7 @@ pub fn mixer(event_queue: &mut EventQueue, max_buffer_size: usize) -> (Mixer, Mi
     tracks.insert(0, track);
 
     let (track_processors_pusher, mut track_processors_pushed) = HashMap::remote_push(event_queue);
-    track_processors_pushed.insert(0, track_processor);
+    track_processors_pushed.insert(0, DBox::new(track_processor));
 
     (
         Mixer {
@@ -45,7 +46,7 @@ pub struct Mixer {
     tracks: HashMap<TrackKey, Track>,
     last_key: TrackKey,
 
-    track_processors: RemotePusherHashMap<TrackKey, TrackProcessor>,
+    track_processors: RemotePusherHashMap<TrackKey, DBox<TrackProcessor>>,
 }
 impl Mixer {
     pub fn tracks(&self) -> Vec<&Track> {
@@ -182,24 +183,26 @@ impl Mixer {
         let (track, track_processor) = track;
         let key = track.key();
         self.tracks.insert(key, track);
-        self.track_processors.push((key, track_processor))
+        self.track_processors
+            .push((key, DBox::new(track_processor)))
     }
     fn push_tracks(&mut self, tracks: Vec<(Track, TrackProcessor)>) {
-        let count = tracks.len();
+        let track_processors = tracks
+            .into_iter()
+            .map(|track| {
+                let (track, track_processor) = track;
+                let key = track.key();
+                self.tracks.insert(key, track);
 
-        let mut track_processors = Vec::with_capacity(count);
-        for track in tracks {
-            let (track, track_processor) = track;
-            let key = track.key();
-            self.tracks.insert(key, track);
-            track_processors.push((key, track_processor));
-        }
+                (key, DBox::new(track_processor))
+            })
+            .collect();
         self.track_processors.push_multiple(track_processors);
     }
 }
 
 pub struct MixerProcessor {
-    tracks: RemotePushedHashMap<TrackKey, TrackProcessor>,
+    tracks: RemotePushedHashMap<TrackKey, DBox<TrackProcessor>>,
     mix_point: MixPoint,
 }
 impl Debug for MixerProcessor {
@@ -276,9 +279,12 @@ mod tests {
         for _ in 0..50 {
             m.add_track().unwrap();
         }
-        let mut ec = eqp.event_consumer();
-        mp.poll(&mut ec);
-        ec.poll();
+
+        no_heap! {{
+            let mut ec = eqp.event_consumer();
+            mp.poll(&mut ec);
+            ec.poll();
+        }}
 
         assert_eq!(m.tracks.len(), 51);
         assert_eq!(mp.tracks.len(), 51);
@@ -292,9 +298,12 @@ mod tests {
         for _ in 0..50 {
             m.add_tracks(5).unwrap();
         }
-        let mut ec = eqp.event_consumer();
-        mp.poll(&mut ec);
-        ec.poll();
+
+        no_heap! {{
+            let mut ec = eqp.event_consumer();
+            mp.poll(&mut ec);
+            ec.poll();
+        }}
 
         assert_eq!(m.tracks.len(), 50 * 5 + 1);
         assert_eq!(mp.tracks.len(), 50 * 5 + 1);
@@ -313,9 +322,12 @@ mod tests {
             })
             .unwrap();
         }
-        let mut ec = eqp.event_consumer();
-        mp.poll(&mut ec);
-        ec.poll();
+
+        no_heap! {{
+            let mut ec = eqp.event_consumer();
+            mp.poll(&mut ec);
+            ec.poll();
+        }}
 
         assert_eq!(mp.tracks.len(), 50 + 1);
     }
@@ -332,9 +344,11 @@ mod tests {
             key: 0,
         });
 
-        let mut ec = eqp.event_consumer();
-        mp.poll(&mut ec);
-        ec.poll();
+        no_heap! {{
+            let mut ec = eqp.event_consumer();
+            mp.poll(&mut ec);
+            ec.poll();
+        }}
 
         assert_eq!(result, Err(TrackReconstructionError { key: 0 }));
         assert_eq!(m.tracks.len(), 1);
@@ -359,10 +373,53 @@ mod tests {
         for data in data.chunks(batch_size) {
             m.reconstruct_tracks(data.iter()).unwrap();
         }
-        let mut ec = eqp.event_consumer();
-        mp.poll(&mut ec);
-        ec.poll();
+
+        no_heap! {{
+            let mut ec = eqp.event_consumer();
+            mp.poll(&mut ec);
+            ec.poll();
+        }}
 
         assert_eq!(mp.tracks.len(), 50 * batch_size + 1);
+    }
+
+    #[test]
+    fn delete_track_immediately() {
+        let (mut eq, mut eqp) = event_queue();
+        let (mut m, mut mp) = mixer(&mut eq, 10);
+
+        let k = m.add_track().unwrap();
+        m.delete_track(k).unwrap();
+
+        no_heap! {{
+            let mut ec = eqp.event_consumer();
+            mp.poll(&mut ec);
+            ec.poll();
+        }}
+
+        assert_eq!(m.tracks.len(), 1);
+        assert_eq!(mp.tracks.len(), 1);
+    }
+
+    #[test]
+    fn delete_track_delayed() {
+        let (mut eq, mut eqp) = event_queue();
+        let (mut m, mut mp) = mixer(&mut eq, 10);
+
+        let mut poll = || {
+            no_heap! {{
+                let mut ec = eqp.event_consumer();
+                mp.poll(&mut ec);
+                ec.poll();
+            }}
+        };
+
+        let k = m.add_track().unwrap();
+        poll();
+        m.delete_track(k).unwrap();
+        poll();
+
+        assert_eq!(m.tracks.len(), 1);
+        assert_eq!(mp.tracks.len(), 1);
     }
 }
