@@ -153,7 +153,7 @@ where
         if self.capacity < needed_capacity {
             let new_capacity = smallest_pow2(needed_capacity as f64);
 
-            let new_inner = C::new_with_capacity(new_capacity);
+            let new_inner = C::with_capacity(new_capacity);
             self.event_sender
                 .send(Event::Reallocated(Some(Box::new(new_inner))));
 

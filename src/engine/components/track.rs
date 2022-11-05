@@ -22,7 +22,7 @@ pub fn track(key: TrackKey, max_buffer_size: usize) -> (Track, TrackProcessor) {
             panning: 0.0,
             volume: 1.0,
             key,
-        },
+        },  
     )
 }
 
@@ -34,8 +34,8 @@ pub fn track_from_data(max_buffer_size: usize, data: &TrackData) -> (Track, Trac
     let (volume, volume_processor) = f32_parameter(data.volume, max_buffer_size);
     let (meter, meter_processor) = audio_meter();
 
-    let source1 = Arc::new(AtomicOptionBox::none());
-    let source2 = Arc::clone(&source1);
+    let new_source1 = Arc::new(AtomicOptionBox::none());
+    let new_source2 = Arc::clone(&new_source1);
 
     (
         Track {
