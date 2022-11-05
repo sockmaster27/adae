@@ -1,11 +1,10 @@
 use std::{
     alloc::{GlobalAlloc, System},
+    backtrace::Backtrace,
     cell::RefCell,
     marker::PhantomData,
     thread,
 };
-
-use backtrace::Backtrace;
 
 #[cfg(not(test))]
 #[global_allocator]
@@ -105,7 +104,7 @@ pub trait ErrorHandler {
 pub struct PrintError;
 impl ErrorHandler for PrintError {
     fn error(msg: &str) {
-        eprintln!("{}\n{:?}", msg, Backtrace::new());
+        eprintln!("{}\n{:?}", msg, Backtrace::force_capture());
     }
 }
 
