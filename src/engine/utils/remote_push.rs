@@ -222,7 +222,11 @@ impl<E: Send, K: Send, C: RemotePushable<E, K>> RemotePushed<E, K, C> {
     }
 
     fn remove(&mut self, k: &mut Option<K>) {
-        self.inner.remove(k.take().unwrap());
+        let successful = self.inner.remove(k.take().unwrap());
+
+        if !successful {
+            panic!("Attempted to remove key not present in collection");
+        }
     }
 }
 impl<E: Send, K: Send, C: RemotePushable<E, K>> Component for RemotePushed<E, K, C> {
@@ -269,9 +273,11 @@ mod tests {
             let (mut rper, mut rped) = Vec::new_remote_push(&mut eq);
 
             rper.push(5);
-            let mut ec = eqp.event_consumer();
-            rped.poll(&mut ec);
-            ec.poll();
+            no_heap! {{
+                let mut ec = eqp.event_consumer();
+                rped.poll(&mut ec);
+                ec.poll();
+            }}
 
             assert_eq!(*rped, vec![5]);
         }
@@ -284,9 +290,12 @@ mod tests {
             rper.push(2);
             rper.push(7);
             rper.push(5);
-            let mut ec = eqp.event_consumer();
-            rped.poll(&mut ec);
-            ec.poll();
+
+            no_heap! {{
+                let mut ec = eqp.event_consumer();
+                rped.poll(&mut ec);
+                ec.poll();
+            }}
 
             assert_eq!(*rped, vec![2, 7, 5]);
         }
@@ -297,9 +306,12 @@ mod tests {
             let (mut rper, mut rped) = Vec::new_remote_push(&mut eq);
 
             rper.push_multiple(vec![2, 7, 5]);
-            let mut ec = eqp.event_consumer();
-            rped.poll(&mut ec);
-            ec.poll();
+
+            no_heap! {{
+                let mut ec = eqp.event_consumer();
+                rped.poll(&mut ec);
+                ec.poll();
+            }}
 
             assert_eq!(*rped, vec![2, 7, 5]);
         }
@@ -312,9 +324,12 @@ mod tests {
             rper.push_multiple(vec![2, 7, 5]);
             rper.push_multiple(vec![8, 16, 1]);
             rper.push_multiple(vec![3, 14, 4]);
-            let mut ec = eqp.event_consumer();
-            rped.poll(&mut ec);
-            ec.poll();
+
+            no_heap! {{
+                let mut ec = eqp.event_consumer();
+                rped.poll(&mut ec);
+                ec.poll();
+            }}
 
             assert_eq!(*rped, vec![2, 7, 5, 8, 16, 1, 3, 14, 4]);
         }
@@ -328,9 +343,12 @@ mod tests {
             for i in 0..5 {
                 assert_eq!(pre_cap, rped.capacity());
                 rper.push(i);
-                let mut ec = eqp.event_consumer();
-                rped.poll(&mut ec);
-                ec.poll();
+
+                no_heap! {{
+                    let mut ec = eqp.event_consumer();
+                    rped.poll(&mut ec);
+                    ec.poll();
+                }}
             }
             assert_ne!(pre_cap, rped.capacity());
             assert_eq!(*rped, vec![0, 1, 2, 3, 4]);
@@ -346,9 +364,12 @@ mod tests {
             let (mut rper, mut rped) = HashMap::new_remote_push(&mut eq);
 
             rper.push(("mop", 5));
-            let mut ec = eqp.event_consumer();
-            rped.poll(&mut ec);
-            ec.poll();
+
+            no_heap! {{
+                let mut ec = eqp.event_consumer();
+                rped.poll(&mut ec);
+                ec.poll();
+            }}
 
             assert_eq!(rped.drain().collect::<Vec<(&str, i32)>>(), vec![("mop", 5)]);
         }
@@ -361,9 +382,12 @@ mod tests {
             rper.push(("mop", 2));
             rper.push(("stop", 5));
             rper.push(("flop", 1));
-            let mut ec = eqp.event_consumer();
-            rped.poll(&mut ec);
-            ec.poll();
+
+            no_heap! {{
+                let mut ec = eqp.event_consumer();
+                rped.poll(&mut ec);
+                ec.poll();
+            }}
 
             let mut result: Vec<(&str, i32)> = rped.drain().collect();
             result.sort();
@@ -376,9 +400,12 @@ mod tests {
             let (mut rper, mut rped) = HashMap::new_remote_push(&mut eq);
 
             rper.push_multiple(vec![("mop", 2), ("stop", 5), ("flop", 1)]);
-            let mut ec = eqp.event_consumer();
-            rped.poll(&mut ec);
-            ec.poll();
+
+            no_heap! {{
+                let mut ec = eqp.event_consumer();
+                rped.poll(&mut ec);
+                ec.poll();
+            }}
 
             let mut result: Vec<(&str, i32)> = rped.drain().collect();
             result.sort();
@@ -393,9 +420,12 @@ mod tests {
             rper.push_multiple(vec![("mop", 2), ("stop", 5), ("flop", 1)]);
             rper.push_multiple(vec![("glop", 7), ("plop", 13), ("pop", 0)]);
             rper.push_multiple(vec![("blop", -1), ("slop", 8), ("tlop", 4)]);
-            let mut ec = eqp.event_consumer();
-            rped.poll(&mut ec);
-            ec.poll();
+
+            no_heap! {{
+                let mut ec = eqp.event_consumer();
+                rped.poll(&mut ec);
+                ec.poll();
+            }}
 
             let mut result: Vec<(&str, i32)> = rped.drain().collect();
             result.sort();
@@ -424,9 +454,12 @@ mod tests {
             for (k, v) in zip!("abcde".chars(), 0..5) {
                 assert_eq!(pre_cap, rped.capacity());
                 rper.push((k, v));
-                let mut ec = eqp.event_consumer();
-                rped.poll(&mut ec);
-                ec.poll();
+
+                no_heap! {{
+                    let mut ec = eqp.event_consumer();
+                    rped.poll(&mut ec);
+                    ec.poll();
+                }}
             }
             assert_ne!(pre_cap, rped.capacity());
 
@@ -436,6 +469,61 @@ mod tests {
                 result,
                 vec![('a', 0), ('b', 1), ('c', 2), ('d', 3), ('e', 4)]
             );
+        }
+
+        #[test]
+        fn remove_immediately() {
+            let (mut eq, mut eqp) = new_event_queue();
+            let (mut rper, mut rped) = HashMap::new_remote_push(&mut eq);
+
+            rper.push(("mop", 5));
+            rper.remove("mop");
+
+            no_heap! {{
+                let mut ec = eqp.event_consumer();
+                rped.poll(&mut ec);
+                ec.poll();
+            }}
+
+            assert!(rped.is_empty());
+        }
+
+        #[test]
+        fn remove_delayed() {
+            let (mut eq, mut eqp) = new_event_queue();
+            let (mut rper, mut rped) = HashMap::new_remote_push(&mut eq);
+
+            let mut poll = || {
+                no_heap! {{
+                    let mut ec = eqp.event_consumer();
+                    rped.poll(&mut ec);
+                    ec.poll();
+                }}
+            };
+
+            rper.push(("mop", 5));
+            poll();
+
+            rper.remove("mop");
+            poll();
+
+            assert!(rped.is_empty());
+        }
+
+        #[test]
+        #[should_panic]
+        fn remove_invalid() {
+            let (mut eq, mut eqp) = new_event_queue();
+            let (mut rper, mut rped) = HashMap::new_remote_push(&mut eq);
+
+            rper.push(("mop", 5));
+            rper.remove("slop");
+
+            no_heap! {{
+                let mut ec = eqp.event_consumer();
+                rped.poll(&mut ec);
+                ec.poll();
+            }}
         }
     }
 }
