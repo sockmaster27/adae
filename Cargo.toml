@@ -13,6 +13,7 @@ ringbuf = "0.2.8"
 hound = { version = "3.4.0", optional = true }
 lazy_static = { version = "1.4.0", optional = true }
 symphonia = { version = "0.5.1", features = ["mp3"]}
+num-traits = "0.2.15"
 
 [features]
 # Record output for debug purposes

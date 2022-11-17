@@ -9,6 +9,8 @@ use super::track::{track, track_from_data, Track, TrackData, TrackProcessor};
 use super::MixPoint;
 use crate::engine::dropper::DBox;
 use crate::engine::traits::{Component, Info, Source};
+use crate::engine::utils::key_generator;
+use crate::engine::utils::key_generator::KeyGenerator;
 use crate::engine::utils::remote_push::RemotePushable;
 use crate::engine::utils::remote_push::{RemotePushedHashMap, RemotePusherHashMap};
 use crate::engine::Sample;
@@ -16,10 +18,13 @@ use crate::engine::Sample;
 pub type TrackKey = u32;
 
 pub fn mixer(event_queue: &mut EventQueue, max_buffer_size: usize) -> (Mixer, MixerProcessor) {
+    let mut key_generator = KeyGenerator::new();
+
     let (track, track_processor) = track(0, max_buffer_size);
 
     let mut tracks = HashMap::new();
     tracks.insert(0, track);
+    key_generator.reserve_key(0).unwrap();
 
     let (track_processors_pusher, mut track_processors_pushed) = HashMap::remote_push(event_queue);
     track_processors_pushed.insert(0, DBox::new(track_processor));
@@ -27,10 +32,8 @@ pub fn mixer(event_queue: &mut EventQueue, max_buffer_size: usize) -> (Mixer, Mi
     (
         Mixer {
             max_buffer_size,
-
+            key_generator,
             tracks,
-            last_key: 0,
-
             track_processors: track_processors_pusher,
         },
         MixerProcessor {
@@ -42,10 +45,8 @@ pub fn mixer(event_queue: &mut EventQueue, max_buffer_size: usize) -> (Mixer, Mi
 
 pub struct Mixer {
     max_buffer_size: usize,
-
+    key_generator: KeyGenerator<TrackKey>,
     tracks: HashMap<TrackKey, Track>,
-    last_key: TrackKey,
-
     track_processors: RemotePusherHashMap<TrackKey, DBox<TrackProcessor>>,
 }
 impl Mixer {
@@ -64,16 +65,24 @@ impl Mixer {
     }
 
     pub fn add_track(&mut self) -> Result<TrackKey, TrackOverflowError> {
-        let key = self.next_key()?;
+        let key = self.key_generator.next_key()?;
         let track = track(key, self.max_buffer_size);
         self.push_track(track);
         Ok(key)
     }
     pub fn add_tracks(&mut self, count: TrackKey) -> Result<Vec<TrackKey>, TrackOverflowError> {
-        let count = count.try_into().or(Err(TrackOverflowError {}))?;
-        let keys = self.next_keys(count)?;
+        if self.key_generator.remaining_keys() < count {
+            return Err(TrackOverflowError);
+        }
+
+        let count = count.try_into().or(Err(TrackOverflowError))?;
+        let mut keys = Vec::with_capacity(count);
         let mut tracks = Vec::with_capacity(count);
-        for &key in &keys {
+        for _ in 0..count {
+            let key = self.key_generator.next_key().expect(
+                "next_key() returned error, even though it reported remaining_keys() >= count",
+            );
+            keys.push(key);
             let track = track(key, self.max_buffer_size);
             tracks.push(track);
         }
@@ -87,7 +96,8 @@ impl Mixer {
     ) -> Result<TrackKey, TrackReconstructionError> {
         let key = data.key;
 
-        if self.tracks.contains_key(&key) {
+        let result = self.key_generator.reserve_key(key);
+        if result.is_err() {
             return Err(TrackReconstructionError { key });
         }
 
@@ -123,11 +133,12 @@ impl Mixer {
     }
 
     pub fn delete_track(&mut self, key: TrackKey) -> Result<(), InvalidTrackError> {
-        let result = self.tracks.remove(&key);
-        if result.is_none() {
+        let result = self.key_generator.remove_key(key);
+        if result.is_err() {
             return Err(InvalidTrackError { key });
         }
 
+        self.tracks.remove(&key);
         self.track_processors.remove(key);
 
         Ok(())
@@ -139,44 +150,13 @@ impl Mixer {
             }
         }
         for key in &keys {
+            self.key_generator
+                .remove_key(*key)
+                .expect("At least one key exists in tracks but not in key_generator");
             self.tracks.remove(key);
         }
         self.track_processors.remove_multiple(keys);
         Ok(())
-    }
-
-    fn next_key_after(&self, last_key: TrackKey) -> Result<TrackKey, TrackOverflowError> {
-        let mut key = last_key.wrapping_add(1);
-
-        let mut i = 0;
-        while self.tracks.contains_key(&key) {
-            i += 1;
-            if i == TrackKey::MAX {
-                return Err(TrackOverflowError);
-            }
-
-            key = key.wrapping_add(1);
-        }
-
-        Ok(key)
-    }
-    fn next_key(&mut self) -> Result<TrackKey, TrackOverflowError> {
-        let key = self.next_key_after(self.last_key)?;
-        self.last_key = key;
-        Ok(key)
-    }
-    fn next_keys(&mut self, count: usize) -> Result<Vec<TrackKey>, TrackOverflowError> {
-        let mut keys = Vec::with_capacity(count);
-        let mut last_key = self.last_key;
-        for _ in 0..count {
-            let key = self.next_key_after(last_key)?;
-            keys.push(key);
-            last_key = key;
-        }
-
-        // Only commit once we know enough are available
-        self.last_key = last_key;
-        Ok(keys)
     }
 
     fn push_track(&mut self, track: (Track, TrackProcessor)) {
@@ -198,6 +178,10 @@ impl Mixer {
             })
             .collect();
         self.track_processors.push_multiple(track_processors);
+    }
+
+    pub fn remaining_keys(&self) -> u32 {
+        self.key_generator.remaining_keys()
     }
 }
 
@@ -253,6 +237,11 @@ impl Display for TrackOverflowError {
     }
 }
 impl Error for TrackOverflowError {}
+impl From<key_generator::OverflowError> for TrackOverflowError {
+    fn from(_: key_generator::OverflowError) -> Self {
+        Self
+    }
+}
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct TrackReconstructionError {

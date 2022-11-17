@@ -5,6 +5,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use crate::engine::utils::key_generator::{self, KeyGenerator};
+
 use super::audio_clip::{self, AudioClip};
 
 pub type ClipKey = u32;
@@ -12,7 +14,7 @@ pub struct AudioClipStore {
     paths: HashMap<PathBuf, ClipKey>,
     clips: HashMap<ClipKey, AudioClip>,
 
-    last_key: ClipKey,
+    key_generator: KeyGenerator<ClipKey>,
 }
 impl AudioClipStore {
     pub fn import(&mut self, path: &Path, max_buffer_size: usize) -> Result<ClipKey, ImportError> {
@@ -21,31 +23,13 @@ impl AudioClipStore {
             return Ok(key);
         }
 
-        let key = self
-            .next_key_after(self.last_key)
-            .or_else(|e| Err(ImportError::OverFlow(e)))?;
-        let clip =
-            AudioClip::import(path, max_buffer_size).or_else(|e| Err(ImportError::Other(e)))?;
+        let key = self.key_generator.next_key()?;
+
+        let clip = AudioClip::import(path, max_buffer_size)?;
 
         // Commit only if no errors occur
         self.clips.insert(key, clip);
         self.paths.insert(path.to_owned(), key);
-        self.last_key = key;
-
-        Ok(key)
-    }
-    fn next_key_after(&self, last_key: ClipKey) -> Result<ClipKey, ClipOverflowError> {
-        let mut key = last_key.wrapping_add(1);
-
-        let mut i = 0;
-        while self.clips.contains_key(&key) {
-            i += 1;
-            if i == ClipKey::MAX {
-                return Err(ClipOverflowError);
-            }
-
-            key = key.wrapping_add(1);
-        }
 
         Ok(key)
     }
@@ -60,7 +44,17 @@ impl Display for ClipOverflowError {
 }
 impl Error for ClipOverflowError {}
 
-enum ImportError {
+pub enum ImportError {
     OverFlow(ClipOverflowError),
     Other(audio_clip::ImportError),
+}
+impl From<key_generator::OverflowError> for ImportError {
+    fn from(_: key_generator::OverflowError) -> Self {
+        ImportError::OverFlow(ClipOverflowError)
+    }
+}
+impl From<audio_clip::ImportError> for ImportError {
+    fn from(e: audio_clip::ImportError) -> Self {
+        ImportError::Other(e)
+    }
 }
