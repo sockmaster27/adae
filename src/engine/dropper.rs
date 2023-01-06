@@ -10,23 +10,10 @@ use std::{
     thread::{self, JoinHandle},
 };
 
-use atomicbox::AtomicOptionBox;
-
 use super::utils::ringbuffer::{self, ringbuffer};
 
 thread_local! {
     static DROPPER: RefCell<Option<Box<Dropper>>> = RefCell::new(None);
-}
-
-static INITTED_DROPPER: AtomicOptionBox<Dropper> = AtomicOptionBox::none();
-
-/// Construct a dropper and put it in the global reserve spot,
-/// where it can be claimed by any single thread to use
-///
-/// The reserve spot is static and only has room for one dropper at a time
-pub fn init() {
-    let new = Box::new(Dropper::new());
-    INITTED_DROPPER.store(Some(new), Ordering::SeqCst);
 }
 
 /// Send a box to another thread to be dropped
@@ -37,20 +24,10 @@ pub fn send(element: Box<dyn Send>) {
     DROPPER.with(|dropper| {
         let mut dropper_option = dropper.borrow_mut();
         let inner_dropper = dropper_option.get_or_insert_with(|| {
-            let initted_dropper = INITTED_DROPPER.take(Ordering::SeqCst);
-            if let Some(initted_dropper) = initted_dropper {
-                initted_dropper
-            } else {
-                #[cfg(not(test))]
-                let d = Box::new(Dropper::new());
-
-                #[cfg(test)]
-                let d = allow_heap! {{
-                    Box::new(Dropper::new())
-                }};
-
-                d
-            }
+            // Initialized the first time it's used
+            allow_heap! {{
+                Box::new(Dropper::new())
+            }}
         });
         inner_dropper.send(Event::Drop(element));
     })
@@ -103,7 +80,6 @@ impl Dropper {
         Dropper {
             sender,
             sleep: sleep2,
-
             handle: Some(handle),
         }
     }
