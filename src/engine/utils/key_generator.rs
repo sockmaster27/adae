@@ -7,6 +7,9 @@ use std::{
 
 use num_traits::{cast, PrimInt, Unsigned, WrappingAdd};
 
+/// Construct for generating unique keys, via an incrementing counter.
+///
+/// Contains a set of all keys currently in use.
 #[derive(Debug)]
 pub struct KeyGenerator<K>
 where
@@ -26,12 +29,20 @@ where
         }
     }
 
+    /// Amount of unique keys that are left.
+    ///
+    /// This will be decremented after each call to [`Self::reserve_key()`] and [`Self::next_key()`],
+    /// which will return an [`OverflowError`] if, and only if this returns 0.
+    ///
+    /// This will correspondingly be incremented after a succesful call to [`Self::free_key()`].
     pub fn remaining_keys(&self) -> K {
         // Size of used_keys should never be able to exceed number of values of K
         let used = cast(self.used_keys.len()).unwrap();
         K::max_value() - used
     }
 
+    /// Return new unique key, registering it as occupied
+    /// until [`Self::free_key()`] is called with this key as argument.
     pub fn next_key(&mut self) -> Result<K, OverflowError> {
         if self.remaining_keys() == K::zero() {
             return Err(OverflowError);
@@ -49,7 +60,9 @@ where
         }
     }
 
-    pub fn remove_key(&mut self, key: K) -> Result<(), InvalidKeyError<K>> {
+    /// Free key, marking it as no longer occupied, being able to be used again.
+    /// Reuse of the key will, however, only happen once the counter has wrapped around.
+    pub fn free_key(&mut self, key: K) -> Result<(), InvalidKeyError<K>> {
         let succesful = self.used_keys.remove(&key);
         if succesful {
             Ok(())
@@ -58,6 +71,7 @@ where
         }
     }
 
+    /// Reserve a key, marking it as occupied.
     pub fn reserve_key(&mut self, key: K) -> Result<(), KeyCollisionError<K>> {
         let succesful = self.used_keys.insert(key);
         if succesful {
@@ -128,15 +142,15 @@ mod tests {
     }
 
     #[test]
-    fn remove_one() {
+    fn free_one() {
         let mut kg = KeyGenerator::<u32>::new();
         let k = kg.next_key().unwrap();
-        kg.remove_key(k).unwrap();
+        kg.free_key(k).unwrap();
         assert_eq!(kg.remaining_keys(), u32::MAX);
     }
 
     #[test]
-    fn remove_multiple() {
+    fn free_multiple() {
         let mut kg = KeyGenerator::<u32>::new();
 
         let mut ks = Vec::new();
@@ -145,16 +159,16 @@ mod tests {
         }
 
         for k in ks {
-            kg.remove_key(k).unwrap();
+            kg.free_key(k).unwrap();
         }
 
         assert_eq!(kg.remaining_keys(), u32::MAX);
     }
 
     #[test]
-    fn remove_invalid() {
+    fn free_invalid() {
         let mut kg = KeyGenerator::<u32>::new();
-        let r = kg.remove_key(6);
+        let r = kg.free_key(6);
         assert_eq!(r, Err(InvalidKeyError { key: 6 }));
         assert_eq!(kg.remaining_keys(), u32::MAX);
     }
@@ -177,5 +191,32 @@ mod tests {
         let k = kg.next_key().unwrap();
         let r = kg.reserve_key(k);
         assert_eq!(r, Err(KeyCollisionError { key: k }));
+    }
+
+    #[test]
+    fn free_reserve() {
+        let mut kg = KeyGenerator::<u32>::new();
+        let k = kg.next_key().unwrap();
+
+        // When freeing a key it should not be reused immediately
+        kg.free_key(k).unwrap();
+        kg.next_key().unwrap();
+        let r = kg.reserve_key(k);
+
+        assert_eq!(r, Ok(()));
+        assert_eq!(kg.remaining_keys(), u32::MAX - 2);
+    }
+
+    #[test]
+    fn overflow() {
+        let mut kg = KeyGenerator::<u8>::new();
+        for i in 1..=255 {
+            kg.next_key().unwrap();
+            assert_eq!(kg.remaining_keys(), u8::MAX - i);
+        }
+
+        let r = kg.next_key();
+        assert_eq!(r, Err(OverflowError));
+        assert_eq!(kg.remaining_keys(), 0);
     }
 }
