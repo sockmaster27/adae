@@ -1,23 +1,58 @@
-use super::TimelineClip;
+use std::sync::atomic::{AtomicBool, AtomicU64};
+use std::sync::Arc;
+
+use super::timestamp::Timestamp;
+use super::{AudioClip, TimelineClip, TimelineClipKey};
+use crate::engine::components::audio_clip::AudioClipKey;
+use crate::engine::components::event_queue::EventReceiver;
 use crate::engine::traits::{Component, Info, Source};
+use crate::engine::utils::key_generator::OverflowError;
 use crate::engine::{Sample, CHANNELS};
 use crate::zip;
 
-pub fn timeline_track(max_buffer_size: usize) -> (TimelineTrack, TimelineTrackProcessor) {
+pub type TimelineTrackKey = u32;
+
+pub fn timeline_track(
+    key: TimelineTrackKey,
+    position: Arc<AtomicU64>,
+    max_buffer_size: usize,
+) -> (TimelineTrack, TimelineTrackProcessor) {
     (
-        TimelineTrack,
+        TimelineTrack { key },
         TimelineTrackProcessor {
+            position,
+
             clips: Vec::new(),
             relevant_clip: None,
+
             output_buffer: Vec::with_capacity(max_buffer_size * CHANNELS),
         },
     )
 }
 
-pub struct TimelineTrack;
+#[derive(Debug)]
+pub struct TimelineTrack {
+    key: TimelineTrackKey,
+}
+impl TimelineTrack {
+    pub fn key(&self) -> TimelineTrackKey {
+        self.key
+    }
+
+    pub fn add_clip(
+        &mut self,
+        clip: AudioClipKey,
+        start: Timestamp,
+        length: Option<Timestamp>,
+    ) -> Result<TimelineClipKey, OverflowError> {
+        todo!()
+    }
+}
 
 #[derive(Debug)]
 pub struct TimelineTrackProcessor {
+    position: Arc<AtomicU64>,
+
     clips: Vec<TimelineClip>,
     relevant_clip: Option<usize>,
 
@@ -35,7 +70,7 @@ impl Source for TimelineTrackProcessor {
             let mut samples = 0;
             while samples < buffer_size && relevant_clip_i < self.clips.len() {
                 let relevant_clip = &mut self.clips[relevant_clip_i];
-                let output = relevant_clip.output(Info {
+                let output = relevant_clip.output(&Info {
                     sample_rate,
                     buffer_size: buffer_size - samples,
                 });

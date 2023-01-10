@@ -20,12 +20,16 @@ use symphonia::core::{
     sample::Sample as SymphoniaSample,
 };
 
-use crate::engine::traits::Info;
+use crate::engine::traits::{Component, Info, Source};
 use crate::engine::{Sample, CHANNELS};
 use crate::zip;
 
+pub type AudioClipKey = u32;
+
 #[derive(PartialEq)]
 pub struct AudioClip {
+    key: AudioClipKey,
+
     sample_rate: u32,
     position: usize,
 
@@ -35,7 +39,15 @@ pub struct AudioClip {
     output_buffer: Vec<Sample>,
 }
 impl AudioClip {
-    pub fn import(path: &Path, max_buffer_size: usize) -> Result<Self, ImportError> {
+    pub fn key(&self) -> AudioClipKey {
+        self.key
+    }
+
+    pub fn import(
+        key: AudioClipKey,
+        path: &Path,
+        max_buffer_size: usize,
+    ) -> Result<Self, ImportError> {
         // Currently the entire clip just gets loaded into memory immediately.
         // I guess that could be improved.
 
@@ -105,6 +117,8 @@ impl AudioClip {
         }
 
         Ok(Self {
+            key,
+
             sample_rate,
             position: 0,
             data,
@@ -141,32 +155,6 @@ impl AudioClip {
         }
     }
 
-    /// Outputs to a buffer of the requested size (via the info parameter).
-    /// When the end is reached, this function will simply write zeroes to the buffer.
-    pub fn output(&mut self, info: Info) -> &mut [Sample] {
-        let Info {
-            sample_rate: _,
-            buffer_size,
-        } = info;
-
-        // TODO: Resample
-
-        let remaining = self.len() - self.position;
-        let filled = min(remaining, buffer_size);
-
-        let next_position = self.position + filled;
-        let relevant_range = self.position..next_position;
-
-        let unfilled_range = filled * CHANNELS..buffer_size * CHANNELS;
-        self.position = next_position;
-
-        self.scale_channels(relevant_range);
-        for sample in &mut self.output_buffer[unfilled_range] {
-            *sample = 0.0;
-        }
-
-        &mut self.output_buffer[0..buffer_size * CHANNELS]
-    }
     /// Scales `range` of each channel to the appropriate number of channels,
     /// and loads the interlaced result to `self.output_buffer`.
     fn scale_channels(&mut self, range: Range<usize>) {
@@ -218,6 +206,35 @@ impl AudioClip {
     pub fn len(&self) -> usize {
         // This should be equal across all channels
         self.data[0].len()
+    }
+}
+impl Component for AudioClip {}
+impl Source for AudioClip {
+    /// Outputs to a buffer of the requested size (via the info parameter).
+    /// When the end is reached, this function will simply write zeroes to the buffer.
+    fn output(&mut self, info: &Info) -> &mut [Sample] {
+        let Info {
+            sample_rate: _,
+            buffer_size,
+        } = *info;
+
+        // TODO: Resample
+
+        let remaining = self.len() - self.position;
+        let filled = min(remaining, buffer_size);
+
+        let next_position = self.position + filled;
+        let relevant_range = self.position..next_position;
+
+        let unfilled_range = filled * CHANNELS..buffer_size * CHANNELS;
+        self.position = next_position;
+
+        self.scale_channels(relevant_range);
+        for sample in &mut self.output_buffer[unfilled_range] {
+            *sample = 0.0;
+        }
+
+        &mut self.output_buffer[0..buffer_size * CHANNELS]
     }
 }
 impl Debug for AudioClip {
@@ -304,53 +321,53 @@ mod tests {
 
     #[test]
     fn import_wav_44100_16_bit() {
-        let ac = AudioClip::import(&path("44100 16-bit.wav"), 10).unwrap();
+        let ac = AudioClip::import(0, &path("44100 16-bit.wav"), 10).unwrap();
         test_lossless(ac);
     }
     #[test]
     fn import_wav_44100_24_bit() {
-        let ac = AudioClip::import(&path("44100 24-bit.wav"), 10).unwrap();
+        let ac = AudioClip::import(0, &path("44100 24-bit.wav"), 10).unwrap();
         test_lossless(ac);
     }
     #[test]
     fn import_wav_44100_32_float() {
-        let ac = AudioClip::import(&path("44100 32-float.wav"), 10).unwrap();
+        let ac = AudioClip::import(0, &path("44100 32-float.wav"), 10).unwrap();
         test_lossless(ac);
     }
 
     #[test]
     fn import_flac_4410_l5_16_bit() {
-        let ac = AudioClip::import(&path("44100 L5 16-bit.flac"), 10).unwrap();
+        let ac = AudioClip::import(0, &path("44100 L5 16-bit.flac"), 10).unwrap();
         test_lossless(ac);
     }
 
     #[test]
     fn import_mp3_44100_joint_stereo() {
         let ac =
-            AudioClip::import(&path("44100 preset-standard-fast joint-stereo.mp3"), 10).unwrap();
+            AudioClip::import(0, &path("44100 preset-standard-fast joint-stereo.mp3"), 10).unwrap();
         test_lossy(ac);
     }
     #[test]
     fn import_mp3_44100_stereo() {
-        let ac = AudioClip::import(&path("44100 preset-standard-fast stereo.mp3"), 10).unwrap();
+        let ac = AudioClip::import(0, &path("44100 preset-standard-fast stereo.mp3"), 10).unwrap();
         test_lossy(ac);
     }
 
     #[test]
     fn import_ogg_44100_q5() {
-        let ac = AudioClip::import(&path("44100 Q5.ogg"), 10).unwrap();
+        let ac = AudioClip::import(0, &path("44100 Q5.ogg"), 10).unwrap();
         test_lossy(ac);
     }
 
     #[test]
     fn bad_path() {
         let path = path("lorem ipsum");
-        let result = AudioClip::import(&path, 10);
+        let result = AudioClip::import(0, &path, 10);
         assert_eq!(result, Err(ImportError::FileNotFound(path)));
     }
     #[test]
     fn unsupported_file() {
-        let result = AudioClip::import(&path("44100 Q160 [unsupported].m4a"), 10);
+        let result = AudioClip::import(0, &path("44100 Q160 [unsupported].m4a"), 10);
         assert_eq!(result, Err(ImportError::UknownFormat));
     }
 }

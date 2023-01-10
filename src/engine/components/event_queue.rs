@@ -158,6 +158,7 @@ impl EventQueueProcessor {
 }
 unsafe impl Send for EventQueueProcessor {}
 
+#[derive(Clone)]
 pub struct EventSender<E> {
     id: ComponentId,
     events: Arc<Mutex<ringbuffer::Sender<Event>>>,
@@ -194,7 +195,7 @@ impl<E> Clone for EventSenderId<E> {
 impl<E> Copy for EventSenderId<E> {}
 impl<E> Debug for EventSenderId<E> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "EventProducerId({:?})", self.id)
+        write!(f, "EventSenderId({:?})", self.id)
     }
 }
 

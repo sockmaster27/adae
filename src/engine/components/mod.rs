@@ -6,6 +6,8 @@ pub use track::{Track, TrackData};
 pub mod mixer;
 mod mixing;
 pub use mixing::MixPoint;
+pub mod audio_clip;
+pub mod audio_clip_store;
 pub mod event_queue;
 mod parameter;
 pub mod test_tone;

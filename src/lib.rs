@@ -28,4 +28,4 @@ macro_rules! allow_heap {
 mod wav_recorder;
 
 mod engine;
-pub use engine::{inverse_meter_scale, meter_scale, Engine, Track, TrackData};
+pub use engine::{inverse_meter_scale, meter_scale, Engine, Timestamp, Track, TrackData};

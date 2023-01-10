@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
@@ -5,15 +6,14 @@ use atomicbox::AtomicOptionBox;
 
 use crate::zip;
 
-use crate::engine::{Sample, CHANNELS};
-
+use super::audio_clip::AudioClip;
 use super::audio_meter::{audio_meter, AudioMeter, AudioMeterProcessor};
 use super::event_queue::EventReceiver;
 use super::mixer::TrackKey;
 use super::parameter::{f32_parameter, F32Parameter, F32ParameterProcessor};
 use super::test_tone::TestTone;
-use super::timeline::{timeline_track, TimelineTrack};
 use crate::engine::traits::{Component, Info, Source};
+use crate::engine::{Sample, CHANNELS};
 
 pub fn track(key: TrackKey, max_buffer_size: usize) -> (Track, TrackProcessor) {
     track_from_data(
@@ -22,13 +22,21 @@ pub fn track(key: TrackKey, max_buffer_size: usize) -> (Track, TrackProcessor) {
             panning: 0.0,
             volume: 1.0,
             key,
-        },  
+        },
     )
 }
 
 pub fn track_from_data(max_buffer_size: usize, data: &TrackData) -> (Track, TrackProcessor) {
     let test_tone = TestTone::new(max_buffer_size);
     let source = Box::new(test_tone);
+
+    // Test audio clip importing
+    // let test_clip = AudioClip::import(
+    //     &PathBuf::from("C:/Users/Holger/Music/Barnaby Remix.mp3"),
+    //     max_buffer_size,
+    // )
+    // .unwrap();
+    // let source = Box::new(test_clip);
 
     let (panning, panning_processor) = f32_parameter(data.panning, max_buffer_size);
     let (volume, volume_processor) = f32_parameter(data.volume, max_buffer_size);
@@ -95,12 +103,6 @@ impl Track {
     }
     pub fn set_volume(&self, value: Sample) {
         self.volume.set(value)
-    }
-
-    pub fn add_timeline(&self) -> TimelineTrack {
-        let (timeline_track, timeline_track_processor) = timeline_track(self.max_buffer_size);
-        self.set_source(Box::new(timeline_track_processor));
-        timeline_track
     }
 
     /// Returns an array of the signals current peak, long-term peak and RMS-level for each channel in the form:

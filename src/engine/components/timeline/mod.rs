@@ -1,67 +1,29 @@
-mod audio_clip;
-mod audio_clip_store;
+mod timestamp;
 mod track;
 
-pub use track::{timeline_track, TimelineTrack};
+use symphonia::core::units::TimeStamp;
 
 use std::{
-    cell::Cell,
-    ops::{Add, Sub},
-    sync::{atomic::AtomicU64, Arc},
+    collections::HashMap,
+    error::Error,
+    fmt::{Debug, Display},
+    sync::{
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        Arc,
+    },
 };
 
-use crate::engine::{traits::Info, Sample};
-use audio_clip::AudioClip;
+use super::{audio_clip::AudioClip, event_queue::EventReceiver, mixer::TrackKey};
+use crate::engine::{
+    traits::{Component, Info, Source},
+    utils::key_generator::{self, KeyGenerator},
+    Sample,
+};
+pub use timestamp::Timestamp;
+use track::timeline_track;
+pub use track::{TimelineTrack, TimelineTrackKey, TimelineTrackProcessor};
 
-const UNITS_PER_BEAT: u64 = 1024;
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-struct Timestamp {
-    /// 1 beat = 1024 beat units, making it highly divisible by powers of 2
-    beat_units: u64,
-}
-impl Timestamp {
-    /// 1 beat = 1024 beat units
-    fn from_beat_units(beat_units: u64) -> Self {
-        Self { beat_units }
-    }
-    fn from_beats(beats: u64) -> Self {
-        Self {
-            beat_units: beats * UNITS_PER_BEAT,
-        }
-    }
-    fn from_samples(samples: u128, sample_rate: u128, bpm: u128) -> Self {
-        let beat_units = (samples * bpm * UNITS_PER_BEAT as u128) / (sample_rate * 60);
-        Self {
-            beat_units: beat_units.try_into().expect("Overflow"),
-        }
-    }
-
-    fn beat_units(&self) -> u64 {
-        self.beat_units
-    }
-    fn beats(&self) -> u64 {
-        self.beat_units / UNITS_PER_BEAT
-    }
-    fn samples(&self, sample_rate: u128, bpm: u128) -> u128 {
-        (self.beat_units as u128 * sample_rate * 60) / (bpm * UNITS_PER_BEAT as u128)
-    }
-}
-impl Add for Timestamp {
-    type Output = Self;
-    fn add(self, rhs: Self) -> Self::Output {
-        Self {
-            beat_units: self.beat_units + rhs.beat_units,
-        }
-    }
-}
-impl Sub for Timestamp {
-    type Output = Self;
-    fn sub(self, rhs: Self) -> Self::Output {
-        Self {
-            beat_units: self.beat_units - rhs.beat_units,
-        }
-    }
-}
+pub type TimelineClipKey = u32;
 
 #[derive(Debug)]
 struct TimelineClip {
@@ -77,7 +39,12 @@ struct TimelineClip {
     inner: AudioClip,
 }
 impl TimelineClip {
-    fn new(start: Timestamp, audio_clip: AudioClip) -> Self {
+    fn new(
+        key: TimelineClipKey,
+        start: Timestamp,
+        length: Option<TimeStamp>,
+        audio_clip: AudioClip,
+    ) -> Self {
         Self {
             start,
             length: None,
@@ -102,64 +69,136 @@ impl TimelineClip {
         }
     }
 
-    fn output(&mut self, info: Info) -> &mut [Sample] {
+    fn output(&mut self, info: &Info) -> &mut [Sample] {
         self.inner.output(info)
     }
 }
 
-pub fn timeline() -> (Timeline, TimelineProcessor) {
-    let sync_position1 = Arc::new(AtomicU64::new(0));
-    let sync_position2 = Arc::clone(&sync_position1);
+pub fn timeline(max_buffer_size: usize) -> (Timeline, TimelineProcessor) {
+    let position_updated1 = Arc::new(AtomicBool::new(false));
+    let position_updated2 = Arc::clone(&position_updated1);
+
+    let new_position1 = Arc::new(AtomicU64::new(0));
+    let new_position2 = Arc::clone(&new_position1);
+
+    let position1 = Arc::new(AtomicU64::new(0));
+    let position2 = Arc::clone(&new_position1);
 
     (
         Timeline {
-            sync_position: sync_position1,
+            max_buffer_size,
+            key_generator: KeyGenerator::new(),
+
+            position_updated: position_updated1,
+            new_position: new_position1,
+            position: position1,
+
+            tracks: HashMap::new(),
         },
         TimelineProcessor {
-            sync_position: sync_position2,
-            position: Cell::new(0),
+            position_updated: position_updated2,
+            new_position: new_position2,
+
+            position: position2,
         },
     )
 }
 
 #[derive(Debug)]
 pub struct Timeline {
-    sync_position: Arc<AtomicU64>,
+    max_buffer_size: usize,
+    key_generator: KeyGenerator<TimelineTrackKey>,
+
+    position_updated: Arc<AtomicBool>,
+    new_position: Arc<AtomicU64>,
+    position: Arc<AtomicU64>,
+
+    tracks: HashMap<TimelineTrackKey, TimelineTrack>,
 }
+impl Timeline {
+    pub fn add_track(
+        &mut self,
+    ) -> Result<(TimelineTrackKey, TimelineTrackProcessor), TimelineTrackOverflowError> {
+        let key = self.key_generator.next_key()?;
+
+        let (timeline_track, timeline_track_processor) =
+            timeline_track(key, Arc::clone(&self.position), self.max_buffer_size);
+
+        self.tracks.insert(key, timeline_track);
+
+        Ok((key, timeline_track_processor))
+    }
+
+    pub fn jump_to(&self, position: u64) {
+        self.new_position.store(position, Ordering::SeqCst);
+        self.position_updated.store(true, Ordering::SeqCst);
+    }
+
+    pub fn remaining_keys(&self) -> u32 {
+        self.key_generator.remaining_keys()
+    }
+
+    pub fn track(
+        &self,
+        key: TimelineTrackKey,
+    ) -> Result<&TimelineTrack, InvalidTimelineTrackError> {
+        self.tracks
+            .get(&key)
+            .ok_or(InvalidTimelineTrackError { key })
+    }
+    pub fn track_mut(
+        &mut self,
+        key: TimelineTrackKey,
+    ) -> Result<&mut TimelineTrack, InvalidTimelineTrackError> {
+        self.tracks
+            .get_mut(&key)
+            .ok_or(InvalidTimelineTrackError { key })
+    }
+}
+
+#[derive(Debug)]
 pub struct TimelineProcessor {
-    sync_position: Arc<AtomicU64>,
-    position: Cell<u64>,
+    position_updated: Arc<AtomicBool>,
+    new_position: Arc<AtomicU64>,
+
+    // Only atomic to be Send
+    position: Arc<AtomicU64>,
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn timestamp_beats_to_beats() {
-        let ts = Timestamp::from_beats(8605);
-        assert_eq!(ts.beats(), 8605);
-    }
-    #[test]
-    fn timestamp_beats_to_beat_units() {
-        let ts = Timestamp::from_beats(8605);
-        assert_eq!(ts.beat_units(), 8_811_520);
-    }
-    #[test]
-    fn timestamp_beat_units_to_beats() {
-        let ts = Timestamp::from_beat_units(8_812_520);
-        assert_eq!(ts.beats(), 8605);
-    }
-    #[test]
-    fn timestamp_beat_units_to_samples() {
-        let ts = Timestamp::from_beat_units(1_024_000);
-        let result = ts.samples(40_000, 100);
-        assert_eq!(result, 24_000_000);
-    }
-    #[test]
-    fn timestamp_max_milli_beats_to_samples() {
-        let ts = Timestamp::from_beat_units(u64::MAX);
-        let result = ts.samples(40_000, 100);
-        assert_eq!(result, 432_345_564_227_567_615_976);
+impl TimelineProcessor {
+    pub fn output(&self, buffer_size: u64) {
+        self.position.fetch_add(buffer_size, Ordering::SeqCst);
     }
 }
+impl Component for TimelineProcessor {
+    fn poll<'a, 'b>(&'a mut self, _: &mut EventReceiver<'a, 'b>) {
+        if self.position_updated.load(Ordering::SeqCst) {
+            let new_pos = self.new_position.load(Ordering::SeqCst);
+            self.position.store(new_pos, Ordering::SeqCst);
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct TimelineTrackOverflowError;
+impl Display for TimelineTrackOverflowError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "The max number of tracks has been exceeded. Impressive")
+    }
+}
+impl Error for TimelineTrackOverflowError {}
+impl From<key_generator::OverflowError> for TimelineTrackOverflowError {
+    fn from(_: key_generator::OverflowError) -> Self {
+        Self
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct InvalidTimelineTrackError {
+    key: TimelineTrackKey,
+}
+impl Display for InvalidTimelineTrackError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "No track with key: {}", self.key)
+    }
+}
+impl Error for InvalidTimelineTrackError {}

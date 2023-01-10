@@ -1,6 +1,9 @@
 use core::sync::atomic::Ordering;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{BuildStreamError, Device, SampleFormat, Stream, StreamConfig};
+use std::error::Error;
+use std::fmt::Display;
+use std::path::Path;
 
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -10,9 +13,13 @@ mod components;
 mod dropper;
 mod traits;
 mod utils;
+use self::components::audio_clip::AudioClipKey;
+use self::components::audio_clip_store::ImportError;
 use self::components::mixer::{
     InvalidTrackError, TrackKey, TrackOverflowError, TrackReconstructionError,
 };
+pub use self::components::timeline::Timestamp;
+use self::components::timeline::{Timeline, TimelineTrackKey, TimelineTrackOverflowError};
 pub use components::{Track, TrackData};
 mod processor;
 use self::processor::{processor, Processor, ProcessorInterface};
@@ -100,11 +107,23 @@ impl Engine {
     ) -> Result<Stream, BuildStreamError> {
         let stream = device.build_output_stream(
             config,
-            move |data: &mut [T], _info| no_heap! {{processor.output(data)}},
+            move |data: &mut [T], _info| {
+                no_heap! {{
+                    processor.poll();
+                    processor.output(data)
+                }}
+            },
             |err| panic!("{}", err),
         )?;
 
         Ok(stream)
+    }
+
+    pub fn timeline(&self) -> &Timeline {
+        &self.processor_interface.timeline
+    }
+    pub fn timeline_mut(&mut self) -> &mut Timeline {
+        &mut self.processor_interface.timeline
     }
 
     pub fn tracks(&self) -> Vec<&Track> {
@@ -147,6 +166,32 @@ impl Engine {
     pub fn delete_tracks(&mut self, keys: Vec<TrackKey>) -> Result<(), InvalidTrackError> {
         self.processor_interface.mixer.delete_tracks(keys)
     }
+
+    pub fn import_audio_clip(&mut self, path: &Path) -> Result<AudioClipKey, ImportError> {
+        self.processor_interface.audio_clip_store.import(path)
+    }
+
+    pub fn add_audio_track(
+        &mut self,
+    ) -> Result<(TimelineTrackKey, TrackKey), AudioTrackOverflowError> {
+        if self.processor_interface.timeline.remaining_keys() == 0 {
+            return Err(AudioTrackOverflowError::TimelineTracks(
+                TimelineTrackOverflowError,
+            ));
+        }
+        if self.processor_interface.mixer.remaining_keys() == 0 {
+            return Err(AudioTrackOverflowError::Tracks(TrackOverflowError));
+        }
+
+        let (timeline_key, timeline_track_processor) =
+            self.processor_interface.timeline.add_track().unwrap();
+
+        let track_key = self.add_track().unwrap();
+        let track = self.track_mut(track_key).unwrap();
+        track.set_source(Box::new(timeline_track_processor));
+
+        Ok((timeline_key, track_key))
+    }
 }
 
 impl Drop for Engine {
@@ -173,3 +218,18 @@ pub fn meter_scale(sample: Sample) -> Sample {
 pub fn inverse_meter_scale(value: Sample) -> Sample {
     value.powi(3) * 2.0
 }
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum AudioTrackOverflowError {
+    Tracks(TrackOverflowError),
+    TimelineTracks(TimelineTrackOverflowError),
+}
+impl Display for AudioTrackOverflowError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Tracks(e) => e.fmt(f),
+            Self::TimelineTracks(e) => e.fmt(f),
+        }
+    }
+}
+impl Error for AudioTrackOverflowError {}

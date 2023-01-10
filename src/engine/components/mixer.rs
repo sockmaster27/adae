@@ -133,7 +133,7 @@ impl Mixer {
     }
 
     pub fn delete_track(&mut self, key: TrackKey) -> Result<(), InvalidTrackError> {
-        let result = self.key_generator.remove_key(key);
+        let result = self.key_generator.free_key(key);
         if result.is_err() {
             return Err(InvalidTrackError { key });
         }
@@ -151,7 +151,7 @@ impl Mixer {
         }
         for key in &keys {
             self.key_generator
-                .remove_key(*key)
+                .free_key(*key)
                 .expect("At least one key exists in tracks but not in key_generator");
             self.tracks.remove(key);
         }

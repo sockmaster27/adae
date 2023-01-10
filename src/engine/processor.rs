@@ -4,6 +4,7 @@ use cpal::StreamConfig;
 
 use super::{
     components::{
+        audio_clip_store::{audio_clip_store, AudioClipStore, AudioClipStoreProcessor},
         event_queue::{event_queue, EventQueue, EventQueueProcessor},
         mixer::{mixer, Mixer, MixerProcessor},
         timeline::{timeline, Timeline, TimelineProcessor},
@@ -25,16 +26,17 @@ pub fn processor(
     let output_channels = stream_config.channels;
     let sample_rate = stream_config.sample_rate.0;
     let (mut global_events, global_events_processor) = event_queue();
-    let (timeline, timeline_processor) = timeline();
+    let (timeline, timeline_processor) = timeline(max_buffer_size);
     let (mixer, mixer_processor) = mixer(&mut global_events, max_buffer_size);
-
-    dropper::init();
+    let (audio_clip_store, audio_clip_store_processor) =
+        audio_clip_store(&mut global_events, max_buffer_size);
 
     (
         ProcessorInterface {
             global_events,
             mixer,
             timeline,
+            audio_clip_store,
         },
         Processor {
             output_channels,
@@ -45,6 +47,7 @@ pub fn processor(
 
             mixer: mixer_processor,
             timeline: timeline_processor,
+            audio_clip_store: audio_clip_store_processor,
 
             #[cfg(feature = "record_output")]
             recorder: WavRecorder::new(
@@ -63,6 +66,7 @@ pub struct ProcessorInterface {
     pub global_events: EventQueue,
     pub mixer: Mixer,
     pub timeline: Timeline,
+    pub audio_clip_store: AudioClipStore,
 }
 
 /// Contatins all data that should persist from one buffer output to the next.
@@ -75,11 +79,19 @@ pub struct Processor {
 
     mixer: MixerProcessor,
     timeline: TimelineProcessor,
+    audio_clip_store: AudioClipStoreProcessor,
 
     #[cfg(feature = "record_output")]
     recorder: WavRecorder,
 }
 impl Processor {
+    /// Synchronize with the [`ProcessorInterface`]
+    pub fn poll(&mut self) {
+        let mut event_receiver = self.global_events.event_consumer();
+        self.mixer.poll(&mut event_receiver);
+        event_receiver.poll();
+    }
+
     /// The function called to generate each audio buffer.
     pub fn output<T: cpal::Sample>(&mut self, data: &mut [T]) {
         // In some cases the buffer size can vary from one buffer to the next.
@@ -100,10 +112,6 @@ impl Processor {
         if buffer_size > self.max_buffer_size {
             panic!("A buffer of size {} was requested, which exceeds the biggest producible size of {}.", buffer_size, self.max_buffer_size);
         }
-
-        let mut event_receiver = self.global_events.event_consumer();
-        self.mixer.poll(&mut event_receiver);
-        event_receiver.poll();
 
         let buffer = self.mixer.output(&Info::new(self.sample_rate, buffer_size));
 

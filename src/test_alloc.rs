@@ -104,7 +104,7 @@ pub trait ErrorHandler {
 pub struct PrintError;
 impl ErrorHandler for PrintError {
     fn error(msg: &str) {
-        eprintln!("{}\n{:?}", msg, Backtrace::force_capture());
+        eprintln!("{}\n{}", msg, Backtrace::force_capture());
     }
 }
 
