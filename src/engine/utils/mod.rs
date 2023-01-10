@@ -9,7 +9,7 @@ use super::{Sample, CHANNELS};
 
 /// Macro for conveniently initializing a static array of a given size, of a type that is not [`Copy`].
 ///
-/// The `initial` exoression is evaluated for each element in the array.
+/// The `initial` expression is evaluated for each element in the array.
 #[macro_export(crate)]
 macro_rules! non_copy_array {
     ($initial:expr; $size:expr) => {
@@ -24,10 +24,9 @@ macro_rules! non_copy_array {
 /// `zip!(a, b, c, d) -> (((a, b), c), d)`
 #[macro_export(crate)]
 macro_rules! zip {
-    ($first:expr, $($rest:expr),+ $(,)?) => { {
+    ($first:expr, $($rest:expr),+ $(,)?) => {{
         ($first.into_iter())$(.zip($rest.into_iter()))+
-    }
-    };
+    }};
 }
 
 /// Find smallest power of 2 that is greater than or equal to `x`
@@ -171,9 +170,9 @@ pub fn format_truncate_list<T: Debug>(max_length: usize, list: &[T]) -> String {
         format_list(list)
     } else {
         let half_length = max_length / 2;
-        let first_five = format_list(&list[..half_length]);
-        let last_five = format_list(&list[(list.len() - half_length)..]);
-        format!("{} ... {}", first_five, last_five)
+        let first = format_list(&list[..half_length]);
+        let last = format_list(&list[(list.len() - half_length)..]);
+        format!("{} ... {}", first, last)
     };
 
     format!("[{}]", truncated_iter)
