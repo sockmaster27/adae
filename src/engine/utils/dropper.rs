@@ -10,16 +10,13 @@ use std::{
     thread::{self, JoinHandle},
 };
 
-use super::utils::ringbuffer::{self, ringbuffer};
+use super::ringbuffer::{self, ringbuffer};
 
 thread_local! {
     static DROPPER: RefCell<Option<Box<Dropper>>> = RefCell::new(None);
 }
 
 /// Send a box to another thread to be dropped
-///
-/// # Panics
-/// Will panic if [`init()`] hasn't been called and project is not built as test
 pub fn send(element: Box<dyn Send>) {
     DROPPER.with(|dropper| {
         let mut dropper_option = dropper.borrow_mut();

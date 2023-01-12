@@ -1,19 +1,10 @@
-use std::path::PathBuf;
-use std::sync::atomic::Ordering;
-use std::sync::Arc;
-
-use atomicbox::AtomicOptionBox;
-
+use super::audio_meter::{audio_meter, AudioMeter, AudioMeterProcessor};
+use super::parameter::{f32_parameter, F32Parameter, F32ParameterProcessor};
+use crate::engine::traits::{Effect, Info};
+use crate::engine::{Sample, CHANNELS};
 use crate::zip;
 
-use super::audio_clip::AudioClip;
-use super::audio_meter::{audio_meter, AudioMeter, AudioMeterProcessor};
-use super::event_queue::EventReceiver;
-use super::mixer::TrackKey;
-use super::parameter::{f32_parameter, F32Parameter, F32ParameterProcessor};
-use super::test_tone::TestTone;
-use crate::engine::traits::{Component, Info, Source};
-use crate::engine::{Sample, CHANNELS};
+pub type TrackKey = u32;
 
 pub fn track(key: TrackKey, max_buffer_size: usize) -> (Track, TrackProcessor) {
     track_from_data(
@@ -27,23 +18,9 @@ pub fn track(key: TrackKey, max_buffer_size: usize) -> (Track, TrackProcessor) {
 }
 
 pub fn track_from_data(max_buffer_size: usize, data: &TrackData) -> (Track, TrackProcessor) {
-    let test_tone = TestTone::new(max_buffer_size);
-    let source = Box::new(test_tone);
-
-    // Test audio clip importing
-    // let test_clip = AudioClip::import(
-    //     &PathBuf::from("C:/Users/Holger/Music/Barnaby Remix.mp3"),
-    //     max_buffer_size,
-    // )
-    // .unwrap();
-    // let source = Box::new(test_clip);
-
     let (panning, panning_processor) = f32_parameter(data.panning, max_buffer_size);
     let (volume, volume_processor) = f32_parameter(data.volume, max_buffer_size);
     let (meter, meter_processor) = audio_meter();
-
-    let new_source1 = Arc::new(AtomicOptionBox::none());
-    let new_source2 = Arc::clone(&new_source1);
 
     (
         Track {
@@ -54,17 +31,11 @@ pub fn track_from_data(max_buffer_size: usize, data: &TrackData) -> (Track, Trac
             panning,
             volume,
             meter,
-
-            new_source: new_source1,
         },
         TrackProcessor {
-            source,
-
             panning: panning_processor,
             volume: volume_processor,
             meter: meter_processor,
-
-            new_source: new_source2,
         },
     )
 }
@@ -77,18 +48,10 @@ pub struct Track {
     panning: F32Parameter,
     volume: F32Parameter,
     meter: AudioMeter,
-
-    // Double-boxed because inner box holds a fat pointer, which can't be atomic
-    new_source: Arc<AtomicOptionBox<Box<dyn Source>>>,
 }
 impl Track {
     pub fn key(&self) -> TrackKey {
         self.key
-    }
-
-    pub fn set_source(&self, source: Box<dyn Source>) {
-        self.new_source
-            .store(Some(Box::new(source)), Ordering::SeqCst);
     }
 
     pub fn panning(&self) -> Sample {
@@ -149,13 +112,9 @@ pub struct TrackData {
 
 #[derive(Debug)]
 pub struct TrackProcessor {
-    source: Box<dyn Source>,
-
     panning: F32ParameterProcessor,
     volume: F32ParameterProcessor,
     meter: AudioMeterProcessor,
-
-    new_source: Arc<AtomicOptionBox<Box<dyn Source>>>,
 }
 impl TrackProcessor {
     fn pan(panning: f32, frame: &mut [Sample]) {
@@ -167,24 +126,12 @@ impl TrackProcessor {
         frame[1] *= right_multiplier;
     }
 }
-impl Component for TrackProcessor {
-    fn poll<'a, 'b>(&'a mut self, event_receiver: &mut EventReceiver<'a, 'b>) {
-        let source_option = self.new_source.take(Ordering::SeqCst);
-        if let Some(source_box) = source_option {
-            self.source = *source_box;
-        }
-
-        self.source.poll(event_receiver);
-    }
-}
-impl Source for TrackProcessor {
-    fn output(&mut self, info: &Info) -> &mut [Sample] {
+impl Effect for TrackProcessor {
+    fn process(&mut self, info: &Info, buffer: &mut [Sample]) {
         let Info {
             sample_rate,
             buffer_size,
         } = *info;
-
-        let buffer = self.source.output(info);
 
         let volume_buffer = self.volume.get(buffer_size);
         let panning_buffer = self.panning.get(buffer_size);
@@ -200,7 +147,6 @@ impl Source for TrackProcessor {
         }
 
         self.meter.report(&buffer, sample_rate as f32);
-        buffer
     }
 }
 

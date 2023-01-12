@@ -3,30 +3,28 @@ use std::error::Error;
 use std::fmt::Debug;
 use std::fmt::Display;
 
-use super::event_queue::EventQueue;
-use super::event_queue::EventReceiver;
+use super::track::TrackKey;
 use super::track::{track, track_from_data, Track, TrackData, TrackProcessor};
 use super::MixPoint;
-use crate::engine::dropper::DBox;
-use crate::engine::traits::{Component, Info, Source};
+use crate::engine::traits::Effect;
+use crate::engine::traits::{Info, Source};
+use crate::engine::utils::dropper::DBox;
 use crate::engine::utils::key_generator;
 use crate::engine::utils::key_generator::KeyGenerator;
 use crate::engine::utils::remote_push::RemotePushable;
 use crate::engine::utils::remote_push::{RemotePushedHashMap, RemotePusherHashMap};
 use crate::engine::Sample;
 
-pub type TrackKey = u32;
-
-pub fn mixer(event_queue: &mut EventQueue, max_buffer_size: usize) -> (Mixer, MixerProcessor) {
+pub fn mixer(max_buffer_size: usize) -> (Mixer, MixerProcessor) {
     let mut key_generator = KeyGenerator::new();
 
     let (track, track_processor) = track(0, max_buffer_size);
 
     let mut tracks = HashMap::new();
     tracks.insert(0, track);
-    key_generator.reserve_key(0).unwrap();
+    key_generator.reserve(0).unwrap();
 
-    let (track_processors_pusher, mut track_processors_pushed) = HashMap::remote_push(event_queue);
+    let (track_processors_pusher, mut track_processors_pushed) = HashMap::remote_push();
     track_processors_pushed.insert(0, DBox::new(track_processor));
 
     (
@@ -65,7 +63,7 @@ impl Mixer {
     }
 
     pub fn add_track(&mut self) -> Result<TrackKey, TrackOverflowError> {
-        let key = self.key_generator.next_key()?;
+        let key = self.key_generator.next()?;
         let track = track(key, self.max_buffer_size);
         self.push_track(track);
         Ok(key)
@@ -79,7 +77,7 @@ impl Mixer {
         let mut keys = Vec::with_capacity(count);
         let mut tracks = Vec::with_capacity(count);
         for _ in 0..count {
-            let key = self.key_generator.next_key().expect(
+            let key = self.key_generator.next().expect(
                 "next_key() returned error, even though it reported remaining_keys() >= count",
             );
             keys.push(key);
@@ -96,7 +94,7 @@ impl Mixer {
     ) -> Result<TrackKey, TrackReconstructionError> {
         let key = data.key;
 
-        let result = self.key_generator.reserve_key(key);
+        let result = self.key_generator.reserve(key);
         if result.is_err() {
             return Err(TrackReconstructionError { key });
         }
@@ -133,7 +131,7 @@ impl Mixer {
     }
 
     pub fn delete_track(&mut self, key: TrackKey) -> Result<(), InvalidTrackError> {
-        let result = self.key_generator.free_key(key);
+        let result = self.key_generator.free(key);
         if result.is_err() {
             return Err(InvalidTrackError { key });
         }
@@ -151,7 +149,7 @@ impl Mixer {
         }
         for key in &keys {
             self.key_generator
-                .free_key(*key)
+                .free(*key)
                 .expect("At least one key exists in tracks but not in key_generator");
             self.tracks.remove(key);
         }
@@ -191,24 +189,26 @@ pub struct MixerProcessor {
 }
 impl Debug for MixerProcessor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "MixerProcessor {{tracks: {:?}, ...}}", self.tracks)
-    }
-}
-impl Component for MixerProcessor {
-    fn poll<'a, 'b>(&'a mut self, event_receiver: &mut EventReceiver<'a, 'b>) {
-        self.tracks.poll(event_receiver);
+        write!(f, "MixerProcessor {{ tracks: {:?}, ... }}", self.tracks)
     }
 }
 impl Source for MixerProcessor {
+    fn poll(&mut self) {
+        self.tracks.poll();
+    }
+
     fn output(&mut self, info: &Info) -> &mut [Sample] {
         let Info {
-            sample_rate: _,
+            sample_rate,
             buffer_size,
         } = *info;
 
         self.mix_point.reset();
         for track in self.tracks.values_mut() {
-            let buffer = track.output(info);
+            // Test
+            let buffer = &mut [0f32; 10][..];
+
+            track.process(info, buffer);
             self.mix_point.add(buffer);
         }
         match self.mix_point.get() {
@@ -256,23 +256,18 @@ impl Error for TrackReconstructionError {}
 
 #[cfg(test)]
 mod tests {
-    use crate::engine::components::event_queue::event_queue;
-
     use super::*;
 
     #[test]
     fn add_track() {
-        let (mut eq, mut eqp) = event_queue();
-        let (mut m, mut mp) = mixer(&mut eq, 10);
+        let (mut m, mut mp) = mixer(10);
 
         for _ in 0..50 {
             m.add_track().unwrap();
         }
 
         no_heap! {{
-            let mut ec = eqp.event_consumer();
-            mp.poll(&mut ec);
-            ec.poll();
+            mp.poll();
         }}
 
         assert_eq!(m.tracks.len(), 51);
@@ -281,17 +276,14 @@ mod tests {
 
     #[test]
     fn add_tracks() {
-        let (mut eq, mut eqp) = event_queue();
-        let (mut m, mut mp) = mixer(&mut eq, 10);
+        let (mut m, mut mp) = mixer(10);
 
         for _ in 0..50 {
             m.add_tracks(5).unwrap();
         }
 
         no_heap! {{
-            let mut ec = eqp.event_consumer();
-            mp.poll(&mut ec);
-            ec.poll();
+            mp.poll();
         }}
 
         assert_eq!(m.tracks.len(), 50 * 5 + 1);
@@ -300,8 +292,7 @@ mod tests {
 
     #[test]
     fn reconstruct_track() {
-        let (mut eq, mut eqp) = event_queue();
-        let (mut m, mut mp) = mixer(&mut eq, 10);
+        let (mut m, mut mp) = mixer(10);
 
         for key in 1..50 + 1 {
             m.reconstruct_track(&TrackData {
@@ -313,17 +304,14 @@ mod tests {
         }
 
         no_heap! {{
-            let mut ec = eqp.event_consumer();
-            mp.poll(&mut ec);
-            ec.poll();
+            mp.poll();
         }}
 
         assert_eq!(mp.tracks.len(), 50 + 1);
     }
     #[test]
     fn reconstruct_existing_track() {
-        let (mut eq, mut eqp) = event_queue();
-        let (mut m, mut mp) = mixer(&mut eq, 10);
+        let (mut m, mut mp) = mixer(10);
 
         let result = m.reconstruct_track(&TrackData {
             panning: 0.0,
@@ -334,9 +322,7 @@ mod tests {
         });
 
         no_heap! {{
-            let mut ec = eqp.event_consumer();
-            mp.poll(&mut ec);
-            ec.poll();
+            mp.poll();
         }}
 
         assert_eq!(result, Err(TrackReconstructionError { key: 0 }));
@@ -346,8 +332,7 @@ mod tests {
 
     #[test]
     fn reconstruct_tracks() {
-        let (mut eq, mut eqp) = event_queue();
-        let (mut m, mut mp) = mixer(&mut eq, 10);
+        let (mut m, mut mp) = mixer(10);
 
         let batch_size = 5;
 
@@ -364,9 +349,7 @@ mod tests {
         }
 
         no_heap! {{
-            let mut ec = eqp.event_consumer();
-            mp.poll(&mut ec);
-            ec.poll();
+            mp.poll();
         }}
 
         assert_eq!(mp.tracks.len(), 50 * batch_size + 1);
@@ -374,16 +357,13 @@ mod tests {
 
     #[test]
     fn delete_track_immediately() {
-        let (mut eq, mut eqp) = event_queue();
-        let (mut m, mut mp) = mixer(&mut eq, 10);
+        let (mut m, mut mp) = mixer(10);
 
         let k = m.add_track().unwrap();
         m.delete_track(k).unwrap();
 
         no_heap! {{
-            let mut ec = eqp.event_consumer();
-            mp.poll(&mut ec);
-            ec.poll();
+            mp.poll();
         }}
 
         assert_eq!(m.tracks.len(), 1);
@@ -392,14 +372,11 @@ mod tests {
 
     #[test]
     fn delete_track_delayed() {
-        let (mut eq, mut eqp) = event_queue();
-        let (mut m, mut mp) = mixer(&mut eq, 10);
+        let (mut m, mut mp) = mixer(10);
 
         let mut poll = || {
             no_heap! {{
-                let mut ec = eqp.event_consumer();
-                mp.poll(&mut ec);
-                ec.poll();
+                mp.poll();
             }}
         };
 

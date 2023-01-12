@@ -5,12 +5,10 @@ use cpal::StreamConfig;
 use super::{
     components::{
         audio_clip_store::{audio_clip_store, AudioClipStore, AudioClipStoreProcessor},
-        event_queue::{event_queue, EventQueue, EventQueueProcessor},
         mixer::{mixer, Mixer, MixerProcessor},
         timeline::{timeline, Timeline, TimelineProcessor},
     },
-    dropper,
-    traits::{Component, Info, Source},
+    traits::{Info, Source},
 };
 use super::{Sample, CHANNELS};
 #[cfg(feature = "record_output")]
@@ -25,15 +23,13 @@ pub fn processor(
 ) -> (ProcessorInterface, Processor) {
     let output_channels = stream_config.channels;
     let sample_rate = stream_config.sample_rate.0;
-    let (mut global_events, global_events_processor) = event_queue();
+
     let (timeline, timeline_processor) = timeline(max_buffer_size);
-    let (mixer, mixer_processor) = mixer(&mut global_events, max_buffer_size);
-    let (audio_clip_store, audio_clip_store_processor) =
-        audio_clip_store(&mut global_events, max_buffer_size);
+    let (mixer, mixer_processor) = mixer(max_buffer_size);
+    let (audio_clip_store, audio_clip_store_processor) = audio_clip_store(max_buffer_size);
 
     (
         ProcessorInterface {
-            global_events,
             mixer,
             timeline,
             audio_clip_store,
@@ -42,8 +38,6 @@ pub fn processor(
             output_channels,
             sample_rate,
             max_buffer_size,
-
-            global_events: global_events_processor,
 
             mixer: mixer_processor,
             timeline: timeline_processor,
@@ -63,7 +57,6 @@ pub fn processor(
 /// The interface to the processor, living outside of the audio thread.
 /// Should somehwat mirror the [`Processor`].
 pub struct ProcessorInterface {
-    pub global_events: EventQueue,
     pub mixer: Mixer,
     pub timeline: Timeline,
     pub audio_clip_store: AudioClipStore,
@@ -75,8 +68,6 @@ pub struct Processor {
     sample_rate: u32,
     max_buffer_size: usize,
 
-    global_events: EventQueueProcessor,
-
     mixer: MixerProcessor,
     timeline: TimelineProcessor,
     audio_clip_store: AudioClipStoreProcessor,
@@ -87,9 +78,7 @@ pub struct Processor {
 impl Processor {
     /// Synchronize with the [`ProcessorInterface`]
     pub fn poll(&mut self) {
-        let mut event_receiver = self.global_events.event_consumer();
-        self.mixer.poll(&mut event_receiver);
-        event_receiver.poll();
+        self.mixer.poll();
     }
 
     /// The function called to generate each audio buffer.

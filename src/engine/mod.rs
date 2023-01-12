@@ -10,16 +10,14 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
 mod components;
-mod dropper;
 mod traits;
 mod utils;
 use self::components::audio_clip::AudioClipKey;
 use self::components::audio_clip_store::ImportError;
-use self::components::mixer::{
-    InvalidTrackError, TrackKey, TrackOverflowError, TrackReconstructionError,
-};
+use self::components::mixer::{InvalidTrackError, TrackOverflowError, TrackReconstructionError};
 pub use self::components::timeline::Timestamp;
 use self::components::timeline::{Timeline, TimelineTrackKey, TimelineTrackOverflowError};
+use self::components::TrackKey;
 pub use components::{Track, TrackData};
 mod processor;
 use self::processor::{processor, Processor, ProcessorInterface};
@@ -183,12 +181,12 @@ impl Engine {
             return Err(AudioTrackOverflowError::Tracks(TrackOverflowError));
         }
 
-        let (timeline_key, timeline_track_processor) =
-            self.processor_interface.timeline.add_track().unwrap();
-
         let track_key = self.add_track().unwrap();
-        let track = self.track_mut(track_key).unwrap();
-        track.set_source(Box::new(timeline_track_processor));
+        let timeline_key = self
+            .processor_interface
+            .timeline
+            .add_track(track_key)
+            .unwrap();
 
         Ok((timeline_key, track_key))
     }

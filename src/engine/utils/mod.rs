@@ -1,3 +1,4 @@
+pub mod dropper;
 pub mod key_generator;
 pub mod remote_push;
 pub mod ringbuffer;

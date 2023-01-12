@@ -5,22 +5,15 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::engine::{
-    components::event_queue::{EventQueue, EventReceiver},
-    traits::Component,
-    utils::{
-        key_generator::{self, KeyGenerator},
-        remote_push::{RemotePushable, RemotePushedHashMap, RemotePusherHashMap},
-    },
+use crate::engine::utils::{
+    key_generator::{self, KeyGenerator},
+    remote_push::{RemotePushable, RemotePushedHashMap, RemotePusherHashMap},
 };
 
 use super::audio_clip::{self, AudioClip, AudioClipKey};
 
-pub fn audio_clip_store(
-    event_queue: &mut EventQueue,
-    max_buffer_size: usize,
-) -> (AudioClipStore, AudioClipStoreProcessor) {
-    let (clips_pusher, clips_pushed) = HashMap::remote_push(event_queue);
+pub fn audio_clip_store(max_buffer_size: usize) -> (AudioClipStore, AudioClipStoreProcessor) {
+    let (clips_pusher, clips_pushed) = HashMap::remote_push();
 
     (
         AudioClipStore {
@@ -52,7 +45,7 @@ impl AudioClipStore {
             return Ok(key);
         }
 
-        let key = self.key_generator.next_key()?;
+        let key = self.key_generator.next()?;
 
         let clip = AudioClip::import(key, path, self.max_buffer_size)?;
 
@@ -68,9 +61,9 @@ impl AudioClipStore {
 pub struct AudioClipStoreProcessor {
     clips: RemotePushedHashMap<AudioClipKey, AudioClip>,
 }
-impl Component for AudioClipStoreProcessor {
-    fn poll<'a, 'b>(&'a mut self, event_receiver: &mut EventReceiver<'a, 'b>) {
-        self.clips.poll(event_receiver);
+impl AudioClipStoreProcessor {
+    pub fn poll(&mut self) {
+        self.clips.poll();
     }
 }
 

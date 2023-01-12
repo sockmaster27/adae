@@ -1,12 +1,17 @@
 ///! Ringbuffer based channel, reallocated by the sender
 use ringbuf::RingBuffer;
 
-use super::smallest_pow2;
+use super::{dropper::DBox, smallest_pow2};
 
 pub fn ringbuffer_with_capacity<T: Send>(capacity: usize) -> (Sender<T>, Receiver<T>) {
     // There will be allocated enough room for capacity elements, plus one more slot for the reallocation
     let (producer, consumer) = RingBuffer::new(capacity + 1).split();
-    (Sender { inner: producer }, Receiver { inner: consumer })
+    (
+        Sender { inner: producer },
+        Receiver {
+            inner: DBox::new(consumer),
+        },
+    )
 }
 
 pub fn ringbuffer<T: Send>() -> (Sender<T>, Receiver<T>) {
@@ -35,7 +40,7 @@ where
         if self.inner.remaining() == 1 {
             let new_capacity = smallest_pow2((self.inner.capacity() + 1) as f64);
             let (producer, consumer) = RingBuffer::new(new_capacity).split();
-            let result = self.inner.push(Event::Reallocated(consumer));
+            let result = self.inner.push(Event::Reallocated(Box::new(consumer)));
             self.inner = producer;
 
             #[cfg(debug_assertions)]
@@ -46,8 +51,8 @@ where
     }
 }
 
-pub struct Receiver<T: Send> {
-    inner: ringbuf::Consumer<Event<T>>,
+pub struct Receiver<T: 'static + Send> {
+    inner: DBox<ringbuf::Consumer<Event<T>>>,
 }
 impl<T> Receiver<T>
 where
@@ -60,7 +65,7 @@ where
                 Some(event) => match event {
                     Event::Element(e) => return Some(e),
                     Event::Reallocated(new) => {
-                        self.inner = new;
+                        self.inner = DBox::from(new);
                     }
                 },
             }
@@ -87,7 +92,7 @@ where
     }
 }
 
-pub struct Iter<'a, T: Send> {
+pub struct Iter<'a, T: 'static + Send> {
     inner: &'a mut Receiver<T>,
 }
 impl<'a, T> Iterator for Iter<'a, T>
@@ -101,7 +106,7 @@ where
     }
 }
 
-pub struct BoundIter<'a, T: Send> {
+pub struct BoundIter<'a, T: 'static + Send> {
     inner: &'a mut Receiver<T>,
     count: usize,
 }
@@ -122,7 +127,7 @@ where
 
 enum Event<T> {
     Element(T),
-    Reallocated(ringbuf::Consumer<Event<T>>),
+    Reallocated(Box<ringbuf::Consumer<Event<T>>>),
 }
 
 #[cfg(test)]

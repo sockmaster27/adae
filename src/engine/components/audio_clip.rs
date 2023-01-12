@@ -20,7 +20,7 @@ use symphonia::core::{
     sample::Sample as SymphoniaSample,
 };
 
-use crate::engine::traits::{Component, Info, Source};
+use crate::engine::traits::{Info, Source};
 use crate::engine::{Sample, CHANNELS};
 use crate::zip;
 
@@ -208,7 +208,6 @@ impl AudioClip {
         self.data[0].len()
     }
 }
-impl Component for AudioClip {}
 impl Source for AudioClip {
     /// Outputs to a buffer of the requested size (via the info parameter).
     /// When the end is reached, this function will simply write zeroes to the buffer.
