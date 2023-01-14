@@ -40,9 +40,8 @@ pub fn smallest_pow2(x: f64) -> usize {
 /// Should only be used for testing.
 ///
 /// For example:
-/// ```
-/// test_file_path("44100 16-bit.wav")
-/// ```
+///
+/// `test_file_path("44100 16-bit.wav")`
 pub fn test_file_path(file_name: &str) -> PathBuf {
     PathBuf::from(format!(
         "{}{}",

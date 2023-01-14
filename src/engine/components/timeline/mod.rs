@@ -155,6 +155,10 @@ impl Timeline {
         Ok(key)
     }
 
+    pub fn key_in_use(&self, key: TimelineTrackKey) -> bool {
+        self.key_generator.in_use(key)
+    }
+
     pub fn jump_to(&self, position: u64) {
         self.new_position.store(position, Ordering::SeqCst);
         self.position_updated.store(true, Ordering::SeqCst);
@@ -174,7 +178,7 @@ impl Timeline {
         if !self.clip_store.key_in_use(clip_key) {
             return Err(AddClipError::InvalidClip(clip_key));
         }
-        if !self.key_generator.in_use(track_key) {
+        if !self.key_in_use(track_key) {
             return Err(AddClipError::InvalidTimelineTrack(track_key));
         }
 
@@ -203,11 +207,6 @@ pub struct TimelineProcessor {
     event_receiver: ringbuffer::Receiver<Event>,
 }
 impl TimelineProcessor {
-    pub fn output(&self, buffer_size: u64) {
-        self.position.fetch_add(buffer_size, Ordering::SeqCst);
-    }
-}
-impl TimelineProcessor {
     pub fn poll(&mut self) {
         if self.position_updated.load(Ordering::SeqCst) {
             let new_pos = self.new_position.load(Ordering::SeqCst);
@@ -233,6 +232,10 @@ impl TimelineProcessor {
                 },
             }
         }
+    }
+
+    pub fn output(&self, buffer_size: u64) {
+        self.position.fetch_add(buffer_size, Ordering::SeqCst);
     }
 
     fn add_clip(
