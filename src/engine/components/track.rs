@@ -24,8 +24,6 @@ pub fn track_from_data(max_buffer_size: usize, data: &TrackData) -> (Track, Trac
 
     (
         Track {
-            max_buffer_size,
-
             key: data.key,
 
             panning,
@@ -41,8 +39,6 @@ pub fn track_from_data(max_buffer_size: usize, data: &TrackData) -> (Track, Trac
 }
 
 pub struct Track {
-    max_buffer_size: usize,
-
     key: TrackKey,
 
     panning: F32Parameter,

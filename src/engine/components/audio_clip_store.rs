@@ -3,6 +3,7 @@ use std::{
     error::Error,
     fmt::Display,
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 use crate::engine::utils::{
@@ -10,7 +11,7 @@ use crate::engine::utils::{
     remote_push::{RemotePushable, RemotePushedHashMap, RemotePusherHashMap},
 };
 
-use super::audio_clip::{self, AudioClip, AudioClipKey};
+use super::audio_clip::{self, AudioClip, AudioClipKey, AudioClipReader, EmptyAudioClipReader};
 
 pub fn audio_clip_store(max_buffer_size: usize) -> (AudioClipStore, AudioClipStoreProcessor) {
     let (clips_pusher, clips_pushed) = HashMap::remote_push();
@@ -34,7 +35,7 @@ pub struct AudioClipStore {
     max_buffer_size: usize,
 
     paths: HashMap<PathBuf, AudioClipKey>,
-    clips: RemotePusherHashMap<AudioClipKey, AudioClip>,
+    clips: RemotePusherHashMap<AudioClipKey, Arc<AudioClip>>,
 
     key_generator: KeyGenerator<AudioClipKey>,
 }
@@ -50,20 +51,33 @@ impl AudioClipStore {
         let clip = AudioClip::import(key, path, self.max_buffer_size)?;
 
         // Commit only if no errors occur
-        self.clips.push((key, clip));
+        self.clips.push((key, Arc::new(clip)));
         self.paths.insert(path.to_owned(), key);
 
         Ok(key)
+    }
+
+    pub fn key_in_use(&self, key: AudioClipKey) -> bool {
+        self.key_generator.in_use(key)
     }
 }
 
 #[derive(Debug)]
 pub struct AudioClipStoreProcessor {
-    clips: RemotePushedHashMap<AudioClipKey, AudioClip>,
+    clips: RemotePushedHashMap<AudioClipKey, Arc<AudioClip>>,
 }
 impl AudioClipStoreProcessor {
     pub fn poll(&mut self) {
         self.clips.poll();
+    }
+
+    pub fn fill(
+        &self,
+        empty_reader: EmptyAudioClipReader,
+        clip_key: AudioClipKey,
+    ) -> Option<AudioClipReader> {
+        let clip = self.clips.get(&clip_key)?;
+        Some(empty_reader.fill(Arc::clone(clip)))
     }
 }
 

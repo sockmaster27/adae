@@ -49,7 +49,7 @@ impl Engine {
         let config = StreamConfig::from(supported_config);
 
         // Since buffer sizes can vary from output to output,
-        // `max_buffer_size` denotes how much space each intermediate buffer should be initialized with.
+        // `max_buffer_size` denotes how much space each intermediate buffer should be initialized with (per channel).
         let max_buffer_size = match config.buffer_size {
             // If usize is smaller than our buffersize we have bigger problems
             cpal::BufferSize::Fixed(size) => size.try_into().expect("Buffer size overflows usize"),
@@ -163,10 +163,6 @@ impl Engine {
     }
     pub fn delete_tracks(&mut self, keys: Vec<TrackKey>) -> Result<(), InvalidTrackError> {
         self.processor_interface.mixer.delete_tracks(keys)
-    }
-
-    pub fn import_audio_clip(&mut self, path: &Path) -> Result<AudioClipKey, ImportError> {
-        self.processor_interface.audio_clip_store.import(path)
     }
 
     pub fn add_audio_track(

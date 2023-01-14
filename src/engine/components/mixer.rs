@@ -199,7 +199,7 @@ impl Source for MixerProcessor {
 
     fn output(&mut self, info: &Info) -> &mut [Sample] {
         let Info {
-            sample_rate,
+            sample_rate: _,
             buffer_size,
         } = *info;
 

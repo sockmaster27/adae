@@ -6,6 +6,7 @@ use std::{
     fs::File,
     ops::Range,
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 use symphonia::core::{
@@ -26,17 +27,122 @@ use crate::zip;
 
 pub type AudioClipKey = u32;
 
+pub struct EmptyAudioClipReader {
+    output_buffer: Vec<Sample>,
+}
+impl EmptyAudioClipReader {
+    pub fn new(max_buffer_size: usize) -> Self {
+        EmptyAudioClipReader {
+            output_buffer: vec![0.0; max_buffer_size * CHANNELS],
+        }
+    }
+
+    pub fn fill(self, clip: Arc<AudioClip>) -> AudioClipReader {
+        AudioClipReader {
+            inner: clip,
+            position: 0,
+            output_buffer: self.output_buffer,
+        }
+    }
+}
+
+pub struct AudioClipReader {
+    inner: Arc<AudioClip>,
+    position: usize,
+    output_buffer: Vec<Sample>,
+}
+impl AudioClipReader {
+    /// Scales `range` of each channel to the appropriate number of channels,
+    /// and loads the interlaced result to `self.output_buffer`.
+    fn scale_channels(&mut self, range: Range<usize>) {
+        match self.inner.channels() {
+            1 => {
+                let relevant = &self.inner.data[0][range];
+                for (&sample, output_frame) in
+                    zip!(relevant, self.output_buffer.chunks_mut(CHANNELS))
+                {
+                    for output_sample in output_frame {
+                        *output_sample = sample;
+                    }
+                }
+            }
+            2 => {
+                let relevant_left = &self.inner.data[0][range.clone()];
+                let relevant_right = &self.inner.data[1][range];
+                for ((&left_sample, &right_sample), output_frame) in zip!(
+                    relevant_left,
+                    relevant_right,
+                    self.output_buffer.chunks_mut(CHANNELS)
+                ) {
+                    output_frame[0] = left_sample;
+                    output_frame[1] = right_sample;
+                }
+            }
+            _ => {
+                // This should have been caught while importing
+                panic!("Clip has incompatible number of channels");
+            }
+        }
+    }
+
+    pub fn jump(&mut self, position: usize) -> Result<(), JumpOutOfBounds> {
+        if position >= self.len() {
+            Err(JumpOutOfBounds)
+        } else {
+            self.position = position;
+            Ok(())
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+}
+impl Source for AudioClipReader {
+    /// Outputs to a buffer of the requested size (via the info parameter).
+    /// When the end is reached, this function will simply write zeroes to the buffer.
+    fn output(&mut self, info: &Info) -> &mut [Sample] {
+        let Info {
+            sample_rate: _,
+            buffer_size,
+        } = *info;
+
+        // TODO: Resample
+
+        let remaining = self.inner.len() - self.position;
+        let filled = min(remaining, buffer_size);
+
+        let next_position = self.position + filled;
+        let relevant_range = self.position..next_position;
+
+        let unfilled_range = filled * CHANNELS..buffer_size * CHANNELS;
+        self.position = next_position;
+
+        self.scale_channels(relevant_range);
+        for sample in &mut self.output_buffer[unfilled_range] {
+            *sample = 0.0;
+        }
+
+        &mut self.output_buffer[0..buffer_size * CHANNELS]
+    }
+}
+impl Debug for AudioClipReader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "AudioClipReader {{ inner: {:?}, position(): {}, ... }}",
+            self.inner, self.position,
+        )
+    }
+}
+
 #[derive(PartialEq)]
 pub struct AudioClip {
     key: AudioClipKey,
-
     sample_rate: u32,
-    position: usize,
 
     /// List of channel buffers
     data: Vec<Vec<Sample>>,
-
-    output_buffer: Vec<Sample>,
 }
 impl AudioClip {
     pub fn key(&self) -> AudioClipKey {
@@ -118,12 +224,8 @@ impl AudioClip {
 
         Ok(Self {
             key,
-
             sample_rate,
-            position: 0,
             data,
-
-            output_buffer: vec![0.0; max_buffer_size * CHANNELS],
         })
     }
     fn extend_from_buffer(data: &mut Vec<Vec<Sample>>, buffer_ref: AudioBufferRef) {
@@ -155,48 +257,6 @@ impl AudioClip {
         }
     }
 
-    /// Scales `range` of each channel to the appropriate number of channels,
-    /// and loads the interlaced result to `self.output_buffer`.
-    fn scale_channels(&mut self, range: Range<usize>) {
-        match self.channels() {
-            1 => {
-                let relevant = &self.data[0][range];
-                for (&sample, output_frame) in
-                    zip!(relevant, self.output_buffer.chunks_mut(CHANNELS))
-                {
-                    for output_sample in output_frame {
-                        *output_sample = sample;
-                    }
-                }
-            }
-            2 => {
-                let relevant_left = &self.data[0][range.clone()];
-                let relevant_right = &self.data[1][range];
-                for ((&left_sample, &right_sample), output_frame) in zip!(
-                    relevant_left,
-                    relevant_right,
-                    self.output_buffer.chunks_mut(CHANNELS)
-                ) {
-                    output_frame[0] = left_sample;
-                    output_frame[1] = right_sample;
-                }
-            }
-            _ => {
-                // This should have been caught while importing
-                panic!("Clip has incompatible number of channels");
-            }
-        }
-    }
-
-    pub fn jump(&mut self, position: usize) -> Result<(), JumpOutOfBounds> {
-        if position >= self.len() {
-            Err(JumpOutOfBounds)
-        } else {
-            self.position = position;
-            Ok(())
-        }
-    }
-
     // Number of channels
     pub fn channels(&self) -> usize {
         self.data.len()
@@ -208,45 +268,15 @@ impl AudioClip {
         self.data[0].len()
     }
 }
-impl Source for AudioClip {
-    /// Outputs to a buffer of the requested size (via the info parameter).
-    /// When the end is reached, this function will simply write zeroes to the buffer.
-    fn output(&mut self, info: &Info) -> &mut [Sample] {
-        let Info {
-            sample_rate: _,
-            buffer_size,
-        } = *info;
-
-        // TODO: Resample
-
-        let remaining = self.len() - self.position;
-        let filled = min(remaining, buffer_size);
-
-        let next_position = self.position + filled;
-        let relevant_range = self.position..next_position;
-
-        let unfilled_range = filled * CHANNELS..buffer_size * CHANNELS;
-        self.position = next_position;
-
-        self.scale_channels(relevant_range);
-        for sample in &mut self.output_buffer[unfilled_range] {
-            *sample = 0.0;
-        }
-
-        &mut self.output_buffer[0..buffer_size * CHANNELS]
-    }
-}
 impl Debug for AudioClip {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_fmt(format_args!(
-            "AudioClip {{ sample_rate: {}, position: {}, channels(): {}, len(): {} }}",
+        write!(
+            f,
+            "AudioClip {{ sample_rate: {}, ..., channels(): {}, len(): {} }}",
             self.sample_rate,
-            self.position,
             self.channels(),
             self.len(),
-        ))?;
-
-        Ok(())
+        )
     }
 }
 
@@ -260,8 +290,11 @@ pub enum ImportError {
 impl Display for ImportError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let msg = match self {
-            Self::FileNotFound(path) => {
-                format!("File could not be found: {}", path.to_string_lossy())
+            Self::FileNotFound(test_file_path) => {
+                format!(
+                    "File could not be found: {}",
+                    test_file_path.to_string_lossy()
+                )
             }
             Self::UknownFormat => "File format not supported".to_owned(),
             Self::TooManyChannels => {
@@ -287,15 +320,9 @@ impl Error for JumpOutOfBounds {}
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::engine::utils::test_file_path;
 
-    fn path(file_name: &str) -> PathBuf {
-        PathBuf::from(format!(
-            "{}{}",
-            concat!(env!("CARGO_MANIFEST_DIR"), "/test_files/"),
-            file_name,
-        ))
-    }
+    use super::*;
 
     fn test_lossless(ac: AudioClip) {
         assert_eq!(ac.channels(), 2);
@@ -320,53 +347,62 @@ mod tests {
 
     #[test]
     fn import_wav_44100_16_bit() {
-        let ac = AudioClip::import(0, &path("44100 16-bit.wav"), 10).unwrap();
+        let ac = AudioClip::import(0, &test_file_path("44100 16-bit.wav"), 10).unwrap();
         test_lossless(ac);
     }
     #[test]
     fn import_wav_44100_24_bit() {
-        let ac = AudioClip::import(0, &path("44100 24-bit.wav"), 10).unwrap();
+        let ac = AudioClip::import(0, &test_file_path("44100 24-bit.wav"), 10).unwrap();
         test_lossless(ac);
     }
     #[test]
     fn import_wav_44100_32_float() {
-        let ac = AudioClip::import(0, &path("44100 32-float.wav"), 10).unwrap();
+        let ac = AudioClip::import(0, &test_file_path("44100 32-float.wav"), 10).unwrap();
         test_lossless(ac);
     }
 
     #[test]
     fn import_flac_4410_l5_16_bit() {
-        let ac = AudioClip::import(0, &path("44100 L5 16-bit.flac"), 10).unwrap();
+        let ac = AudioClip::import(0, &test_file_path("44100 L5 16-bit.flac"), 10).unwrap();
         test_lossless(ac);
     }
 
     #[test]
     fn import_mp3_44100_joint_stereo() {
-        let ac =
-            AudioClip::import(0, &path("44100 preset-standard-fast joint-stereo.mp3"), 10).unwrap();
+        let ac = AudioClip::import(
+            0,
+            &test_file_path("44100 preset-standard-fast joint-stereo.mp3"),
+            10,
+        )
+        .unwrap();
         test_lossy(ac);
     }
     #[test]
     fn import_mp3_44100_stereo() {
-        let ac = AudioClip::import(0, &path("44100 preset-standard-fast stereo.mp3"), 10).unwrap();
+        let ac = AudioClip::import(
+            0,
+            &test_file_path("44100 preset-standard-fast stereo.mp3"),
+            10,
+        )
+        .unwrap();
         test_lossy(ac);
     }
 
     #[test]
     fn import_ogg_44100_q5() {
-        let ac = AudioClip::import(0, &path("44100 Q5.ogg"), 10).unwrap();
+        let ac = AudioClip::import(0, &test_file_path("44100 Q5.ogg"), 10).unwrap();
         test_lossy(ac);
     }
 
     #[test]
-    fn bad_path() {
-        let path = path("lorem ipsum");
-        let result = AudioClip::import(0, &path, 10);
-        assert_eq!(result, Err(ImportError::FileNotFound(path)));
+    fn bad_test_file_path() {
+        let test_file_path = test_file_path("lorem ipsum");
+        let result = AudioClip::import(0, &test_file_path, 10);
+        assert_eq!(result, Err(ImportError::FileNotFound(test_file_path)));
     }
     #[test]
     fn unsupported_file() {
-        let result = AudioClip::import(0, &path("44100 Q160 [unsupported].m4a"), 10);
+        let result = AudioClip::import(0, &test_file_path("44100 Q160 [unsupported].m4a"), 10);
         assert_eq!(result, Err(ImportError::UknownFormat));
     }
 }

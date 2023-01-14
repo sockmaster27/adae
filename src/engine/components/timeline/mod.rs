@@ -1,12 +1,11 @@
 mod timestamp;
 mod track;
 
-use symphonia::core::units::TimeStamp;
-
 use std::{
     collections::HashMap,
     error::Error,
     fmt::{Debug, Display},
+    path::Path,
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
         Arc,
@@ -14,7 +13,8 @@ use std::{
 };
 
 use super::{
-    audio_clip::{AudioClip, AudioClipKey},
+    audio_clip::{AudioClipKey, AudioClipReader, EmptyAudioClipReader},
+    audio_clip_store::{audio_clip_store, AudioClipStore, AudioClipStoreProcessor, ImportError},
     track::TrackKey,
 };
 use crate::engine::{
@@ -40,10 +40,10 @@ struct TimelineClip {
     /// Relevant if the start has been trimmed off.
     start_offset: u64,
 
-    inner: AudioClip,
+    inner: AudioClipReader,
 }
 impl TimelineClip {
-    fn new(start: Timestamp, length: Option<TimeStamp>, audio_clip: AudioClip) -> Self {
+    fn new(start: Timestamp, length: Option<Timestamp>, audio_clip: AudioClipReader) -> Self {
         Self {
             start,
             length: None,
@@ -83,6 +83,7 @@ pub fn timeline(max_buffer_size: usize) -> (Timeline, TimelineProcessor) {
     let position1 = Arc::new(AtomicU64::new(0));
     let position2 = Arc::clone(&new_position1);
 
+    let (clip_store, clip_store_processor) = audio_clip_store(max_buffer_size);
     let (tracks_pusher, tracks_pushed) = HashMap::remote_push();
 
     let (event_sender, event_receiver) = ringbuffer();
@@ -96,6 +97,7 @@ pub fn timeline(max_buffer_size: usize) -> (Timeline, TimelineProcessor) {
             new_position: new_position1,
             position: position1,
 
+            clip_store,
             tracks: tracks_pusher,
 
             event_sender,
@@ -105,6 +107,7 @@ pub fn timeline(max_buffer_size: usize) -> (Timeline, TimelineProcessor) {
             new_position: new_position2,
             position: position2,
 
+            clip_store: clip_store_processor,
             tracks: tracks_pushed,
 
             event_receiver,
@@ -116,6 +119,7 @@ enum Event {
     AddClip {
         track_key: TimelineTrackKey,
         clip_key: AudioClipKey,
+        clip_reader: EmptyAudioClipReader,
         start: Timestamp,
         length: Option<Timestamp>,
     },
@@ -129,11 +133,16 @@ pub struct Timeline {
     new_position: Arc<AtomicU64>,
     position: Arc<AtomicU64>,
 
+    clip_store: AudioClipStore,
     tracks: RemotePusherHashMap<TimelineTrackKey, TimelineTrack>,
 
     event_sender: ringbuffer::Sender<Event>,
 }
 impl Timeline {
+    pub fn import_audio_clip(&mut self, path: &Path) -> Result<AudioClipKey, ImportError> {
+        self.clip_store.import(path)
+    }
+
     pub fn add_track(
         &mut self,
         output: TrackKey,
@@ -162,7 +171,9 @@ impl Timeline {
         start: Timestamp,
         length: Option<Timestamp>,
     ) -> Result<(), AddClipError> {
-        // TODO: Check whether clip exists
+        if !self.clip_store.key_in_use(clip_key) {
+            return Err(AddClipError::InvalidClip(clip_key));
+        }
         if !self.key_generator.in_use(track_key) {
             return Err(AddClipError::InvalidTimelineTrack(track_key));
         }
@@ -170,6 +181,7 @@ impl Timeline {
         self.event_sender.send(Event::AddClip {
             track_key,
             clip_key,
+            clip_reader: EmptyAudioClipReader::new(self.max_buffer_size),
             start,
             length,
         });
@@ -185,6 +197,7 @@ pub struct TimelineProcessor {
     // Only atomic to be Send
     position: Arc<AtomicU64>,
 
+    clip_store: AudioClipStoreProcessor,
     tracks: RemotePushedHashMap<TimelineTrackKey, TimelineTrack>,
 
     event_receiver: ringbuffer::Receiver<Event>,
@@ -201,7 +214,47 @@ impl TimelineProcessor {
             self.position.store(new_pos, Ordering::SeqCst);
         }
 
+        self.clip_store.poll();
         self.tracks.poll();
+
+        for _ in 0..256 {
+            let event_option = self.event_receiver.recv();
+            match event_option {
+                None => break,
+
+                Some(event) => match event {
+                    Event::AddClip {
+                        track_key,
+                        clip_key,
+                        clip_reader,
+                        start,
+                        length,
+                    } => self.add_clip(track_key, clip_key, clip_reader, start, length),
+                },
+            }
+        }
+    }
+
+    fn add_clip(
+        &mut self,
+        track_key: TimelineTrackKey,
+        clip_key: AudioClipKey,
+        clip_reader: EmptyAudioClipReader,
+        start: Timestamp,
+        length: Option<Timestamp>,
+    ) {
+        let track = self
+            .tracks
+            .get_mut(&track_key)
+            .expect("Track doesn't exist");
+        let audio_clip = self
+            .clip_store
+            .fill(clip_reader, clip_key)
+            .expect("Clip doesn't exist");
+
+        let timeline_clip = TimelineClip::new(start, length, audio_clip);
+
+        track.insert_clip(timeline_clip);
     }
 }
 
@@ -247,6 +300,7 @@ impl Error for AddClipError {}
 
 #[cfg(test)]
 mod tests {
+    use crate::engine::utils::test_file_path;
 
     use super::*;
 
@@ -271,8 +325,11 @@ mod tests {
     fn add_clip() {
         let (mut tl, mut tlp) = timeline(10);
 
+        let ck = tl
+            .import_audio_clip(&test_file_path("44100 16-bit.wav"))
+            .unwrap();
         let tk = tl.add_track(0).unwrap();
-        tl.add_clip(tk, 0, Timestamp::from_beat_units(0), None)
+        tl.add_clip(tk, ck, Timestamp::from_beat_units(0), None)
             .unwrap();
 
         no_heap! {{

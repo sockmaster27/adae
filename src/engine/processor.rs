@@ -4,7 +4,6 @@ use cpal::StreamConfig;
 
 use super::{
     components::{
-        audio_clip_store::{audio_clip_store, AudioClipStore, AudioClipStoreProcessor},
         mixer::{mixer, Mixer, MixerProcessor},
         timeline::{timeline, Timeline, TimelineProcessor},
     },
@@ -26,14 +25,9 @@ pub fn processor(
 
     let (timeline, timeline_processor) = timeline(max_buffer_size);
     let (mixer, mixer_processor) = mixer(max_buffer_size);
-    let (audio_clip_store, audio_clip_store_processor) = audio_clip_store(max_buffer_size);
 
     (
-        ProcessorInterface {
-            mixer,
-            timeline,
-            audio_clip_store,
-        },
+        ProcessorInterface { mixer, timeline },
         Processor {
             output_channels,
             sample_rate,
@@ -41,7 +35,6 @@ pub fn processor(
 
             mixer: mixer_processor,
             timeline: timeline_processor,
-            audio_clip_store: audio_clip_store_processor,
 
             #[cfg(feature = "record_output")]
             recorder: WavRecorder::new(
@@ -59,7 +52,6 @@ pub fn processor(
 pub struct ProcessorInterface {
     pub mixer: Mixer,
     pub timeline: Timeline,
-    pub audio_clip_store: AudioClipStore,
 }
 
 /// Contatins all data that should persist from one buffer output to the next.
@@ -70,7 +62,6 @@ pub struct Processor {
 
     mixer: MixerProcessor,
     timeline: TimelineProcessor,
-    audio_clip_store: AudioClipStoreProcessor,
 
     #[cfg(feature = "record_output")]
     recorder: WavRecorder,

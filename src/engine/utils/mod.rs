@@ -4,6 +4,7 @@ pub mod remote_push;
 pub mod ringbuffer;
 
 use std::fmt::Debug;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use super::{Sample, CHANNELS};
@@ -33,6 +34,21 @@ macro_rules! zip {
 /// Find smallest power of 2 that is greater than or equal to `x`
 pub fn smallest_pow2(x: f64) -> usize {
     2usize.pow(x.log2().ceil() as u32)
+}
+
+/// Get PathBuf to any file located in the `test_files` directory.
+/// Should only be used for testing.
+///
+/// For example:
+/// ```
+/// test_file_path("44100 16-bit.wav")
+/// ```
+pub fn test_file_path(file_name: &str) -> PathBuf {
+    PathBuf::from(format!(
+        "{}{}",
+        concat!(env!("CARGO_MANIFEST_DIR"), "/test_files/"),
+        file_name,
+    ))
 }
 
 /// Atomic supporting storing and loading of an f32, via the raw bits of a u32.

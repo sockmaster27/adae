@@ -25,7 +25,7 @@ impl TimelineTrack {
         TimelineTrack {
             position,
 
-            clips: Vec::new(),
+            clips: Vec::with_capacity(10),
             relevant_clip: None,
 
             output_track: output,
@@ -36,6 +36,11 @@ impl TimelineTrack {
 
     pub fn output_track(&self) -> TrackKey {
         self.output_track
+    }
+
+    pub fn insert_clip(&mut self, clip: TimelineClip) {
+        // Temporary prototype
+        self.clips.push(clip)
     }
 }
 impl Source for TimelineTrack {
