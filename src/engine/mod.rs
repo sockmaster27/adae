@@ -3,7 +3,6 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{BuildStreamError, Device, SampleFormat, Stream, StreamConfig};
 use std::error::Error;
 use std::fmt::Display;
-use std::path::Path;
 
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -12,8 +11,6 @@ use std::thread::{self, JoinHandle};
 mod components;
 mod traits;
 mod utils;
-use self::components::audio_clip::AudioClipKey;
-use self::components::audio_clip_store::ImportError;
 use self::components::mixer::{InvalidTrackError, TrackOverflowError, TrackReconstructionError};
 pub use self::components::timeline::Timestamp;
 use self::components::timeline::{Timeline, TimelineTrackKey, TimelineTrackOverflowError};

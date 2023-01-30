@@ -1,3 +1,4 @@
+mod timeline_clip;
 mod timestamp;
 mod track;
 
@@ -7,83 +8,30 @@ use std::{
     fmt::{Debug, Display},
     path::Path,
     sync::{
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicU64, Ordering},
         Arc,
     },
 };
 
+use self::timeline_clip::TimelineClip;
+
 use super::{
-    audio_clip::{AudioClipKey, AudioClipReader, EmptyAudioClipReader},
-    audio_clip_store::{audio_clip_store, AudioClipStore, AudioClipStoreProcessor, ImportError},
+    audio_clip::AudioClipKey,
+    audio_clip_store::{AudioClipStore, ImportError},
     track::TrackKey,
 };
-use crate::engine::{
-    traits::{Info, Source},
-    utils::{
-        key_generator::{self, KeyGenerator},
-        remote_push::{RemotePushable, RemotePushedHashMap, RemotePusherHashMap},
-        ringbuffer::{self, ringbuffer},
-    },
-    Sample,
+use crate::engine::utils::{
+    key_generator::{self, KeyGenerator},
+    remote_push::{RemotePushable, RemotePushedHashMap, RemotePusherHashMap},
+    ringbuffer::{self, ringbuffer},
 };
 pub use timestamp::Timestamp;
 pub use track::{TimelineTrack, TimelineTrackKey};
 
-#[derive(Debug)]
-struct TimelineClip {
-    /// Start on the timeline
-    start: Timestamp,
-    /// Duration on the timeline.
-    /// If `None` clip should play till end.
-    length: Option<Timestamp>,
-    /// Where in the source clip this sound starts.
-    /// Relevant if the start has been trimmed off.
-    start_offset: u64,
-
-    inner: AudioClipReader,
-}
-impl TimelineClip {
-    fn new(start: Timestamp, length: Option<Timestamp>, audio_clip: AudioClipReader) -> Self {
-        Self {
-            start,
-            length: None,
-            start_offset: 0,
-            inner: audio_clip,
-        }
-    }
-
-    fn end(&self, sample_rate: u128, bpm: u128) -> Timestamp {
-        if let Some(length) = self.length {
-            self.start + length
-        } else {
-            self.start
-                + Timestamp::from_samples(
-                    self.inner
-                        .len()
-                        .try_into()
-                        .expect("Length of audio clip too long"),
-                    sample_rate,
-                    bpm,
-                )
-        }
-    }
-
-    fn output(&mut self, info: &Info) -> &mut [Sample] {
-        self.inner.output(info)
-    }
-}
-
-pub fn timeline(max_buffer_size: usize) -> (Timeline, TimelineProcessor) {
-    let position_updated1 = Arc::new(AtomicBool::new(false));
-    let position_updated2 = Arc::clone(&position_updated1);
-
-    let new_position1 = Arc::new(AtomicU64::new(0));
-    let new_position2 = Arc::clone(&new_position1);
-
+pub fn timeline(sample_rate: u32, max_buffer_size: usize) -> (Timeline, TimelineProcessor) {
     let position1 = Arc::new(AtomicU64::new(0));
-    let position2 = Arc::clone(&new_position1);
+    let position2 = Arc::clone(&position1);
 
-    let (clip_store, clip_store_processor) = audio_clip_store(max_buffer_size);
     let (tracks_pusher, tracks_pushed) = HashMap::remote_push();
 
     let (event_sender, event_receiver) = ringbuffer();
@@ -91,23 +39,19 @@ pub fn timeline(max_buffer_size: usize) -> (Timeline, TimelineProcessor) {
     (
         Timeline {
             max_buffer_size,
+            sample_rate,
             key_generator: KeyGenerator::new(),
 
-            position_updated: position_updated1,
-            new_position: new_position1,
             position: position1,
 
-            clip_store,
+            clip_store: AudioClipStore::new(max_buffer_size),
             tracks: tracks_pusher,
 
             event_sender,
         },
         TimelineProcessor {
-            position_updated: position_updated2,
-            new_position: new_position2,
             position: position2,
-
-            clip_store: clip_store_processor,
+            bpm_cents: 120,
             tracks: tracks_pushed,
 
             event_receiver,
@@ -116,21 +60,19 @@ pub fn timeline(max_buffer_size: usize) -> (Timeline, TimelineProcessor) {
 }
 
 enum Event {
+    JumpTo(u64),
     AddClip {
-        track_key: TimelineTrackKey,
-        clip_key: AudioClipKey,
-        clip_reader: EmptyAudioClipReader,
-        start: Timestamp,
-        length: Option<Timestamp>,
+        track_key: TrackKey,
+        clip: Box<TimelineClip>,
     },
 }
 
 pub struct Timeline {
     max_buffer_size: usize,
+    sample_rate: u32,
     key_generator: KeyGenerator<TimelineTrackKey>,
 
-    position_updated: Arc<AtomicBool>,
-    new_position: Arc<AtomicU64>,
+    /// Should not be mutated from here
     position: Arc<AtomicU64>,
 
     clip_store: AudioClipStore,
@@ -149,8 +91,12 @@ impl Timeline {
     ) -> Result<TimelineTrackKey, TimelineTrackOverflowError> {
         let key = self.key_generator.next()?;
 
-        let timeline_track =
-            TimelineTrack::new(output, Arc::clone(&self.position), self.max_buffer_size);
+        let timeline_track = TimelineTrack::new(
+            output,
+            Arc::clone(&self.position),
+            self.sample_rate,
+            self.max_buffer_size,
+        );
         self.tracks.push((key, timeline_track));
         Ok(key)
     }
@@ -159,9 +105,8 @@ impl Timeline {
         self.key_generator.in_use(key)
     }
 
-    pub fn jump_to(&self, position: u64) {
-        self.new_position.store(position, Ordering::SeqCst);
-        self.position_updated.store(true, Ordering::SeqCst);
+    pub fn jump_to(&mut self, position: u64) {
+        self.event_sender.send(Event::JumpTo(position))
     }
 
     pub fn remaining_keys(&self) -> u32 {
@@ -175,19 +120,18 @@ impl Timeline {
         start: Timestamp,
         length: Option<Timestamp>,
     ) -> Result<(), AddClipError> {
-        if !self.clip_store.key_in_use(clip_key) {
-            return Err(AddClipError::InvalidClip(clip_key));
-        }
         if !self.key_in_use(track_key) {
             return Err(AddClipError::InvalidTimelineTrack(track_key));
         }
 
+        let audio_clip = self
+            .clip_store
+            .get(clip_key)
+            .ok_or(AddClipError::InvalidClip(clip_key))?;
+
         self.event_sender.send(Event::AddClip {
             track_key,
-            clip_key,
-            clip_reader: EmptyAudioClipReader::new(self.max_buffer_size),
-            start,
-            length,
+            clip: Box::new(TimelineClip::new(start, length, audio_clip)),
         });
 
         Ok(())
@@ -195,25 +139,17 @@ impl Timeline {
 }
 
 pub struct TimelineProcessor {
-    position_updated: Arc<AtomicBool>,
-    new_position: Arc<AtomicU64>,
-
-    // Only atomic to be Send
+    // Only atomic to be Send.
+    // Could be Rc<Cell<u64>> if tracks was a regular HashMap.
     position: Arc<AtomicU64>,
 
-    clip_store: AudioClipStoreProcessor,
+    bpm_cents: u16,
     tracks: RemotePushedHashMap<TimelineTrackKey, TimelineTrack>,
 
     event_receiver: ringbuffer::Receiver<Event>,
 }
 impl TimelineProcessor {
     pub fn poll(&mut self) {
-        if self.position_updated.load(Ordering::SeqCst) {
-            let new_pos = self.new_position.load(Ordering::SeqCst);
-            self.position.store(new_pos, Ordering::SeqCst);
-        }
-
-        self.clip_store.poll();
         self.tracks.poll();
 
         for _ in 0..256 {
@@ -222,42 +158,24 @@ impl TimelineProcessor {
                 None => break,
 
                 Some(event) => match event {
-                    Event::AddClip {
-                        track_key,
-                        clip_key,
-                        clip_reader,
-                        start,
-                        length,
-                    } => self.add_clip(track_key, clip_key, clip_reader, start, length),
+                    Event::JumpTo(pos) => self.position.store(pos, Ordering::Relaxed),
+                    Event::AddClip { track_key, clip } => self.add_clip(track_key, clip),
                 },
             }
         }
     }
 
     pub fn output(&self, buffer_size: u64) {
-        self.position.fetch_add(buffer_size, Ordering::SeqCst);
+        self.position.fetch_add(buffer_size, Ordering::Relaxed);
     }
 
-    fn add_clip(
-        &mut self,
-        track_key: TimelineTrackKey,
-        clip_key: AudioClipKey,
-        clip_reader: EmptyAudioClipReader,
-        start: Timestamp,
-        length: Option<Timestamp>,
-    ) {
+    fn add_clip(&mut self, track_key: TimelineTrackKey, timeline_clip: Box<TimelineClip>) {
         let track = self
             .tracks
             .get_mut(&track_key)
             .expect("Track doesn't exist");
-        let audio_clip = self
-            .clip_store
-            .fill(clip_reader, clip_key)
-            .expect("Clip doesn't exist");
 
-        let timeline_clip = TimelineClip::new(start, length, audio_clip);
-
-        track.insert_clip(timeline_clip);
+        track.insert_clip(timeline_clip, self.bpm_cents);
     }
 }
 
@@ -309,7 +227,7 @@ mod tests {
 
     #[test]
     fn add_track() {
-        let (mut tl, mut tlp) = timeline(10);
+        let (mut tl, mut tlp) = timeline(40_000, 10);
 
         for _ in 0..50 {
             tl.add_track(0).unwrap();
@@ -326,7 +244,7 @@ mod tests {
 
     #[test]
     fn add_clip() {
-        let (mut tl, mut tlp) = timeline(10);
+        let (mut tl, mut tlp) = timeline(40_000, 10);
 
         let ck = tl
             .import_audio_clip(&test_file_path("44100 16-bit.wav"))

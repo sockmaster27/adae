@@ -27,31 +27,20 @@ use crate::zip;
 
 pub type AudioClipKey = u32;
 
-pub struct EmptyAudioClipReader {
-    output_buffer: Vec<Sample>,
-}
-impl EmptyAudioClipReader {
-    pub fn new(max_buffer_size: usize) -> Self {
-        EmptyAudioClipReader {
-            output_buffer: vec![0.0; max_buffer_size * CHANNELS],
-        }
-    }
-
-    pub fn fill(self, clip: Arc<AudioClip>) -> AudioClipReader {
-        AudioClipReader {
-            inner: clip,
-            position: 0,
-            output_buffer: self.output_buffer,
-        }
-    }
-}
-
 pub struct AudioClipReader {
     inner: Arc<AudioClip>,
     position: usize,
     output_buffer: Vec<Sample>,
 }
 impl AudioClipReader {
+    pub fn new(clip: Arc<AudioClip>, max_buffer_size: usize) -> Self {
+        AudioClipReader {
+            inner: clip,
+            position: 0,
+            output_buffer: vec![0.0; max_buffer_size * CHANNELS],
+        }
+    }
+
     /// Scales `range` of each channel to the appropriate number of channels,
     /// and loads the interlaced result to `self.output_buffer`.
     fn scale_channels(&mut self, range: Range<usize>) {
@@ -149,11 +138,7 @@ impl AudioClip {
         self.key
     }
 
-    pub fn import(
-        key: AudioClipKey,
-        path: &Path,
-        max_buffer_size: usize,
-    ) -> Result<Self, ImportError> {
+    pub fn import(key: AudioClipKey, path: &Path) -> Result<Self, ImportError> {
         // Currently the entire clip just gets loaded into memory immediately.
         // I guess that could be improved.
 
@@ -347,23 +332,23 @@ mod tests {
 
     #[test]
     fn import_wav_44100_16_bit() {
-        let ac = AudioClip::import(0, &test_file_path("44100 16-bit.wav"), 10).unwrap();
+        let ac = AudioClip::import(0, &test_file_path("44100 16-bit.wav")).unwrap();
         test_lossless(ac);
     }
     #[test]
     fn import_wav_44100_24_bit() {
-        let ac = AudioClip::import(0, &test_file_path("44100 24-bit.wav"), 10).unwrap();
+        let ac = AudioClip::import(0, &test_file_path("44100 24-bit.wav")).unwrap();
         test_lossless(ac);
     }
     #[test]
     fn import_wav_44100_32_float() {
-        let ac = AudioClip::import(0, &test_file_path("44100 32-float.wav"), 10).unwrap();
+        let ac = AudioClip::import(0, &test_file_path("44100 32-float.wav")).unwrap();
         test_lossless(ac);
     }
 
     #[test]
     fn import_flac_4410_l5_16_bit() {
-        let ac = AudioClip::import(0, &test_file_path("44100 L5 16-bit.flac"), 10).unwrap();
+        let ac = AudioClip::import(0, &test_file_path("44100 L5 16-bit.flac")).unwrap();
         test_lossless(ac);
     }
 
@@ -372,37 +357,32 @@ mod tests {
         let ac = AudioClip::import(
             0,
             &test_file_path("44100 preset-standard-fast joint-stereo.mp3"),
-            10,
         )
         .unwrap();
         test_lossy(ac);
     }
     #[test]
     fn import_mp3_44100_stereo() {
-        let ac = AudioClip::import(
-            0,
-            &test_file_path("44100 preset-standard-fast stereo.mp3"),
-            10,
-        )
-        .unwrap();
+        let ac =
+            AudioClip::import(0, &test_file_path("44100 preset-standard-fast stereo.mp3")).unwrap();
         test_lossy(ac);
     }
 
     #[test]
     fn import_ogg_44100_q5() {
-        let ac = AudioClip::import(0, &test_file_path("44100 Q5.ogg"), 10).unwrap();
+        let ac = AudioClip::import(0, &test_file_path("44100 Q5.ogg")).unwrap();
         test_lossy(ac);
     }
 
     #[test]
     fn bad_test_file_path() {
         let test_file_path = test_file_path("lorem ipsum");
-        let result = AudioClip::import(0, &test_file_path, 10);
+        let result = AudioClip::import(0, &test_file_path);
         assert_eq!(result, Err(ImportError::FileNotFound(test_file_path)));
     }
     #[test]
     fn unsupported_file() {
-        let result = AudioClip::import(0, &test_file_path("44100 Q160 [unsupported].m4a"), 10);
+        let result = AudioClip::import(0, &test_file_path("44100 Q160 [unsupported].m4a"));
         assert_eq!(result, Err(ImportError::UknownFormat));
     }
 }

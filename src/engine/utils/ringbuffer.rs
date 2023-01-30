@@ -82,7 +82,7 @@ where
     }
 
     /// Iterate through the elements in the ringbuffer,
-    /// but return `None` at the latest after a certain number of iteration.
+    /// but return `None` at the latest after a certain number of iterations.
     /// This avoids endless looping.
     pub fn iter_bound(&mut self) -> impl Iterator<Item = T> + '_ {
         BoundIter {

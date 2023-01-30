@@ -42,6 +42,7 @@ pub fn smallest_pow2(x: f64) -> usize {
 /// For example:
 ///
 /// `test_file_path("44100 16-bit.wav")`
+#[allow(dead_code)]
 pub fn test_file_path(file_name: &str) -> PathBuf {
     PathBuf::from(format!(
         "{}{}",
