@@ -1,7 +1,7 @@
 use std::{
     alloc::{GlobalAlloc, System},
     backtrace::Backtrace,
-    cell::RefCell,
+    cell::Cell,
     marker::PhantomData,
     thread,
 };
@@ -19,7 +19,7 @@ static GLOBAL: TestAlloc<PanicError> = TestAlloc {
     error: PhantomData,
 };
 
-thread_local!(static ALLOWED: RefCell<bool> = RefCell::new(true));
+thread_local!(static ALLOWED: Cell<bool> = Cell::new(true));
 
 macro_rules! no_heap {
     {$body:block} => {{
@@ -40,10 +40,10 @@ macro_rules! allow_heap {
 }
 
 pub fn is_allowed() -> bool {
-    ALLOWED.with(|a| *a.borrow())
+    ALLOWED.with(|a| a.get())
 }
 pub fn set_allowed(allowed: bool) {
-    ALLOWED.with(|a| *a.borrow_mut() = allowed);
+    ALLOWED.with(|a| a.set(allowed));
 }
 
 pub struct TestAlloc<E: ErrorHandler> {
@@ -56,7 +56,7 @@ where
 {
     unsafe fn alloc(&self, layout: std::alloc::Layout) -> *mut u8 {
         ALLOWED.with(|a| {
-            let allowed = *a.borrow();
+            let allowed = a.get();
             if !allowed {
                 set_allowed(true);
                 E::error("Attempted to allocate heap memory on disallowed thread");
@@ -69,7 +69,7 @@ where
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: std::alloc::Layout) {
         ALLOWED.with(|a| {
-            let allowed = *a.borrow();
+            let allowed = a.get();
             if !allowed {
                 set_allowed(true);
                 E::error("Attempted to deallocate heap memory on disallowed thread");
