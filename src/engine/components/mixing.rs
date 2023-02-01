@@ -8,40 +8,44 @@ use crate::engine::{Sample, CHANNELS};
 pub struct MixPoint {
     sum_buffer: Vec<f64>,
     output_buffer: Vec<Sample>,
-    buffer_size: Option<usize>,
+    buffer_size_samples: Option<usize>,
 }
 impl MixPoint {
     pub fn new(max_buffer_size: usize) -> Self {
         Self {
             sum_buffer: vec![0.0; max_buffer_size * CHANNELS],
             output_buffer: vec![0.0; max_buffer_size * CHANNELS],
-            buffer_size: None,
+
+            /// Measures samples in buffer instead of frames
+            ///
+            /// `buffer_size_samples == buffer_size * CHANNELS`
+            buffer_size_samples: None,
         }
     }
 
     /// Resets sum and buffer size.
     pub fn reset(&mut self) {
-        let dirty = self.buffer_size.unwrap_or(0);
+        let dirty = self.buffer_size_samples.unwrap_or(0);
         for sample in &mut self.sum_buffer[..dirty] {
             *sample = 0.0;
         }
-        self.buffer_size = None;
+        self.buffer_size_samples = None;
     }
 
     /// Add buffer to the 64-bit sum.
     /// With debug assertions enabled, this will panic if buffers of different sizes are added inbetween resets.
     pub fn add(&mut self, input_buffer: &[Sample]) {
-        if self.buffer_size.is_none() {
-            self.buffer_size = Some(input_buffer.len());
+        if self.buffer_size_samples.is_none() {
+            self.buffer_size_samples = Some(input_buffer.len());
         } else {
             // Assert that all buffers added between resets are of equal size.
             #[cfg(debug_assertions)]
             {
-                let buffer_size = self.buffer_size.unwrap();
-                if buffer_size != input_buffer.len() {
+                let buffer_size_samples = self.buffer_size_samples.unwrap();
+                if buffer_size_samples != input_buffer.len() {
                     panic!(
                         "At least two buffers were of different sizes: {}, {}.",
-                        buffer_size,
+                        buffer_size_samples,
                         input_buffer.len()
                     );
                 }
@@ -59,16 +63,16 @@ impl MixPoint {
     ///
     /// Result is not clipped.
     pub fn get(&mut self) -> Result<&mut [Sample], &mut [Sample]> {
-        if let Some(buffer_size) = self.buffer_size {
+        if let Some(buffer_size_samples) = self.buffer_size_samples {
             // Convert back to original sample format.
             for (output_sample, &sum_sample) in zip!(
-                self.output_buffer[..buffer_size].iter_mut(),
+                self.output_buffer[..buffer_size_samples].iter_mut(),
                 self.sum_buffer.iter()
             ) {
                 *output_sample = sum_sample as Sample;
             }
 
-            Ok(&mut self.output_buffer[..buffer_size])
+            Ok(&mut self.output_buffer[..buffer_size_samples])
         } else {
             // Buffer size is unknown.
             Err(&mut self.output_buffer)
