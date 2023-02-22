@@ -2,41 +2,41 @@ use std::ops::{Add, Sub};
 
 const UNITS_PER_BEAT: u32 = 1024;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Timestamp {
     /// 1 beat = 1024 beat units, making it highly divisible by powers of 2
     beat_units: u32,
 }
 impl Timestamp {
     /// The smallest possible Timestamp representing the very beginning (regardless of unit)
-    pub fn zero() -> Self {
+    pub const fn zero() -> Self {
         Self { beat_units: 0 }
     }
 
     /// 1 beat = 1024 beat units
-    pub fn from_beat_units(beat_units: u32) -> Self {
+    pub const fn from_beat_units(beat_units: u32) -> Self {
         Self { beat_units }
     }
-    pub fn from_beats(beats: u32) -> Self {
+    pub const fn from_beats(beats: u32) -> Self {
         Self {
             beat_units: beats * UNITS_PER_BEAT,
         }
     }
-    pub fn from_samples(samples: u64, sample_rate: u32, bpm_cents: u16) -> Self {
+    pub const fn from_samples(samples: u64, sample_rate: u32, bpm_cents: u16) -> Self {
         let beat_units =
             (samples * bpm_cents as u64 * UNITS_PER_BEAT as u64) / (sample_rate as u64 * 60 * 100);
         Self {
-            beat_units: beat_units.try_into().expect("Overflow"),
+            beat_units: beat_units as u32,
         }
     }
 
-    pub fn beat_units(&self) -> u32 {
+    pub const fn beat_units(&self) -> u32 {
         self.beat_units
     }
-    pub fn beats(&self) -> u32 {
+    pub const fn beats(&self) -> u32 {
         self.beat_units / UNITS_PER_BEAT
     }
-    pub fn samples(&self, sample_rate: u32, bpm_cents: u16) -> u64 {
+    pub const fn samples(&self, sample_rate: u32, bpm_cents: u16) -> u64 {
         (self.beat_units as u64 * sample_rate as u64 * 60 * 100)
             / (bpm_cents as u64 * UNITS_PER_BEAT as u64)
     }
@@ -55,6 +55,16 @@ impl Sub for Timestamp {
         Self {
             beat_units: self.beat_units - rhs.beat_units,
         }
+    }
+}
+impl PartialOrd for Timestamp {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.beat_units.partial_cmp(&other.beat_units)
+    }
+}
+impl Ord for Timestamp {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.beat_units.cmp(&other.beat_units)
     }
 }
 

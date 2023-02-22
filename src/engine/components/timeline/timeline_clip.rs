@@ -1,21 +1,14 @@
-use intrusive_collections::{intrusive_adapter, KeyAdapter, RBTreeLink};
+use std::cmp::min;
 
 use crate::{
     engine::{
         components::audio_clip::AudioClipReader,
         traits::{Info, Source},
+        utils::rbtree_node,
         Sample,
     },
     Timestamp,
 };
-
-intrusive_adapter!(pub TimelineClipAdapter = Box<TimelineClip>: TimelineClip { link: RBTreeLink });
-impl<'a> KeyAdapter<'a> for TimelineClipAdapter {
-    type Key = Timestamp;
-    fn get_key(&self, tc: &'a TimelineClip) -> Timestamp {
-        tc.start
-    }
-}
 
 #[derive(Debug)]
 pub struct TimelineClip {
@@ -26,11 +19,9 @@ pub struct TimelineClip {
     pub length: Option<Timestamp>,
     /// Where in the source clip this sound starts.
     /// Relevant if the start has been trimmed off.
-    pub start_offset: u64,
+    pub start_offset: usize,
 
     inner: AudioClipReader,
-
-    link: RBTreeLink,
 }
 impl TimelineClip {
     pub fn new(start: Timestamp, length: Option<Timestamp>, audio_clip: AudioClipReader) -> Self {
@@ -39,7 +30,6 @@ impl TimelineClip {
             length,
             start_offset: 0,
             inner: audio_clip,
-            link: RBTreeLink::new(),
         }
     }
 
@@ -59,7 +49,34 @@ impl TimelineClip {
         }
     }
 
-    pub fn output(&mut self, info: &Info) -> &mut [Sample] {
-        self.inner.output(info)
+    /// Outputs to a buffer of at most the requested size (via the info parameter).
+    /// If the end is reached the returned buffer is smaller.
+    pub fn output(&mut self, bpm_cents: u16, info: &Info) -> &mut [Sample] {
+        let Info {
+            sample_rate,
+            buffer_size,
+        } = *info;
+
+        let capped_buffer_size = match self.length {
+            None => buffer_size,
+            Some(length) => {
+                let remaining = length.samples(sample_rate, bpm_cents) as usize
+                    - self.inner.position()
+                    + self.start_offset;
+                min(buffer_size, remaining)
+            }
+        };
+
+        self.inner.output(&Info {
+            sample_rate,
+            buffer_size: capped_buffer_size,
+        })
+    }
+}
+impl rbtree_node::Keyed for TimelineClip {
+    type Key = Timestamp;
+
+    fn key(&self) -> Self::Key {
+        self.start
     }
 }

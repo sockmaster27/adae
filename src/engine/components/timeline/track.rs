@@ -1,4 +1,6 @@
+use std::cmp::min;
 use std::fmt::Debug;
+use std::mem;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -6,10 +8,10 @@ use intrusive_collections::rbtree::{CursorMut, RBTreeOps};
 use intrusive_collections::{Adapter, RBTree};
 use ouroboros::self_referencing;
 
-use super::timeline_clip::TimelineClipAdapter;
 use super::TimelineClip;
 use crate::engine::components::track::TrackKey;
 use crate::engine::traits::{Info, Source};
+use crate::engine::utils::rbtree_node::{TreeNode, TreeNodeAdapter};
 use crate::engine::{Sample, CHANNELS};
 use crate::Timestamp;
 
@@ -38,8 +40,9 @@ where
 pub struct TimelineTrack {
     position: Arc<AtomicU64>,
     sample_rate: u32,
+    bpm_cents: u16,
 
-    clips: CursorOwning<TimelineClipAdapter>,
+    relevant_clip: CursorOwning<TreeNodeAdapter<TimelineClip>>,
 
     output_track: TrackKey,
 
@@ -50,19 +53,21 @@ impl TimelineTrack {
         output: TrackKey,
         position: Arc<AtomicU64>,
         sample_rate: u32,
+        bpm_cents: u16,
         max_buffer_size: usize,
     ) -> Self {
         TimelineTrack {
             position,
             sample_rate,
+            bpm_cents,
 
-            clips: CursorOwning::new(RBTree::new(TimelineClipAdapter::new()), |tree| {
+            relevant_clip: CursorOwning::new(RBTree::new(TreeNodeAdapter::new()), |tree| {
                 tree.front_mut()
             }),
 
             output_track: output,
 
-            output_buffer: Vec::with_capacity(max_buffer_size * CHANNELS),
+            output_buffer: vec![0.0; max_buffer_size * CHANNELS],
         }
     }
 
@@ -70,17 +75,20 @@ impl TimelineTrack {
         self.output_track
     }
 
-    pub fn insert_clip(&mut self, clip: Box<TimelineClip>, bpm_cents: u16) {
-        self.clips.with_cursor_mut(|cursor| {
+    pub fn insert_clip(&mut self, clip: Box<TreeNode<TimelineClip>>) {
+        self.relevant_clip.with_cursor_mut(|cursor| {
             let position = Timestamp::from_samples(
                 self.position.load(Ordering::SeqCst),
                 self.sample_rate,
-                bpm_cents,
+                self.bpm_cents,
             );
-            let clip_end = clip.end(self.sample_rate, bpm_cents);
-            let next_start = cursor.get().map_or(Timestamp::zero(), |next| next.start);
+            let clip_end = clip.borrow().end(self.sample_rate, self.bpm_cents);
+            let next = cursor.get();
 
-            let is_more_relevant = position < clip_end && clip_end < next_start;
+            let is_more_relevant = match next {
+                Some(next) => position < clip_end && clip_end <= next.borrow().start,
+                None => position < clip_end,
+            };
 
             cursor.insert(clip);
             if is_more_relevant {
@@ -101,8 +109,226 @@ impl Source for TimelineTrack {
             buffer_size,
         } = *info;
 
-        todo!("output");
+        self.relevant_clip.with_cursor_mut(|cursor| {
+            let mut progress = 0;
 
-        &mut self.output_buffer[..buffer_size]
+            while progress < buffer_size {
+                let mut should_move = false;
+                match cursor.get() {
+                    Some(clip) => {
+                        let position = self.position.load(Ordering::Relaxed);
+                        let mut clip_ref = clip.borrow_mut();
+
+                        // Pad start with zero
+                        let clip_start = clip_ref.start.samples(sample_rate, self.bpm_cents);
+                        if position + (progress as u64) < clip_start {
+                            let end_zeroes = min((clip_start - position) as usize, buffer_size);
+                            self.output_buffer[progress * CHANNELS..end_zeroes * CHANNELS]
+                                .fill(0.0);
+                            progress = end_zeroes;
+                        }
+
+                        // Fill with content
+                        let requested_buffer = buffer_size - progress;
+                        let output = clip_ref.output(
+                            self.bpm_cents,
+                            &Info {
+                                sample_rate,
+                                buffer_size: requested_buffer,
+                            },
+                        );
+                        self.output_buffer[progress * CHANNELS..progress * CHANNELS + output.len()]
+                            .copy_from_slice(&output);
+                        progress += output.len() / CHANNELS;
+
+                        // Determine if we should move on to next clip
+                        should_move = output.len() < requested_buffer;
+                    }
+
+                    None => {
+                        // No more clips, pad with zero
+                        self.output_buffer[progress * CHANNELS..buffer_size * CHANNELS].fill(0.0);
+                        break;
+                    }
+                }
+
+                // Needs to be out here to access &mut cursor
+                if should_move {
+                    cursor.move_next();
+                }
+            }
+        });
+        &mut self.output_buffer[..buffer_size * CHANNELS]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use crate::engine::{
+        components::audio_clip::{AudioClip, AudioClipReader},
+        utils::test_file_path,
+    };
+
+    use super::*;
+
+    const SAMPLE_RATE: u32 = 40_960;
+    const BPM_CENTS: u16 = 120_00;
+    /// Samples per Beat Unit
+    const SBU: usize = Timestamp::from_beat_units(1).samples(SAMPLE_RATE, BPM_CENTS) as usize;
+
+    fn clip(
+        start_beat_units: u32,
+        length_beat_units: Option<u32>,
+        max_buffer_size: usize,
+    ) -> Box<TreeNode<TimelineClip>> {
+        thread_local! {
+            static AC: Arc<AudioClip> = Arc::new(AudioClip::import(&test_file_path("44100 16-bit.wav")).unwrap());
+        }
+
+        AC.with(|ac| {
+            Box::new(TreeNode::new(TimelineClip::new(
+                Timestamp::from_beat_units(start_beat_units),
+                length_beat_units.map(|l| Timestamp::from_beat_units(l)),
+                AudioClipReader::new(Arc::clone(&ac), max_buffer_size),
+            )))
+        })
+    }
+
+    #[test]
+    fn insert() {
+        let mut t = TimelineTrack::new(0, Arc::new(AtomicU64::new(0)), SAMPLE_RATE, BPM_CENTS, 100);
+        let c1 = clip(3, Some(1), 100);
+        let c2 = clip(1, Some(2), 100);
+
+        no_heap! {{
+            t.insert_clip(c1);
+            t.insert_clip(c2);
+        }}
+
+        // c2 should be inserted before c1
+        t.relevant_clip.with_cursor_mut(|cur| {
+            let clip = cur.get().unwrap().borrow();
+            let length = clip.length.unwrap();
+            assert_eq!(length.beat_units(), 2);
+        });
+    }
+
+    #[test]
+    fn output() {
+        let info = Info {
+            sample_rate: SAMPLE_RATE,
+            buffer_size: SBU,
+        };
+        let pos = Arc::new(AtomicU64::new(0));
+        let mut t = TimelineTrack::new(0, Arc::clone(&pos), SAMPLE_RATE, BPM_CENTS, 100);
+        let c1 = clip(1, Some(1), 100);
+        let c2 = clip(3, Some(2), 100);
+
+        no_heap! {{
+            t.insert_clip(c1);
+            t.insert_clip(c2);
+
+            // Empty
+            let out = t.output(&info);
+            for &mut s in out {
+                assert_eq!(s, 0.0);
+            }
+            pos.fetch_add(info.buffer_size as u64, Ordering::Relaxed);
+
+            // c1
+            t.relevant_clip.with_cursor_mut(|cur| {
+                let clip = cur.get().unwrap().borrow();
+                let length = clip.length.unwrap();
+                assert_eq!(length.beat_units(), 1);
+            });
+
+            let out = t.output(&info);
+            for &mut s in out {
+                assert_ne!(s, 0.0);
+            }
+            pos.fetch_add(info.buffer_size as u64, Ordering::Relaxed);
+
+            // Empty
+            let out = t.output(&info);
+            for &mut s in out {
+                assert_eq!(s, 0.0);
+            }
+            pos.fetch_add(info.buffer_size as u64, Ordering::Relaxed);
+
+            // c2
+            t.relevant_clip.with_cursor_mut(|cur| {
+                let clip = cur.get().unwrap().borrow();
+                let length = clip.length.unwrap();
+                assert_eq!(length.beat_units(), 2);
+            });
+
+            let out = t.output(&Info {
+                sample_rate: SAMPLE_RATE,
+                buffer_size: 3 * SBU,
+            });
+            for &s in &out[..CHANNELS * (2 * SBU)] {
+                assert_ne!(s, 0.0);
+            }
+            for &s in &out[CHANNELS * (2 * SBU)..] {
+                assert_eq!(s, 0.0);
+            }
+
+            // end
+            t.relevant_clip.with_cursor_mut(|cur| {
+                let clip = cur.get();
+                assert!(clip.is_none());
+            });
+            let out = t.output(&info);
+            for &mut s in out {
+                assert_eq!(s, 0.0);
+            }
+            t.relevant_clip.with_cursor_mut(|cur| {
+                let clip = cur.get();
+                assert!(clip.is_none());
+            });
+        }}
+    }
+
+    #[test]
+    fn output_many() {
+        let mut t = TimelineTrack::new(0, Arc::new(AtomicU64::new(0)), SAMPLE_RATE, BPM_CENTS, 200);
+        let c1 = clip(0, Some(1), 200);
+        let c2 = clip(2, Some(1), 200);
+        let c3 = clip(4, Some(1), 200);
+        let c4 = clip(5, Some(1), 200);
+
+        no_heap! {{
+            t.insert_clip(c1);
+            t.insert_clip(c2);
+            t.insert_clip(c3);
+            t.insert_clip(c4);
+
+            let out = t.output(&Info {
+                sample_rate: SAMPLE_RATE,
+                buffer_size: 6 * SBU,
+            });
+            const SBUC: usize = SBU * CHANNELS;
+            for &s in &out[..SBUC] {
+                // Something
+                assert_ne!(s, 0.0);
+            }
+            for &s in &out[SBUC..2 * SBUC] {
+                // Nothing
+                assert_eq!(s, 0.0);
+            }
+            for &s in &out[2 * SBUC..3 * SBUC] {
+                // Something
+                assert_ne!(s, 0.0);
+            }
+            for &s in &out[3 * SBUC..4 * SBUC] {
+                // Nothing
+                assert_eq!(s, 0.0);
+            }
+            for &s in &out[4 * SBUC..] {
+                // Something
+                assert_ne!(s, 0.0);
+            }
+        }}
     }
 }

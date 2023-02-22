@@ -21,9 +21,12 @@ use symphonia::core::{
     sample::Sample as SymphoniaSample,
 };
 
-use crate::engine::traits::{Info, Source};
 use crate::engine::{Sample, CHANNELS};
 use crate::zip;
+use crate::{
+    engine::traits::{Info, Source},
+    Timestamp,
+};
 
 pub type AudioClipKey = u32;
 
@@ -39,6 +42,10 @@ impl AudioClipReader {
             position: 0,
             output_buffer: vec![0.0; max_buffer_size * CHANNELS],
         }
+    }
+
+    pub fn position(&self) -> usize {
+        self.position
     }
 
     /// Scales `range` of each channel to the appropriate number of channels,
@@ -74,6 +81,7 @@ impl AudioClipReader {
         }
     }
 
+    // Jump to position with sample precision
     pub fn jump(&mut self, position: usize) -> Result<(), JumpOutOfBounds> {
         if position >= self.len() {
             Err(JumpOutOfBounds)
@@ -88,8 +96,8 @@ impl AudioClipReader {
     }
 }
 impl Source for AudioClipReader {
-    /// Outputs to a buffer of the requested size (via the info parameter).
-    /// When the end is reached, this function will simply write zeroes to the buffer.
+    /// Outputs to a buffer of at most the requested size (via the info parameter).
+    /// If the end is reached the returned buffer is smaller.
     fn output(&mut self, info: &Info) -> &mut [Sample] {
         let Info {
             sample_rate: _,
@@ -104,15 +112,11 @@ impl Source for AudioClipReader {
         let next_position = self.position + filled;
         let relevant_range = self.position..next_position;
 
-        let unfilled_range = filled * CHANNELS..buffer_size * CHANNELS;
         self.position = next_position;
 
         self.scale_channels(relevant_range);
-        for sample in &mut self.output_buffer[unfilled_range] {
-            *sample = 0.0;
-        }
 
-        &mut self.output_buffer[0..buffer_size * CHANNELS]
+        &mut self.output_buffer[..filled * CHANNELS]
     }
 }
 impl Debug for AudioClipReader {
@@ -127,18 +131,13 @@ impl Debug for AudioClipReader {
 
 #[derive(PartialEq)]
 pub struct AudioClip {
-    key: AudioClipKey,
     sample_rate: u32,
 
     /// List of channel buffers
     data: Vec<Vec<Sample>>,
 }
 impl AudioClip {
-    pub fn key(&self) -> AudioClipKey {
-        self.key
-    }
-
-    pub fn import(key: AudioClipKey, path: &Path) -> Result<Self, ImportError> {
+    pub fn import(path: &Path) -> Result<Self, ImportError> {
         // Currently the entire clip just gets loaded into memory immediately.
         // I guess that could be improved.
 
@@ -207,11 +206,7 @@ impl AudioClip {
             }
         }
 
-        Ok(Self {
-            key,
-            sample_rate,
-            data,
-        })
+        Ok(Self { sample_rate, data })
     }
     fn extend_from_buffer(data: &mut Vec<Vec<Sample>>, buffer_ref: AudioBufferRef) {
         // Bruh
@@ -317,9 +312,9 @@ mod tests {
 
         // These should be 1.0 and -1.0 exactly, but sample conversion skews that a little bit
         let first_left_sample = ac.data[0][0];
-        assert!(first_left_sample > 0.99);
+        assert!(0.999 <= first_left_sample && first_left_sample <= 1.001);
         let first_right_sample = ac.data[1][0];
-        assert!(first_right_sample < -0.99);
+        assert!(-1.001 <= first_right_sample && first_right_sample <= -0.999);
     }
     fn test_lossy(ac: AudioClip) {
         assert_eq!(ac.channels(), 2);
@@ -332,57 +327,146 @@ mod tests {
 
     #[test]
     fn import_wav_44100_16_bit() {
-        let ac = AudioClip::import(0, &test_file_path("44100 16-bit.wav")).unwrap();
+        let ac = AudioClip::import(&test_file_path("44100 16-bit.wav")).unwrap();
         test_lossless(ac);
     }
     #[test]
     fn import_wav_44100_24_bit() {
-        let ac = AudioClip::import(0, &test_file_path("44100 24-bit.wav")).unwrap();
+        let ac = AudioClip::import(&test_file_path("44100 24-bit.wav")).unwrap();
         test_lossless(ac);
     }
     #[test]
     fn import_wav_44100_32_float() {
-        let ac = AudioClip::import(0, &test_file_path("44100 32-float.wav")).unwrap();
+        let ac = AudioClip::import(&test_file_path("44100 32-float.wav")).unwrap();
         test_lossless(ac);
     }
 
     #[test]
     fn import_flac_4410_l5_16_bit() {
-        let ac = AudioClip::import(0, &test_file_path("44100 L5 16-bit.flac")).unwrap();
+        let ac = AudioClip::import(&test_file_path("44100 L5 16-bit.flac")).unwrap();
         test_lossless(ac);
     }
 
     #[test]
     fn import_mp3_44100_joint_stereo() {
-        let ac = AudioClip::import(
-            0,
-            &test_file_path("44100 preset-standard-fast joint-stereo.mp3"),
-        )
+        let ac = AudioClip::import(&test_file_path(
+            "44100 preset-standard-fast joint-stereo.mp3",
+        ))
         .unwrap();
         test_lossy(ac);
     }
     #[test]
     fn import_mp3_44100_stereo() {
         let ac =
-            AudioClip::import(0, &test_file_path("44100 preset-standard-fast stereo.mp3")).unwrap();
+            AudioClip::import(&test_file_path("44100 preset-standard-fast stereo.mp3")).unwrap();
         test_lossy(ac);
     }
 
     #[test]
     fn import_ogg_44100_q5() {
-        let ac = AudioClip::import(0, &test_file_path("44100 Q5.ogg")).unwrap();
+        let ac = AudioClip::import(&test_file_path("44100 Q5.ogg")).unwrap();
         test_lossy(ac);
     }
 
     #[test]
     fn bad_test_file_path() {
         let test_file_path = test_file_path("lorem ipsum");
-        let result = AudioClip::import(0, &test_file_path);
+        let result = AudioClip::import(&test_file_path);
         assert_eq!(result, Err(ImportError::FileNotFound(test_file_path)));
     }
     #[test]
     fn unsupported_file() {
-        let result = AudioClip::import(0, &test_file_path("44100 Q160 [unsupported].m4a"));
+        let result = AudioClip::import(&test_file_path("44100 Q160 [unsupported].m4a"));
         assert_eq!(result, Err(ImportError::UknownFormat));
+    }
+
+    #[test]
+    fn reader_output() {
+        let ac = AudioClip::import(&test_file_path("44100 16-bit.wav")).unwrap();
+        let mut acr = AudioClipReader::new(Arc::new(ac), 50);
+
+        let output = acr.output(&Info {
+            sample_rate: 44100,
+            buffer_size: 50,
+        });
+
+        assert_eq!(output.len(), 50 * CHANNELS);
+
+        let first_left_sample = output[0];
+        assert!(0.999 <= first_left_sample && first_left_sample <= 1.001);
+        let first_right_sample = output[1];
+        assert!(-1.001 <= first_right_sample && first_right_sample <= -0.999);
+
+        let output = acr.output(&Info {
+            sample_rate: 44100,
+            buffer_size: 50,
+        });
+
+        assert_eq!(output.len(), 50 * CHANNELS);
+
+        let first_left_sample = output[0];
+        assert!(-1.001 <= first_left_sample && first_left_sample <= -0.999);
+        let first_right_sample = output[1];
+        assert!(0.999 <= first_right_sample && first_right_sample <= 1.001);
+    }
+
+    #[test]
+    fn reader_output_past_end() {
+        let ac = AudioClip::import(&test_file_path("44100 16-bit.wav")).unwrap();
+        let mut acr = AudioClipReader::new(Arc::new(ac), 1_322_978 + 10);
+
+        let output = acr.output(&Info {
+            sample_rate: 44100,
+            buffer_size: 1_322_978 + 10,
+        });
+
+        assert_eq!(output.len(), 1_322_978 * CHANNELS);
+
+        let output = acr.output(&Info {
+            sample_rate: 44100,
+            buffer_size: 10,
+        });
+
+        assert_eq!(output.len(), 0);
+    }
+
+    #[test]
+    fn reader_jump() {
+        let ac = AudioClip::import(&test_file_path("44100 16-bit.wav")).unwrap();
+        let mut acr = AudioClipReader::new(Arc::new(ac), 50);
+
+        let output = acr.output(&Info {
+            sample_rate: 44100,
+            buffer_size: 50,
+        });
+
+        assert_eq!(output.len(), 50 * CHANNELS);
+
+        let first_left_sample = output[0];
+        assert!(0.999 <= first_left_sample && first_left_sample <= 1.001);
+        let first_right_sample = output[1];
+        assert!(-1.001 <= first_right_sample && first_right_sample <= -0.999);
+
+        acr.jump(0).unwrap();
+
+        let output = acr.output(&Info {
+            sample_rate: 44100,
+            buffer_size: 50,
+        });
+
+        assert_eq!(output.len(), 50 * CHANNELS);
+
+        let first_left_sample = output[0];
+        assert!(0.999 <= first_left_sample && first_left_sample <= 1.001);
+        let first_right_sample = output[1];
+        assert!(-1.001 <= first_right_sample && first_right_sample <= -0.999);
+    }
+
+    #[test]
+    fn reader_jump_out_of_bounds() {
+        let ac = AudioClip::import(&test_file_path("44100 16-bit.wav")).unwrap();
+        let mut acr = AudioClipReader::new(Arc::new(ac), 50);
+
+        assert_eq!(acr.jump(1_322_978), Err(JumpOutOfBounds));
     }
 }

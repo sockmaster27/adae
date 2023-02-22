@@ -23,7 +23,7 @@ pub fn processor(
     let output_channels = stream_config.channels;
     let sample_rate = stream_config.sample_rate.0;
 
-    let (timeline, timeline_processor) = timeline(sample_rate, max_buffer_size);
+    let (timeline, timeline_processor) = timeline(sample_rate, 120_00, max_buffer_size);
     let (mixer, mixer_processor) = mixer(max_buffer_size);
 
     (

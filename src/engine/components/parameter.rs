@@ -3,7 +3,7 @@ use std::{
     sync::{atomic::Ordering, Arc},
 };
 
-use crate::engine::utils::format_truncate_list;
+use crate::engine::{utils::format_truncate_list, CHANNELS};
 
 use crate::engine::utils::{AtomicF32, MovingAverage};
 
@@ -19,7 +19,7 @@ pub fn f32_parameter(
             desired: desired2,
             moving_average: MovingAverage::new(initial, max_buffer_size),
 
-            buffer: vec![0.0; max_buffer_size],
+            buffer: vec![0.0; max_buffer_size * CHANNELS],
         },
     )
 }
@@ -52,12 +52,12 @@ impl F32ParameterProcessor {
     pub fn get(&mut self, buffer_size: usize) -> &mut [f32] {
         let desired = self.desired.load(Ordering::Relaxed);
 
-        for point in self.buffer[..buffer_size].iter_mut() {
+        for point in self.buffer[..buffer_size * CHANNELS].iter_mut() {
             self.moving_average.push(desired);
             *point = self.moving_average.average();
         }
 
-        &mut self.buffer[..buffer_size]
+        &mut self.buffer[..buffer_size * CHANNELS]
     }
 }
 impl Debug for F32ParameterProcessor {

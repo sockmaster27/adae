@@ -22,13 +22,18 @@ use super::{
 };
 use crate::engine::utils::{
     key_generator::{self, KeyGenerator},
+    rbtree_node::TreeNode,
     remote_push::{RemotePushable, RemotePushedHashMap, RemotePusherHashMap},
     ringbuffer::{self, ringbuffer},
 };
 pub use timestamp::Timestamp;
 pub use track::{TimelineTrack, TimelineTrackKey};
 
-pub fn timeline(sample_rate: u32, max_buffer_size: usize) -> (Timeline, TimelineProcessor) {
+pub fn timeline(
+    sample_rate: u32,
+    bpm_cents: u16,
+    max_buffer_size: usize,
+) -> (Timeline, TimelineProcessor) {
     let position1 = Arc::new(AtomicU64::new(0));
     let position2 = Arc::clone(&position1);
 
@@ -40,6 +45,7 @@ pub fn timeline(sample_rate: u32, max_buffer_size: usize) -> (Timeline, Timeline
         Timeline {
             max_buffer_size,
             sample_rate,
+            bpm_cents,
             key_generator: KeyGenerator::new(),
 
             position: position1,
@@ -51,7 +57,7 @@ pub fn timeline(sample_rate: u32, max_buffer_size: usize) -> (Timeline, Timeline
         },
         TimelineProcessor {
             position: position2,
-            bpm_cents: 120,
+            bpm_cents,
             tracks: tracks_pushed,
 
             event_receiver,
@@ -63,13 +69,14 @@ enum Event {
     JumpTo(u64),
     AddClip {
         track_key: TrackKey,
-        clip: Box<TimelineClip>,
+        clip: Box<TreeNode<TimelineClip>>,
     },
 }
 
 pub struct Timeline {
     max_buffer_size: usize,
     sample_rate: u32,
+    bpm_cents: u16,
     key_generator: KeyGenerator<TimelineTrackKey>,
 
     /// Should not be mutated from here
@@ -95,6 +102,7 @@ impl Timeline {
             output,
             Arc::clone(&self.position),
             self.sample_rate,
+            self.bpm_cents,
             self.max_buffer_size,
         );
         self.tracks.push((key, timeline_track));
@@ -131,7 +139,7 @@ impl Timeline {
 
         self.event_sender.send(Event::AddClip {
             track_key,
-            clip: Box::new(TimelineClip::new(start, length, audio_clip)),
+            clip: Box::new(TreeNode::new(TimelineClip::new(start, length, audio_clip))),
         });
 
         Ok(())
@@ -169,13 +177,17 @@ impl TimelineProcessor {
         self.position.fetch_add(buffer_size, Ordering::Relaxed);
     }
 
-    fn add_clip(&mut self, track_key: TimelineTrackKey, timeline_clip: Box<TimelineClip>) {
+    fn add_clip(
+        &mut self,
+        track_key: TimelineTrackKey,
+        timeline_clip: Box<TreeNode<TimelineClip>>,
+    ) {
         let track = self
             .tracks
             .get_mut(&track_key)
             .expect("Track doesn't exist");
 
-        track.insert_clip(timeline_clip, self.bpm_cents);
+        track.insert_clip(timeline_clip);
     }
 }
 
@@ -227,7 +239,7 @@ mod tests {
 
     #[test]
     fn add_track() {
-        let (mut tl, mut tlp) = timeline(40_000, 10);
+        let (mut tl, mut tlp) = timeline(40_000, 100_00, 10);
 
         for _ in 0..50 {
             tl.add_track(0).unwrap();
@@ -244,7 +256,7 @@ mod tests {
 
     #[test]
     fn add_clip() {
-        let (mut tl, mut tlp) = timeline(40_000, 10);
+        let (mut tl, mut tlp) = timeline(40_000, 100_00, 10);
 
         let ck = tl
             .import_audio_clip(&test_file_path("44100 16-bit.wav"))

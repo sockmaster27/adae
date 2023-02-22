@@ -38,7 +38,7 @@ impl AudioClipStore {
 
         let key = self.key_generator.next()?;
 
-        let clip = AudioClip::import(key, path)?;
+        let clip = AudioClip::import(path)?;
 
         // Commit only if no errors occur
         self.clips.insert(key, Arc::new(clip));

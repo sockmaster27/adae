@@ -14,6 +14,7 @@ use crate::engine::utils::key_generator::KeyGenerator;
 use crate::engine::utils::remote_push::RemotePushable;
 use crate::engine::utils::remote_push::{RemotePushedHashMap, RemotePusherHashMap};
 use crate::engine::Sample;
+use crate::engine::CHANNELS;
 
 pub fn mixer(max_buffer_size: usize) -> (Mixer, MixerProcessor) {
     let mut key_generator = KeyGenerator::new();
@@ -213,7 +214,7 @@ impl Source for MixerProcessor {
         }
         match self.mix_point.get() {
             Ok(buffer) => buffer,
-            Err(buffer) => &mut buffer[..buffer_size],
+            Err(buffer) => &mut buffer[..buffer_size * CHANNELS],
         }
     }
 }
