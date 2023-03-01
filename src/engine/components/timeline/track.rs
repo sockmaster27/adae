@@ -1,6 +1,5 @@
 use std::cmp::min;
 use std::fmt::Debug;
-use std::mem;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -10,7 +9,7 @@ use ouroboros::self_referencing;
 
 use super::TimelineClip;
 use crate::engine::components::track::TrackKey;
-use crate::engine::traits::{Info, Source};
+use crate::engine::traits::Info;
 use crate::engine::utils::rbtree_node::{TreeNode, TreeNodeAdapter};
 use crate::engine::{Sample, CHANNELS};
 use crate::Timestamp;
@@ -45,8 +44,6 @@ pub struct TimelineTrack {
     relevant_clip: CursorOwning<TreeNodeAdapter<TimelineClip>>,
 
     output_track: TrackKey,
-
-    output_buffer: Vec<Sample>,
 }
 impl TimelineTrack {
     pub fn new(
@@ -54,7 +51,6 @@ impl TimelineTrack {
         position: Arc<AtomicU64>,
         sample_rate: u32,
         bpm_cents: u16,
-        max_buffer_size: usize,
     ) -> Self {
         TimelineTrack {
             position,
@@ -66,8 +62,6 @@ impl TimelineTrack {
             }),
 
             output_track: output,
-
-            output_buffer: vec![0.0; max_buffer_size * CHANNELS],
         }
     }
 
@@ -78,7 +72,7 @@ impl TimelineTrack {
     pub fn insert_clip(&mut self, clip: Box<TreeNode<TimelineClip>>) {
         self.relevant_clip.with_cursor_mut(|cursor| {
             let position = Timestamp::from_samples(
-                self.position.load(Ordering::SeqCst),
+                self.position.load(Ordering::Relaxed),
                 self.sample_rate,
                 self.bpm_cents,
             );
@@ -96,14 +90,12 @@ impl TimelineTrack {
             }
         })
     }
-}
-impl Debug for TimelineTrack {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "TimelineTrack")
+
+    pub fn jump(&mut self, position: Timestamp) {
+        todo!("Update relevant_clip");
     }
-}
-impl Source for TimelineTrack {
-    fn output(&mut self, info: &Info) -> &mut [Sample] {
+
+    pub fn output(&mut self, info: &Info, buffer: &mut [Sample]) {
         let Info {
             sample_rate,
             buffer_size,
@@ -113,7 +105,7 @@ impl Source for TimelineTrack {
             let mut progress = 0;
 
             while progress < buffer_size {
-                let mut should_move = false;
+                let should_move;
                 match cursor.get() {
                     Some(clip) => {
                         let position = self.position.load(Ordering::Relaxed);
@@ -123,8 +115,7 @@ impl Source for TimelineTrack {
                         let clip_start = clip_ref.start.samples(sample_rate, self.bpm_cents);
                         if position + (progress as u64) < clip_start {
                             let end_zeroes = min((clip_start - position) as usize, buffer_size);
-                            self.output_buffer[progress * CHANNELS..end_zeroes * CHANNELS]
-                                .fill(0.0);
+                            buffer[progress * CHANNELS..end_zeroes * CHANNELS].fill(0.0);
                             progress = end_zeroes;
                         }
 
@@ -137,7 +128,7 @@ impl Source for TimelineTrack {
                                 buffer_size: requested_buffer,
                             },
                         );
-                        self.output_buffer[progress * CHANNELS..progress * CHANNELS + output.len()]
+                        buffer[progress * CHANNELS..progress * CHANNELS + output.len()]
                             .copy_from_slice(&output);
                         progress += output.len() / CHANNELS;
 
@@ -147,7 +138,7 @@ impl Source for TimelineTrack {
 
                     None => {
                         // No more clips, pad with zero
-                        self.output_buffer[progress * CHANNELS..buffer_size * CHANNELS].fill(0.0);
+                        buffer[progress * CHANNELS..buffer_size * CHANNELS].fill(0.0);
                         break;
                     }
                 }
@@ -158,7 +149,11 @@ impl Source for TimelineTrack {
                 }
             }
         });
-        &mut self.output_buffer[..buffer_size * CHANNELS]
+    }
+}
+impl Debug for TimelineTrack {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "TimelineTrack")
     }
 }
 
@@ -197,7 +192,7 @@ mod tests {
 
     #[test]
     fn insert() {
-        let mut t = TimelineTrack::new(0, Arc::new(AtomicU64::new(0)), SAMPLE_RATE, BPM_CENTS, 100);
+        let mut t = TimelineTrack::new(0, Arc::new(AtomicU64::new(0)), SAMPLE_RATE, BPM_CENTS);
         let c1 = clip(3, Some(1), 100);
         let c2 = clip(1, Some(2), 100);
 
@@ -216,12 +211,13 @@ mod tests {
 
     #[test]
     fn output() {
+        const BUFFER_SIZE: usize = SBU;
         let info = Info {
             sample_rate: SAMPLE_RATE,
-            buffer_size: SBU,
+            buffer_size: BUFFER_SIZE,
         };
         let pos = Arc::new(AtomicU64::new(0));
-        let mut t = TimelineTrack::new(0, Arc::clone(&pos), SAMPLE_RATE, BPM_CENTS, 100);
+        let mut t = TimelineTrack::new(0, Arc::clone(&pos), SAMPLE_RATE, BPM_CENTS);
         let c1 = clip(1, Some(1), 100);
         let c2 = clip(3, Some(2), 100);
 
@@ -230,8 +226,9 @@ mod tests {
             t.insert_clip(c2);
 
             // Empty
-            let out = t.output(&info);
-            for &mut s in out {
+            let mut out = [0.0; BUFFER_SIZE * CHANNELS];
+            t.output(&info, &mut out[..]);
+            for &mut s in out.iter_mut() {
                 assert_eq!(s, 0.0);
             }
             pos.fetch_add(info.buffer_size as u64, Ordering::Relaxed);
@@ -243,15 +240,17 @@ mod tests {
                 assert_eq!(length.beat_units(), 1);
             });
 
-            let out = t.output(&info);
-            for &mut s in out {
+            let mut out = [0.0; BUFFER_SIZE * CHANNELS];
+            t.output(&info, &mut out[..]);
+            for &mut s in out.iter_mut() {
                 assert_ne!(s, 0.0);
             }
             pos.fetch_add(info.buffer_size as u64, Ordering::Relaxed);
 
             // Empty
-            let out = t.output(&info);
-            for &mut s in out {
+            let mut out = [0.0; BUFFER_SIZE * CHANNELS];
+            t.output(&info, &mut out[..]);
+            for &mut s in out.iter_mut() {
                 assert_eq!(s, 0.0);
             }
             pos.fetch_add(info.buffer_size as u64, Ordering::Relaxed);
@@ -263,10 +262,11 @@ mod tests {
                 assert_eq!(length.beat_units(), 2);
             });
 
-            let out = t.output(&Info {
+            let mut out = [0.0; 3 * SBU * CHANNELS];
+            t.output(&Info {
                 sample_rate: SAMPLE_RATE,
                 buffer_size: 3 * SBU,
-            });
+            }, &mut out[..]);
             for &s in &out[..CHANNELS * (2 * SBU)] {
                 assert_ne!(s, 0.0);
             }
@@ -279,8 +279,9 @@ mod tests {
                 let clip = cur.get();
                 assert!(clip.is_none());
             });
-            let out = t.output(&info);
-            for &mut s in out {
+            let mut out = [0.0; BUFFER_SIZE * CHANNELS];
+            t.output(&info, &mut out[..]);
+            for &mut s in out.iter_mut() {
                 assert_eq!(s, 0.0);
             }
             t.relevant_clip.with_cursor_mut(|cur| {
@@ -292,7 +293,7 @@ mod tests {
 
     #[test]
     fn output_many() {
-        let mut t = TimelineTrack::new(0, Arc::new(AtomicU64::new(0)), SAMPLE_RATE, BPM_CENTS, 200);
+        let mut t = TimelineTrack::new(0, Arc::new(AtomicU64::new(0)), SAMPLE_RATE, BPM_CENTS);
         let c1 = clip(0, Some(1), 200);
         let c2 = clip(2, Some(1), 200);
         let c3 = clip(4, Some(1), 200);
@@ -304,10 +305,11 @@ mod tests {
             t.insert_clip(c3);
             t.insert_clip(c4);
 
-            let out = t.output(&Info {
+            let mut out = [0.0; 6 * SBU * CHANNELS];
+            t.output(&Info {
                 sample_rate: SAMPLE_RATE,
                 buffer_size: 6 * SBU,
-            });
+            }, &mut out[..]);
             const SBUC: usize = SBU * CHANNELS;
             for &s in &out[..SBUC] {
                 // Something

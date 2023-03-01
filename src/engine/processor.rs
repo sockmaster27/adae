@@ -7,7 +7,7 @@ use super::{
         mixer::{mixer, Mixer, MixerProcessor},
         timeline::{timeline, Timeline, TimelineProcessor},
     },
-    traits::{Info, Source},
+    traits::Info,
 };
 use super::{Sample, CHANNELS};
 #[cfg(feature = "record_output")]
@@ -69,6 +69,7 @@ pub struct Processor {
 impl Processor {
     /// Synchronize with the [`ProcessorInterface`]
     pub fn poll(&mut self) {
+        self.timeline.poll();
         self.mixer.poll();
     }
 
@@ -93,7 +94,10 @@ impl Processor {
             panic!("A buffer of size {} was requested, which exceeds the biggest producible size of {}.", buffer_size, self.max_buffer_size);
         }
 
-        let buffer = self.mixer.output(&Info::new(self.sample_rate, buffer_size));
+        let info = Info::new(self.sample_rate, buffer_size);
+        let timeline_out = self.mixer.source_outs();
+        self.timeline.output(timeline_out, &info);
+        let buffer = self.mixer.output(&info);
 
         Self::clip(buffer);
 

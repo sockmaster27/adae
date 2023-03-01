@@ -1,7 +1,4 @@
-use std::{
-    cell::{Ref, RefCell, RefMut, UnsafeCell},
-    ops::{Deref, DerefMut},
-};
+use std::cell::{Ref, RefCell, RefMut};
 
 use intrusive_collections::{intrusive_adapter, KeyAdapter, RBTreeLink};
 

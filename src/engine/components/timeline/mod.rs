@@ -20,11 +20,15 @@ use super::{
     audio_clip_store::{AudioClipStore, ImportError},
     track::TrackKey,
 };
-use crate::engine::utils::{
-    key_generator::{self, KeyGenerator},
-    rbtree_node::TreeNode,
-    remote_push::{RemotePushable, RemotePushedHashMap, RemotePusherHashMap},
-    ringbuffer::{self, ringbuffer},
+use crate::engine::{
+    traits::Info,
+    utils::{
+        key_generator::{self, KeyGenerator},
+        rbtree_node::TreeNode,
+        remote_push::{RemotePushable, RemotePushedHashMap, RemotePusherHashMap},
+        ringbuffer::{self, ringbuffer},
+    },
+    Sample, CHANNELS,
 };
 pub use timestamp::Timestamp;
 pub use track::{TimelineTrack, TimelineTrackKey};
@@ -43,7 +47,6 @@ pub fn timeline(
 
     (
         Timeline {
-            max_buffer_size,
             sample_rate,
             bpm_cents,
             key_generator: KeyGenerator::new(),
@@ -57,7 +60,6 @@ pub fn timeline(
         },
         TimelineProcessor {
             position: position2,
-            bpm_cents,
             tracks: tracks_pushed,
 
             event_receiver,
@@ -74,7 +76,6 @@ enum Event {
 }
 
 pub struct Timeline {
-    max_buffer_size: usize,
     sample_rate: u32,
     bpm_cents: u16,
     key_generator: KeyGenerator<TimelineTrackKey>,
@@ -103,7 +104,6 @@ impl Timeline {
             Arc::clone(&self.position),
             self.sample_rate,
             self.bpm_cents,
-            self.max_buffer_size,
         );
         self.tracks.push((key, timeline_track));
         Ok(key)
@@ -151,7 +151,6 @@ pub struct TimelineProcessor {
     // Could be Rc<Cell<u64>> if tracks was a regular HashMap.
     position: Arc<AtomicU64>,
 
-    bpm_cents: u16,
     tracks: RemotePushedHashMap<TimelineTrackKey, TimelineTrack>,
 
     event_receiver: ringbuffer::Receiver<Event>,
@@ -173,10 +172,6 @@ impl TimelineProcessor {
         }
     }
 
-    pub fn output(&self, buffer_size: u64) {
-        self.position.fetch_add(buffer_size, Ordering::Relaxed);
-    }
-
     fn add_clip(
         &mut self,
         track_key: TimelineTrackKey,
@@ -188,6 +183,27 @@ impl TimelineProcessor {
             .expect("Track doesn't exist");
 
         track.insert_clip(timeline_clip);
+    }
+
+    pub fn output(&mut self, mixer_ins: &mut HashMap<TrackKey, Vec<Sample>>, info: &Info) {
+        let Info {
+            sample_rate: _,
+            buffer_size,
+        } = *info;
+        for track in self.tracks.values_mut() {
+            let key = track.output_track();
+
+            let buffer = &mut mixer_ins
+                .get_mut(&key)
+                .expect("No buffer found for output track")[..buffer_size * CHANNELS];
+            track.output(info, buffer);
+        }
+        self.position.fetch_add(
+            buffer_size
+                .try_into()
+                .expect("buffer_size doesn't fit in 64 bits"),
+            Ordering::Relaxed,
+        );
     }
 }
 

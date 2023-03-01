@@ -21,12 +21,9 @@ use symphonia::core::{
     sample::Sample as SymphoniaSample,
 };
 
+use crate::engine::traits::{Info, Source};
 use crate::engine::{Sample, CHANNELS};
 use crate::zip;
-use crate::{
-    engine::traits::{Info, Source},
-    Timestamp,
-};
 
 pub type AudioClipKey = u32;
 

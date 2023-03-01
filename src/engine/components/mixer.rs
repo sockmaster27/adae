@@ -7,7 +7,7 @@ use super::track::TrackKey;
 use super::track::{track, track_from_data, Track, TrackData, TrackProcessor};
 use super::MixPoint;
 use crate::engine::traits::Effect;
-use crate::engine::traits::{Info, Source};
+use crate::engine::traits::Info;
 use crate::engine::utils::dropper::DBox;
 use crate::engine::utils::key_generator;
 use crate::engine::utils::key_generator::KeyGenerator;
@@ -25,8 +25,14 @@ pub fn mixer(max_buffer_size: usize) -> (Mixer, MixerProcessor) {
     tracks.insert(0, track);
     key_generator.reserve(0).unwrap();
 
-    let (track_processors_pusher, mut track_processors_pushed) = HashMap::remote_push();
-    track_processors_pushed.insert(0, DBox::new(track_processor));
+    let (mut track_processors_pusher, mut track_processors_pushed) = HashMap::remote_push();
+    let (mut source_outs_pusher, mut source_outs_pushed) = HashMap::remote_push();
+
+    track_processors_pusher.push((0, DBox::new(track_processor)));
+    source_outs_pusher.push((0, vec![0.0; max_buffer_size * CHANNELS]));
+
+    track_processors_pushed.poll();
+    source_outs_pushed.poll();
 
     (
         Mixer {
@@ -34,10 +40,12 @@ pub fn mixer(max_buffer_size: usize) -> (Mixer, MixerProcessor) {
             key_generator,
             tracks,
             track_processors: track_processors_pusher,
+            source_outs: source_outs_pusher,
         },
         MixerProcessor {
             tracks: track_processors_pushed,
             mix_point: MixPoint::new(max_buffer_size),
+            source_outs: source_outs_pushed,
         },
     )
 }
@@ -47,6 +55,7 @@ pub struct Mixer {
     key_generator: KeyGenerator<TrackKey>,
     tracks: HashMap<TrackKey, Track>,
     track_processors: RemotePusherHashMap<TrackKey, DBox<TrackProcessor>>,
+    source_outs: RemotePusherHashMap<TrackKey, Vec<Sample>>,
 }
 impl Mixer {
     pub fn tracks(&self) -> Vec<&Track> {
@@ -162,20 +171,23 @@ impl Mixer {
         let (track, track_processor) = track;
         let key = track.key();
         self.tracks.insert(key, track);
+        self.source_outs
+            .push((key, vec![0.0; self.max_buffer_size * CHANNELS]));
         self.track_processors
             .push((key, DBox::new(track_processor)))
     }
     fn push_tracks(&mut self, tracks: Vec<(Track, TrackProcessor)>) {
-        let track_processors = tracks
-            .into_iter()
-            .map(|track| {
-                let (track, track_processor) = track;
-                let key = track.key();
-                self.tracks.insert(key, track);
+        let mut track_processors = vec![];
+        let mut source_outs = vec![];
+        for track in tracks {
+            let (track, track_processor) = track;
+            let key = track.key();
+            self.tracks.insert(key, track);
 
-                (key, DBox::new(track_processor))
-            })
-            .collect();
+            track_processors.push((key, DBox::new(track_processor)));
+            source_outs.push((key, vec![0.0; self.max_buffer_size * CHANNELS]));
+        }
+        self.source_outs.push_multiple(source_outs);
         self.track_processors.push_multiple(track_processors);
     }
 
@@ -186,29 +198,28 @@ impl Mixer {
 
 pub struct MixerProcessor {
     tracks: RemotePushedHashMap<TrackKey, DBox<TrackProcessor>>,
+    source_outs: RemotePushedHashMap<TrackKey, Vec<Sample>>,
     mix_point: MixPoint,
 }
-impl Debug for MixerProcessor {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "MixerProcessor {{ tracks: {:?}, ... }}", self.tracks)
-    }
-}
-impl Source for MixerProcessor {
-    fn poll(&mut self) {
-        self.tracks.poll();
+impl MixerProcessor {
+    pub fn source_outs(&mut self) -> &mut HashMap<TrackKey, Vec<Sample>> {
+        &mut self.source_outs
     }
 
-    fn output(&mut self, info: &Info) -> &mut [Sample] {
+    pub fn poll(&mut self) {
+        self.tracks.poll();
+        self.source_outs.poll();
+    }
+
+    pub fn output(&mut self, info: &Info) -> &mut [Sample] {
         let Info {
             sample_rate: _,
             buffer_size,
         } = *info;
 
         self.mix_point.reset();
-        for track in self.tracks.values_mut() {
-            // Test
-            let buffer = &mut [0f32; 10][..];
-
+        for (key, track) in self.tracks.iter_mut() {
+            let buffer = self.source_outs.get_mut(key).expect("Track has no input");
             track.process(info, buffer);
             self.mix_point.add(buffer);
         }
@@ -216,6 +227,11 @@ impl Source for MixerProcessor {
             Ok(buffer) => buffer,
             Err(buffer) => &mut buffer[..buffer_size * CHANNELS],
         }
+    }
+}
+impl Debug for MixerProcessor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "MixerProcessor {{ tracks: {:?}, ... }}", self.tracks)
     }
 }
 

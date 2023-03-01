@@ -68,8 +68,8 @@ impl Dropper {
                 }
             }
 
-            sleep1.store(true, Ordering::SeqCst);
-            while sleep1.load(Ordering::SeqCst) {
+            sleep1.store(true, Ordering::Release);
+            while sleep1.load(Ordering::Acquire) {
                 thread::park();
             }
         });
@@ -83,8 +83,11 @@ impl Dropper {
 
     fn send(&mut self, event: Event) {
         let handle = self.handle.as_ref().expect("No connected thread");
-        self.sender.send(event);
-        self.sleep.store(false, Ordering::SeqCst);
+        // Might reallocate :(
+        allow_heap! {{
+            self.sender.send(event);
+        }}
+        self.sleep.store(false, Ordering::Release);
         handle.thread().unpark();
     }
 }
@@ -103,7 +106,7 @@ impl Debug for Dropper {
     }
 }
 
-/// A Box whose content will autoatically be dropped in another thread
+/// A Box whose content will automatically be sent to another thread to be dropped
 #[derive(Debug)]
 pub struct DBox<T>
 where
