@@ -121,6 +121,13 @@ impl Engine {
         &mut self.processor_interface.timeline
     }
 
+    pub fn master(&self) -> &Track {
+        self.processor_interface.mixer.master()
+    }
+    pub fn master_mut(&mut self) -> &mut Track {
+        self.processor_interface.mixer.master_mut()
+    }
+
     pub fn tracks(&self) -> Vec<&Track> {
         self.processor_interface.mixer.tracks()
     }

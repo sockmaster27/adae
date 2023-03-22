@@ -29,7 +29,7 @@ impl<T> TreeNode<T> {
         self.val.borrow()
     }
 
-    ///Mutably borrows the wrapped value.
+    /// Mutably borrows the wrapped value.
     ///
     /// The borrow lasts until the returned RefMut or all RefMuts derived from it exit scope. The value cannot be borrowed while this borrow is active.
     ///

@@ -29,6 +29,15 @@ where
         }
     }
 
+    /// Amount of keys currently in use.
+    ///
+    /// This will be incremented after each call to [`Self::reserve()`] and [`Self::next()`].
+    ///
+    /// This will correspondingly be decremented after a succesful call to [`Self::free()`].
+    pub fn used_keys(&self) -> K {
+        cast(self.used_keys.len()).unwrap()
+    }
+
     /// Amount of unique keys that are left.
     ///
     /// This will be decremented after each call to [`Self::reserve()`] and [`Self::next()`],
@@ -37,8 +46,7 @@ where
     /// This will correspondingly be incremented after a succesful call to [`Self::free()`].
     pub fn remaining_keys(&self) -> K {
         // Size of used_keys should never be able to exceed number of values of K
-        let used = cast(self.used_keys.len()).unwrap();
-        K::max_value() - used
+        K::max_value() - self.used_keys()
     }
 
     /// Return new unique key, registering it as occupied
@@ -81,9 +89,14 @@ where
         }
     }
 
-    // Check whether key is currently in use
+    /// Check whether key is currently in use
     pub fn in_use(&self, key: K) -> bool {
         self.used_keys.contains(&key)
+    }
+
+    /// Return the set of keys currently in use
+    pub fn get_used_keys(&self) -> impl Iterator<Item = K> + '_ {
+        self.used_keys.iter().map(|k| *k)
     }
 }
 

@@ -71,6 +71,15 @@ pub enum ImportError {
     OverFlow(ClipOverflowError),
     Other(audio_clip::ImportError),
 }
+impl Display for ImportError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::OverFlow(e) => e.fmt(f),
+            Self::Other(e) => e.fmt(f),
+        }
+    }
+}
+impl Error for ImportError {}
 impl From<key_generator::OverflowError> for ImportError {
     fn from(_: key_generator::OverflowError) -> Self {
         ImportError::OverFlow(ClipOverflowError)

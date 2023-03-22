@@ -19,31 +19,26 @@ use crate::engine::CHANNELS;
 pub fn mixer(max_buffer_size: usize) -> (Mixer, MixerProcessor) {
     let mut key_generator = KeyGenerator::new();
 
-    let (track, track_processor) = track(0, max_buffer_size);
+    let tracks = HashMap::new();
 
-    let mut tracks = HashMap::new();
-    tracks.insert(0, track);
-    key_generator.reserve(0).unwrap();
+    let (track_processors_pusher, track_processors_pushed) = HashMap::remote_push();
+    let (source_outs_pusher, source_outs_pushed) = HashMap::remote_push();
 
-    let (mut track_processors_pusher, mut track_processors_pushed) = HashMap::remote_push();
-    let (mut source_outs_pusher, mut source_outs_pushed) = HashMap::remote_push();
-
-    track_processors_pusher.push((0, DBox::new(track_processor)));
-    source_outs_pusher.push((0, vec![0.0; max_buffer_size * CHANNELS]));
-
-    track_processors_pushed.poll();
-    source_outs_pushed.poll();
+    let (master, master_processor) = track(0, max_buffer_size);
 
     (
         Mixer {
             max_buffer_size,
             key_generator,
             tracks,
+            master,
+
             track_processors: track_processors_pusher,
             source_outs: source_outs_pusher,
         },
         MixerProcessor {
             tracks: track_processors_pushed,
+            master: DBox::new(master_processor),
             mix_point: MixPoint::new(max_buffer_size),
             source_outs: source_outs_pushed,
         },
@@ -54,10 +49,19 @@ pub struct Mixer {
     max_buffer_size: usize,
     key_generator: KeyGenerator<TrackKey>,
     tracks: HashMap<TrackKey, Track>,
+    master: Track,
+
     track_processors: RemotePusherHashMap<TrackKey, DBox<TrackProcessor>>,
     source_outs: RemotePusherHashMap<TrackKey, Vec<Sample>>,
 }
 impl Mixer {
+    pub fn master(&self) -> &Track {
+        &self.master
+    }
+    pub fn master_mut(&mut self) -> &mut Track {
+        &mut self.master
+    }
+
     pub fn tracks(&self) -> Vec<&Track> {
         self.tracks.values().collect()
     }
@@ -198,6 +202,7 @@ impl Mixer {
 
 pub struct MixerProcessor {
     tracks: RemotePushedHashMap<TrackKey, DBox<TrackProcessor>>,
+    master: DBox<TrackProcessor>,
     source_outs: RemotePushedHashMap<TrackKey, Vec<Sample>>,
     mix_point: MixPoint,
 }
@@ -223,10 +228,13 @@ impl MixerProcessor {
             track.process(info, buffer);
             self.mix_point.add(buffer);
         }
-        match self.mix_point.get() {
+        let out = match self.mix_point.get() {
             Ok(buffer) => buffer,
             Err(buffer) => &mut buffer[..buffer_size * CHANNELS],
-        }
+        };
+
+        self.master.process(info, out);
+        out
     }
 }
 impl Debug for MixerProcessor {
@@ -287,8 +295,8 @@ mod tests {
             mp.poll();
         }}
 
-        assert_eq!(m.tracks.len(), 51);
-        assert_eq!(mp.tracks.len(), 51);
+        assert_eq!(m.tracks.len(), 50);
+        assert_eq!(mp.tracks.len(), 50);
     }
 
     #[test]
@@ -303,8 +311,8 @@ mod tests {
             mp.poll();
         }}
 
-        assert_eq!(m.tracks.len(), 50 * 5 + 1);
-        assert_eq!(mp.tracks.len(), 50 * 5 + 1);
+        assert_eq!(m.tracks.len(), 50 * 5);
+        assert_eq!(mp.tracks.len(), 50 * 5);
     }
 
     #[test]
@@ -324,18 +332,19 @@ mod tests {
             mp.poll();
         }}
 
-        assert_eq!(mp.tracks.len(), 50 + 1);
+        assert_eq!(mp.tracks.len(), 50);
     }
     #[test]
     fn reconstruct_existing_track() {
         let (mut m, mut mp) = mixer(10);
 
+        let used = m.add_track().unwrap();
+
         let result = m.reconstruct_track(&TrackData {
             panning: 0.0,
             volume: 1.0,
 
-            // Should already be in use by the initial track
-            key: 0,
+            key: used,
         });
 
         no_heap! {{
@@ -369,7 +378,7 @@ mod tests {
             mp.poll();
         }}
 
-        assert_eq!(mp.tracks.len(), 50 * batch_size + 1);
+        assert_eq!(mp.tracks.len(), 50 * batch_size);
     }
 
     #[test]
@@ -383,8 +392,8 @@ mod tests {
             mp.poll();
         }}
 
-        assert_eq!(m.tracks.len(), 1);
-        assert_eq!(mp.tracks.len(), 1);
+        assert_eq!(m.tracks.len(), 0);
+        assert_eq!(mp.tracks.len(), 0);
     }
 
     #[test]
@@ -402,7 +411,7 @@ mod tests {
         m.delete_track(k).unwrap();
         poll();
 
-        assert_eq!(m.tracks.len(), 1);
-        assert_eq!(mp.tracks.len(), 1);
+        assert_eq!(m.tracks.len(), 0);
+        assert_eq!(mp.tracks.len(), 0);
     }
 }

@@ -93,6 +93,10 @@ impl Timeline {
         self.clip_store.import(path)
     }
 
+    pub fn tracks(&self) -> impl Iterator<Item = TimelineTrackKey> + '_ {
+        self.key_generator.get_used_keys()
+    }
+
     pub fn add_track(
         &mut self,
         output: TrackKey,
@@ -115,6 +119,10 @@ impl Timeline {
 
     pub fn jump_to(&mut self, position: u64) {
         self.event_sender.send(Event::JumpTo(position))
+    }
+
+    pub fn used_keys(&self) -> u32 {
+        self.key_generator.used_keys()
     }
 
     pub fn remaining_keys(&self) -> u32 {
