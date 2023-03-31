@@ -1,6 +1,7 @@
 use core::sync::atomic::Ordering;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{BuildStreamError, Device, SampleFormat, SampleRate, Stream, StreamConfig};
+use std::collections::HashSet;
 use std::error::Error;
 use std::fmt::Display;
 use std::path::Path;
@@ -41,6 +42,7 @@ pub struct Engine {
     join_handle: Option<JoinHandle<()>>,
 
     processor_interface: ProcessorInterface,
+    audio_tracks: HashSet<AudioTrack>,
 }
 impl Engine {
     pub fn new() -> Self {
@@ -98,6 +100,7 @@ impl Engine {
             stopped: stopped1,
             join_handle,
             processor_interface,
+            audio_tracks: HashSet::new(),
         }
     }
 
@@ -157,6 +160,7 @@ impl Engine {
             stopped: stopped1,
             join_handle: Some(join_handle),
             processor_interface,
+            audio_tracks: HashSet::new(),
         }
     }
 
@@ -189,6 +193,10 @@ impl Engine {
         self.processor_interface.mixer.track_mut(key)
     }
 
+    pub fn audio_tracks(&self) -> impl Iterator<Item = &'_ AudioTrack> {
+        self.audio_tracks.iter()
+    }
+
     pub fn add_audio_track(&mut self) -> Result<AudioTrack, AudioTrackOverflowError> {
         if self.processor_interface.timeline.remaining_keys() == 0 {
             return Err(AudioTrackOverflowError::TimelineTracks(
@@ -206,15 +214,17 @@ impl Engine {
             .add_track(track_key)
             .unwrap();
 
-        Ok(AudioTrack {
+        let audio_track = AudioTrack {
             timeline_track_key: timeline_key,
             track_key,
-        })
+        };
+        self.audio_tracks.insert(audio_track.clone());
+        Ok(audio_track)
     }
     pub fn add_audio_tracks(
         &mut self,
         count: u32,
-    ) -> Result<Vec<AudioTrack>, AudioTrackOverflowError> {
+    ) -> Result<impl Iterator<Item = AudioTrack>, AudioTrackOverflowError> {
         if self.processor_interface.timeline.remaining_keys() < count {
             return Err(AudioTrackOverflowError::TimelineTracks(
                 TimelineTrackOverflowError,
@@ -231,13 +241,14 @@ impl Engine {
             .add_tracks(track_keys.clone())
             .unwrap();
 
-        let audio_tracks = zip!(track_keys, timeline_keys)
-            .map(|(track_key, timeline_key)| AudioTrack {
+        let audio_tracks =
+            zip!(track_keys, timeline_keys).map(|(track_key, timeline_key)| AudioTrack {
                 timeline_track_key: timeline_key,
                 track_key,
-            })
-            .collect();
-
+            });
+        for audio_track in audio_tracks.clone() {
+            self.audio_tracks.insert(audio_track.clone());
+        }
         Ok(audio_tracks)
     }
 
@@ -309,6 +320,7 @@ impl Engine {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AudioTrack {
     timeline_track_key: TimelineTrackKey,
     track_key: TrackKey,

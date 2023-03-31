@@ -24,6 +24,35 @@ fn get_track_from_key() {
 }
 
 #[test]
+fn add_audio_track() {
+    let mut e = Engine::dummy();
+    assert_eq!(e.audio_tracks().count(), 0);
+
+    let at = e.add_audio_track().unwrap();
+
+    assert_eq!(e.audio_tracks().count(), 1);
+    assert_eq!(e.audio_tracks().next(), Some(&at));
+}
+
+#[test]
+fn add_audio_tracks() {
+    let mut e = Engine::dummy();
+    assert_eq!(e.audio_tracks().count(), 0);
+
+    let mut ats: Vec<_> = e.add_audio_tracks(42).unwrap().collect();
+
+    assert_eq!(ats.len(), 42);
+    assert_eq!(e.audio_tracks().count(), 42);
+    for at1 in e.audio_tracks() {
+        let pos = ats.iter().position(|at2| at1 == at2).expect(
+            "add_audio_tracks() returned different tracks than the ones added to audio_tracks()",
+        );
+        ats.swap_remove(pos);
+    }
+    assert_eq!(ats.len(), 0);
+}
+
+#[test]
 fn add_audio_clip() {
     let mut e = Engine::dummy();
     let at = e.add_audio_track().unwrap();
