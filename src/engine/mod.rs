@@ -1,8 +1,9 @@
 use core::sync::atomic::Ordering;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{BuildStreamError, Device, SampleFormat, Stream, StreamConfig};
+use cpal::{BuildStreamError, Device, SampleFormat, SampleRate, Stream, StreamConfig};
 use std::error::Error;
 use std::fmt::Display;
+use std::path::Path;
 
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -11,9 +12,15 @@ use std::thread::{self, JoinHandle};
 mod components;
 mod traits;
 mod utils;
-use self::components::mixer::{InvalidTrackError, TrackOverflowError, TrackReconstructionError};
+use crate::zip;
+
+use self::components::audio_clip::AudioClipKey;
+use self::components::audio_clip_store::ImportError;
+use self::components::mixer::{InvalidTrackError, TrackOverflowError};
 pub use self::components::timeline::Timestamp;
-use self::components::timeline::{Timeline, TimelineTrackKey, TimelineTrackOverflowError};
+use self::components::timeline::{
+    AddClipError, InvalidTimelineTrackError, TimelineTrackKey, TimelineTrackOverflowError,
+};
 use self::components::TrackKey;
 pub use components::{Track, TrackData};
 mod processor;
@@ -105,7 +112,7 @@ impl Engine {
             move |data: &mut [T], _info| {
                 no_heap! {{
                     processor.poll();
-                    processor.output(data)
+                    processor.output(data);
                 }}
             },
             |err| panic!("{}", err),
@@ -114,11 +121,58 @@ impl Engine {
         Ok(stream)
     }
 
-    pub fn timeline(&self) -> &Timeline {
-        &self.processor_interface.timeline
+    /// Creates an engine that simulates outputting without outputting to any audio device.
+    ///
+    /// Spins poll- and output callback as fast as possible with a varying buffersize.  
+    pub fn dummy() -> Self {
+        let (processor_interface, mut processor) = processor(
+            &StreamConfig {
+                channels: 2,
+                sample_rate: SampleRate(48_000),
+                buffer_size: cpal::BufferSize::Default,
+            },
+            1024,
+        );
+
+        let mut data = vec![0.0; 2048];
+
+        let stopped1 = Arc::new(AtomicBool::new(false));
+        let stopped2 = Arc::clone(&stopped1);
+        let join_handle = thread::spawn(move || {
+            while !stopped2.load(Ordering::Acquire) {
+                let data = &mut data[..];
+                no_heap! {{
+                    processor.poll();
+                    processor.output(data);
+                }}
+                let data = &mut data[..1024];
+                no_heap! {{
+                    processor.poll();
+                    processor.output(data);
+                }}
+            }
+        });
+
+        Engine {
+            stopped: stopped1,
+            join_handle: Some(join_handle),
+            processor_interface,
+        }
     }
-    pub fn timeline_mut(&mut self) -> &mut Timeline {
-        &mut self.processor_interface.timeline
+
+    pub fn import_audio_clip(&mut self, path: &Path) -> Result<AudioClipKey, ImportError> {
+        self.processor_interface.timeline.import_audio_clip(path)
+    }
+    pub fn add_clip(
+        &mut self,
+        timeline_track_key: TimelineTrackKey,
+        clip_key: AudioClipKey,
+        start: Timestamp,
+        length: Option<Timestamp>,
+    ) -> Result<(), AddClipError> {
+        self.processor_interface
+            .timeline
+            .add_clip(timeline_track_key, clip_key, start, length)
     }
 
     pub fn master(&self) -> &Track {
@@ -128,13 +182,6 @@ impl Engine {
         self.processor_interface.mixer.master_mut()
     }
 
-    pub fn tracks(&self) -> Vec<&Track> {
-        self.processor_interface.mixer.tracks()
-    }
-    pub fn tracks_mut(&mut self) -> Vec<&mut Track> {
-        self.processor_interface.mixer.tracks_mut()
-    }
-
     pub fn track(&self, key: TrackKey) -> Result<&Track, InvalidTrackError> {
         self.processor_interface.mixer.track(key)
     }
@@ -142,36 +189,7 @@ impl Engine {
         self.processor_interface.mixer.track_mut(key)
     }
 
-    pub fn add_track(&mut self) -> Result<TrackKey, TrackOverflowError> {
-        self.processor_interface.mixer.add_track()
-    }
-    pub fn add_tracks(&mut self, count: TrackKey) -> Result<Vec<TrackKey>, TrackOverflowError> {
-        self.processor_interface.mixer.add_tracks(count)
-    }
-
-    pub fn reconstruct_track(
-        &mut self,
-        data: &TrackData,
-    ) -> Result<TrackKey, TrackReconstructionError> {
-        self.processor_interface.mixer.reconstruct_track(data)
-    }
-    pub fn reconstruct_tracks<'a>(
-        &mut self,
-        data: impl Iterator<Item = &'a TrackData>,
-    ) -> Result<Vec<TrackKey>, TrackReconstructionError> {
-        self.processor_interface.mixer.reconstruct_tracks(data)
-    }
-
-    pub fn delete_track(&mut self, key: TrackKey) -> Result<(), InvalidTrackError> {
-        self.processor_interface.mixer.delete_track(key)
-    }
-    pub fn delete_tracks(&mut self, keys: Vec<TrackKey>) -> Result<(), InvalidTrackError> {
-        self.processor_interface.mixer.delete_tracks(keys)
-    }
-
-    pub fn add_audio_track(
-        &mut self,
-    ) -> Result<(TimelineTrackKey, TrackKey), AudioTrackOverflowError> {
+    pub fn add_audio_track(&mut self) -> Result<AudioTrack, AudioTrackOverflowError> {
         if self.processor_interface.timeline.remaining_keys() == 0 {
             return Err(AudioTrackOverflowError::TimelineTracks(
                 TimelineTrackOverflowError,
@@ -181,14 +199,126 @@ impl Engine {
             return Err(AudioTrackOverflowError::Tracks(TrackOverflowError));
         }
 
-        let track_key = self.add_track().unwrap();
+        let track_key = self.processor_interface.mixer.add_track().unwrap();
         let timeline_key = self
             .processor_interface
             .timeline
             .add_track(track_key)
             .unwrap();
 
-        Ok((timeline_key, track_key))
+        Ok(AudioTrack {
+            timeline_track_key: timeline_key,
+            track_key,
+        })
+    }
+    pub fn add_audio_tracks(
+        &mut self,
+        count: u32,
+    ) -> Result<Vec<AudioTrack>, AudioTrackOverflowError> {
+        if self.processor_interface.timeline.remaining_keys() < count {
+            return Err(AudioTrackOverflowError::TimelineTracks(
+                TimelineTrackOverflowError,
+            ));
+        }
+        if self.processor_interface.mixer.remaining_keys() < count {
+            return Err(AudioTrackOverflowError::Tracks(TrackOverflowError));
+        }
+
+        let track_keys = self.processor_interface.mixer.add_tracks(count).unwrap();
+        let timeline_keys = self
+            .processor_interface
+            .timeline
+            .add_tracks(track_keys.clone())
+            .unwrap();
+
+        let audio_tracks = zip!(track_keys, timeline_keys)
+            .map(|(track_key, timeline_key)| AudioTrack {
+                timeline_track_key: timeline_key,
+                track_key,
+            })
+            .collect();
+
+        Ok(audio_tracks)
+    }
+
+    pub fn delete_audio_track(&mut self, track: AudioTrack) -> Result<(), InvalidAudioTrackError> {
+        if !self
+            .processor_interface
+            .timeline
+            .key_in_use(track.timeline_track_key)
+        {
+            return Err(InvalidAudioTrackError::TimelineTracks(
+                InvalidTimelineTrackError {
+                    key: track.timeline_track_key,
+                },
+            ));
+        }
+        if !self.processor_interface.mixer.key_in_use(track.track_key) {
+            return Err(InvalidAudioTrackError::Tracks(InvalidTrackError {
+                key: track.track_key,
+            }));
+        }
+
+        self.processor_interface
+            .mixer
+            .delete_track(track.track_key)
+            .unwrap();
+        self.processor_interface
+            .timeline
+            .delete_track(track.timeline_track_key)
+            .unwrap();
+        Ok(())
+    }
+    pub fn delete_audio_tracks(
+        &mut self,
+        tracks: Vec<AudioTrack>,
+    ) -> Result<(), InvalidAudioTrackError> {
+        let mut track_keys = Vec::with_capacity(tracks.len());
+        let mut timeline_keys = Vec::with_capacity(tracks.len());
+        for track in tracks {
+            if !self
+                .processor_interface
+                .timeline
+                .key_in_use(track.timeline_track_key)
+            {
+                return Err(InvalidAudioTrackError::TimelineTracks(
+                    InvalidTimelineTrackError {
+                        key: track.timeline_track_key,
+                    },
+                ));
+            }
+            if !self.processor_interface.mixer.key_in_use(track.track_key) {
+                return Err(InvalidAudioTrackError::Tracks(InvalidTrackError {
+                    key: track.track_key,
+                }));
+            }
+
+            track_keys.push(track.track_key);
+            timeline_keys.push(track.timeline_track_key);
+        }
+
+        self.processor_interface
+            .mixer
+            .delete_tracks(track_keys)
+            .unwrap();
+        self.processor_interface
+            .timeline
+            .delete_tracks(timeline_keys)
+            .unwrap();
+        Ok(())
+    }
+}
+
+pub struct AudioTrack {
+    timeline_track_key: TimelineTrackKey,
+    track_key: TrackKey,
+}
+impl AudioTrack {
+    pub fn timeline_track_key(&self) -> TimelineTrackKey {
+        self.timeline_track_key
+    }
+    pub fn track_key(&self) -> TrackKey {
+        self.track_key
     }
 }
 
@@ -231,3 +361,18 @@ impl Display for AudioTrackOverflowError {
     }
 }
 impl Error for AudioTrackOverflowError {}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum InvalidAudioTrackError {
+    Tracks(InvalidTrackError),
+    TimelineTracks(InvalidTimelineTrackError),
+}
+impl Display for InvalidAudioTrackError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Tracks(e) => e.fmt(f),
+            Self::TimelineTracks(e) => e.fmt(f),
+        }
+    }
+}
+impl Error for InvalidAudioTrackError {}

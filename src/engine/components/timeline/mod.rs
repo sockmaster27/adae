@@ -20,15 +20,18 @@ use super::{
     audio_clip_store::{AudioClipStore, ImportError},
     track::TrackKey,
 };
-use crate::engine::{
-    traits::Info,
-    utils::{
-        key_generator::{self, KeyGenerator},
-        rbtree_node::TreeNode,
-        remote_push::{RemotePushable, RemotePushedHashMap, RemotePusherHashMap},
-        ringbuffer::{self, ringbuffer},
+use crate::{
+    engine::{
+        traits::Info,
+        utils::{
+            key_generator::{self, KeyGenerator},
+            rbtree_node::TreeNode,
+            remote_push::{RemotePushable, RemotePushedHashMap, RemotePusherHashMap},
+            ringbuffer::{self, ringbuffer},
+        },
+        Sample, CHANNELS,
     },
-    Sample, CHANNELS,
+    zip,
 };
 pub use timestamp::Timestamp;
 pub use track::{TimelineTrack, TimelineTrackKey};
@@ -93,42 +96,6 @@ impl Timeline {
         self.clip_store.import(path)
     }
 
-    pub fn tracks(&self) -> impl Iterator<Item = TimelineTrackKey> + '_ {
-        self.key_generator.get_used_keys()
-    }
-
-    pub fn add_track(
-        &mut self,
-        output: TrackKey,
-    ) -> Result<TimelineTrackKey, TimelineTrackOverflowError> {
-        let key = self.key_generator.next()?;
-
-        let timeline_track = TimelineTrack::new(
-            output,
-            Arc::clone(&self.position),
-            self.sample_rate,
-            self.bpm_cents,
-        );
-        self.tracks.push((key, timeline_track));
-        Ok(key)
-    }
-
-    pub fn key_in_use(&self, key: TimelineTrackKey) -> bool {
-        self.key_generator.in_use(key)
-    }
-
-    pub fn jump_to(&mut self, position: u64) {
-        self.event_sender.send(Event::JumpTo(position))
-    }
-
-    pub fn used_keys(&self) -> u32 {
-        self.key_generator.used_keys()
-    }
-
-    pub fn remaining_keys(&self) -> u32 {
-        self.key_generator.remaining_keys()
-    }
-
     pub fn add_clip(
         &mut self,
         track_key: TimelineTrackKey,
@@ -151,6 +118,94 @@ impl Timeline {
         });
 
         Ok(())
+    }
+
+    pub fn jump_to(&mut self, position: u64) {
+        self.event_sender.send(Event::JumpTo(position))
+    }
+
+    pub fn add_track(
+        &mut self,
+        output: TrackKey,
+    ) -> Result<TimelineTrackKey, TimelineTrackOverflowError> {
+        let key = self.key_generator.next()?;
+
+        let timeline_track = TimelineTrack::new(
+            output,
+            Arc::clone(&self.position),
+            self.sample_rate,
+            self.bpm_cents,
+        );
+        self.tracks.push((key, timeline_track));
+        Ok(key)
+    }
+    pub(crate) fn add_tracks<'a>(
+        &mut self,
+        outputs: Vec<TrackKey>,
+    ) -> Result<Vec<TimelineTrackKey>, TimelineTrackOverflowError> {
+        let count = outputs.len();
+
+        if self.key_generator.remaining_keys()
+            < count.try_into().or(Err(TimelineTrackOverflowError))?
+        {
+            return Err(TimelineTrackOverflowError);
+        }
+
+        let mut keys = Vec::with_capacity(count);
+        for _ in 0..count {
+            let key = self.key_generator.next().expect(
+                "next_key() returned error, even though it reported remaining_keys() >= count",
+            );
+            keys.push(key);
+        }
+
+        let tracks = zip!(&keys, outputs)
+            .map(|(&key, output)| {
+                (
+                    key,
+                    TimelineTrack::new(
+                        output,
+                        Arc::clone(&self.position),
+                        self.sample_rate,
+                        self.bpm_cents,
+                    ),
+                )
+            })
+            .collect();
+        self.tracks.push_multiple(tracks);
+        Ok(keys)
+    }
+
+    pub fn delete_track(&mut self, key: TimelineTrackKey) -> Result<(), InvalidTimelineTrackError> {
+        if !self.key_in_use(key) {
+            return Err(InvalidTimelineTrackError { key });
+        }
+        self.tracks.remove(key);
+        Ok(())
+    }
+    pub fn delete_tracks(
+        &mut self,
+        keys: Vec<TimelineTrackKey>,
+    ) -> Result<(), InvalidTimelineTrackError> {
+        for &key in &keys {
+            if !self.key_in_use(key) {
+                return Err(InvalidTimelineTrackError { key });
+            }
+        }
+        self.tracks.remove_multiple(keys);
+        Ok(())
+    }
+
+    pub fn key_in_use(&self, key: TimelineTrackKey) -> bool {
+        self.key_generator.in_use(key)
+    }
+
+    pub fn used_keys(&self) -> u32 {
+        self.key_generator.used_keys()
+    }
+
+    pub fn remaining_keys(&self) -> u32 {
+        self.key_generator.remaining_keys()
     }
 }
 
@@ -231,11 +286,11 @@ impl From<key_generator::OverflowError> for TimelineTrackOverflowError {
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct InvalidTimelineTrackError {
-    key: TimelineTrackKey,
+    pub key: TimelineTrackKey,
 }
 impl Display for InvalidTimelineTrackError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "No track with key: {}", self.key)
+        write!(f, "No track with key, {}, on timeline", self.key)
     }
 }
 impl Error for InvalidTimelineTrackError {}
@@ -248,8 +303,10 @@ pub enum AddClipError {
 impl Display for AddClipError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::InvalidTimelineTrack(key) => write!(f, "No timeline track with key: {}", key),
-            Self::InvalidClip(key) => write!(f, "No audio clip with key: {}", key),
+            Self::InvalidTimelineTrack(key) => {
+                write!(f, "No timeline track with key, {}, on timeline", key)
+            }
+            Self::InvalidClip(key) => write!(f, "No audio clip with key, {}", key),
         }
     }
 }

@@ -82,7 +82,7 @@ impl Mixer {
         self.push_track(track);
         Ok(key)
     }
-    pub fn add_tracks(&mut self, count: TrackKey) -> Result<Vec<TrackKey>, TrackOverflowError> {
+    pub fn add_tracks(&mut self, count: u32) -> Result<Vec<TrackKey>, TrackOverflowError> {
         if self.key_generator.remaining_keys() < count {
             return Err(TrackOverflowError);
         }
@@ -195,6 +195,14 @@ impl Mixer {
         self.track_processors.push_multiple(track_processors);
     }
 
+    pub fn key_in_use(&self, key: TrackKey) -> bool {
+        self.key_generator.in_use(key)
+    }
+
+    pub fn used_keys(&self) -> u32 {
+        self.key_generator.used_keys()
+    }
+
     pub fn remaining_keys(&self) -> u32 {
         self.key_generator.remaining_keys()
     }
@@ -245,11 +253,11 @@ impl Debug for MixerProcessor {
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct InvalidTrackError {
-    key: TrackKey,
+    pub key: TrackKey,
 }
 impl Display for InvalidTrackError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "No track with key: {}", self.key)
+        write!(f, "No track with key, {}, on mixer", self.key)
     }
 }
 impl Error for InvalidTrackError {}
@@ -274,7 +282,7 @@ pub struct TrackReconstructionError {
 }
 impl Display for TrackReconstructionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Track with key, {}, already exists", self.key)
+        write!(f, "Track with key, {}, already exists on mixer", self.key)
     }
 }
 impl Error for TrackReconstructionError {}
