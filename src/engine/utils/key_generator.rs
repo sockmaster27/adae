@@ -93,11 +93,6 @@ where
     pub fn in_use(&self, key: K) -> bool {
         self.used_keys.contains(&key)
     }
-
-    /// Return the set of keys currently in use
-    pub fn get_used_keys(&self) -> impl Iterator<Item = K> + '_ {
-        self.used_keys.iter().map(|k| *k)
-    }
 }
 
 #[derive(Debug, PartialEq, Eq)]

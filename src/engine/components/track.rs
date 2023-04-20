@@ -7,9 +7,9 @@ use crate::zip;
 pub type TrackKey = u32;
 
 pub fn track(key: TrackKey, max_buffer_size: usize) -> (Track, TrackProcessor) {
-    track_from_data(
+    track_from_state(
         max_buffer_size,
-        &TrackData {
+        &TrackState {
             panning: 0.0,
             volume: 1.0,
             key,
@@ -17,14 +17,14 @@ pub fn track(key: TrackKey, max_buffer_size: usize) -> (Track, TrackProcessor) {
     )
 }
 
-pub fn track_from_data(max_buffer_size: usize, data: &TrackData) -> (Track, TrackProcessor) {
-    let (panning, panning_processor) = f32_parameter(data.panning, max_buffer_size);
-    let (volume, volume_processor) = f32_parameter(data.volume, max_buffer_size);
+pub fn track_from_state(max_buffer_size: usize, state: &TrackState) -> (Track, TrackProcessor) {
+    let (panning, panning_processor) = f32_parameter(state.panning, max_buffer_size);
+    let (volume, volume_processor) = f32_parameter(state.volume, max_buffer_size);
     let (meter, meter_processor) = audio_meter();
 
     (
         Track {
-            key: data.key,
+            key: state.key,
 
             panning,
             volume,
@@ -87,8 +87,8 @@ impl Track {
     }
 
     /// Takes a snapshot of the current state of the track
-    pub fn data(&self) -> TrackData {
-        TrackData {
+    pub(crate) fn state(&self) -> TrackState {
+        TrackState {
             panning: self.panning.get(),
             volume: self.volume.get(),
             key: self.key(),
@@ -98,8 +98,8 @@ impl Track {
 
 /// Contains all info about the tracks state,
 /// that is relevant to reconstructing it
-#[derive(Clone)]
-pub struct TrackData {
+#[derive(Debug, Clone, PartialEq)]
+pub struct TrackState {
     pub panning: f32,
     pub volume: f32,
 

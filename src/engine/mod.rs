@@ -21,9 +21,10 @@ use self::components::mixer::{InvalidTrackError, TrackOverflowError};
 pub use self::components::timeline::Timestamp;
 use self::components::timeline::{
     AddClipError, InvalidTimelineTrackError, TimelineTrackKey, TimelineTrackOverflowError,
+    TimelineTrackState,
 };
-use self::components::TrackKey;
-pub use components::{Track, TrackData};
+use self::components::{TrackKey, TrackState};
+pub use components::Track;
 mod processor;
 use self::processor::{processor, Processor, ProcessorInterface};
 
@@ -253,23 +254,9 @@ impl Engine {
     }
 
     pub fn delete_audio_track(&mut self, track: AudioTrack) -> Result<(), InvalidAudioTrackError> {
-        if !self
-            .processor_interface
-            .timeline
-            .key_in_use(track.timeline_track_key)
-        {
-            return Err(InvalidAudioTrackError::TimelineTracks(
-                InvalidTimelineTrackError {
-                    key: track.timeline_track_key,
-                },
-            ));
-        }
-        if !self.processor_interface.mixer.key_in_use(track.track_key) {
-            return Err(InvalidAudioTrackError::Tracks(InvalidTrackError {
-                key: track.track_key,
-            }));
-        }
+        self.audio_track_exists(&track)?;
 
+        self.audio_tracks.remove(&track);
         self.processor_interface
             .mixer
             .delete_track(track.track_key)
@@ -286,24 +273,11 @@ impl Engine {
     ) -> Result<(), InvalidAudioTrackError> {
         let mut track_keys = Vec::with_capacity(tracks.len());
         let mut timeline_keys = Vec::with_capacity(tracks.len());
+        for track in &tracks {
+            self.audio_track_exists(&track)?;
+        }
         for track in tracks {
-            if !self
-                .processor_interface
-                .timeline
-                .key_in_use(track.timeline_track_key)
-            {
-                return Err(InvalidAudioTrackError::TimelineTracks(
-                    InvalidTimelineTrackError {
-                        key: track.timeline_track_key,
-                    },
-                ));
-            }
-            if !self.processor_interface.mixer.key_in_use(track.track_key) {
-                return Err(InvalidAudioTrackError::Tracks(InvalidTrackError {
-                    key: track.track_key,
-                }));
-            }
-
+            self.audio_tracks.remove(&track);
             track_keys.push(track.track_key);
             timeline_keys.push(track.timeline_track_key);
         }
@@ -317,6 +291,144 @@ impl Engine {
             .delete_tracks(timeline_keys)
             .unwrap();
         Ok(())
+    }
+
+    pub fn audio_track_state(
+        &self,
+        audio_track: &AudioTrack,
+    ) -> Result<AudioTrackState, InvalidAudioTrackError> {
+        self.audio_track_exists(audio_track)?;
+
+        let timeline_track_state = self
+            .processor_interface
+            .timeline
+            .track_state(audio_track.timeline_track_key())
+            .unwrap();
+        let track_state = self.track(audio_track.track_key()).unwrap().state();
+
+        Ok(AudioTrackState {
+            timeline_track_state,
+            track_state,
+        })
+    }
+
+    fn audio_track_exists(&self, audio_track: &AudioTrack) -> Result<(), InvalidAudioTrackError> {
+        if !self
+            .processor_interface
+            .timeline
+            .key_in_use(audio_track.timeline_track_key)
+        {
+            return Err(InvalidAudioTrackError::TimelineTracks(
+                InvalidTimelineTrackError {
+                    key: audio_track.timeline_track_key,
+                },
+            ));
+        }
+        if !self
+            .processor_interface
+            .mixer
+            .key_in_use(audio_track.track_key)
+        {
+            return Err(InvalidAudioTrackError::Tracks(InvalidTrackError {
+                key: audio_track.track_key,
+            }));
+        }
+        Ok(())
+    }
+
+    pub fn reconstruct_audio_track(
+        &mut self,
+        state: AudioTrackState,
+    ) -> Result<AudioTrack, AudioTrackReconstructionError> {
+        let timeline_track_key = state.timeline_track_state.key;
+        let track_key = state.track_state.key;
+
+        if self
+            .processor_interface
+            .timeline
+            .key_in_use(timeline_track_key)
+        {
+            return Err(AudioTrackReconstructionError::TimelineTracks(
+                timeline_track_key,
+            ));
+        }
+        if self.processor_interface.mixer.key_in_use(track_key) {
+            return Err(AudioTrackReconstructionError::Tracks(track_key));
+        }
+
+        self.processor_interface
+            .timeline
+            .reconstruct_track(&state.timeline_track_state, track_key);
+        self.processor_interface
+            .mixer
+            .reconstruct_track(&state.track_state);
+
+        let audio_track = AudioTrack {
+            timeline_track_key,
+            track_key,
+        };
+
+        self.audio_tracks.insert(audio_track.clone());
+
+        Ok(audio_track)
+    }
+    pub fn reconstruct_audio_tracks(
+        &mut self,
+        states: Vec<AudioTrackState>,
+    ) -> Result<Vec<AudioTrack>, AudioTrackReconstructionError> {
+        for state in &states {
+            let timeline_track_key = state.timeline_track_state.key;
+            let track_key = state.track_state.key;
+
+            if self
+                .processor_interface
+                .timeline
+                .key_in_use(timeline_track_key)
+            {
+                return Err(AudioTrackReconstructionError::TimelineTracks(
+                    timeline_track_key,
+                ));
+            }
+            if self.processor_interface.mixer.key_in_use(track_key) {
+                return Err(AudioTrackReconstructionError::Tracks(track_key));
+            }
+        }
+
+        let mut audio_tracks = Vec::with_capacity(states.len());
+        for state in &states {
+            let timeline_track_key = state.timeline_track_state.key;
+            let track_key = state.track_state.key;
+
+            let audio_track = AudioTrack {
+                timeline_track_key,
+                track_key,
+            };
+
+            self.audio_tracks.insert(audio_track.clone());
+            audio_tracks.push(audio_track);
+        }
+
+        self.processor_interface.timeline.reconstruct_tracks(
+            states
+                .iter()
+                .map(|state| (&state.timeline_track_state, state.track_state.key)),
+        );
+        self.processor_interface
+            .mixer
+            .reconstruct_tracks(states.iter().map(|state| &state.track_state));
+
+        Ok(audio_tracks)
+    }
+}
+impl Drop for Engine {
+    fn drop(&mut self) {
+        self.stopped.store(true, Ordering::Release);
+        let join_handle = self
+            .join_handle
+            .take()
+            .expect("Stream was terminated more than once.");
+        join_handle.thread().unpark();
+        join_handle.join().unwrap();
     }
 }
 
@@ -334,16 +446,10 @@ impl AudioTrack {
     }
 }
 
-impl Drop for Engine {
-    fn drop(&mut self) {
-        self.stopped.store(true, Ordering::Release);
-        let join_handle = self
-            .join_handle
-            .take()
-            .expect("Stream was terminated more than once.");
-        join_handle.thread().unpark();
-        join_handle.join().unwrap();
-    }
+#[derive(Debug, Clone, PartialEq)]
+pub struct AudioTrackState {
+    timeline_track_state: TimelineTrackState,
+    track_state: TrackState,
 }
 
 /// Scaling used by [`Track::read_meter`]
@@ -388,3 +494,18 @@ impl Display for InvalidAudioTrackError {
     }
 }
 impl Error for InvalidAudioTrackError {}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum AudioTrackReconstructionError {
+    Tracks(TrackKey),
+    TimelineTracks(TimelineTrackKey),
+}
+impl Display for AudioTrackReconstructionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Tracks(k) => write!(f, "Track key already in use: {}", k),
+            Self::TimelineTracks(k) => write!(f, "Timeline track key already in use: {}", k),
+        }
+    }
+}
+impl Error for AudioTrackReconstructionError {}

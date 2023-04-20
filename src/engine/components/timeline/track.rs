@@ -157,6 +157,11 @@ impl Debug for TimelineTrack {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TimelineTrackState {
+    pub key: TimelineTrackKey,
+}
+
 #[cfg(test)]
 mod tests {
 

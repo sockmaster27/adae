@@ -80,16 +80,6 @@ where
     pub fn iter(&mut self) -> impl Iterator<Item = T> + '_ {
         Iter { inner: self }
     }
-
-    /// Iterate through the elements in the ringbuffer,
-    /// but return `None` at the latest after a certain number of iterations.
-    /// This avoids endless looping.
-    pub fn iter_bound(&mut self) -> impl Iterator<Item = T> + '_ {
-        BoundIter {
-            inner: self,
-            count: 256,
-        }
-    }
 }
 
 pub struct Iter<'a, T: 'static + Send> {
@@ -102,25 +92,6 @@ where
     type Item = T;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.inner.recv()
-    }
-}
-
-pub struct BoundIter<'a, T: 'static + Send> {
-    inner: &'a mut Receiver<T>,
-    count: usize,
-}
-impl<'a, T> Iterator for BoundIter<'a, T>
-where
-    T: Send,
-{
-    type Item = T;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.count == 0 {
-            return None;
-        }
-        self.count -= 1;
         self.inner.recv()
     }
 }
@@ -203,18 +174,5 @@ mod tests {
 
         let r: Vec<i32> = receiver.iter().collect();
         assert_eq!(r, vec![5, 4, 3, 7]);
-    }
-
-    #[test]
-    fn iter_bound() {
-        let (mut sender, mut receiver) = ringbuffer();
-
-        for _ in 0..300 {
-            sender.send(5);
-        }
-
-        // At the moment the bound is hardcoded to 256
-        let r: Vec<i32> = receiver.iter_bound().collect();
-        assert_eq!(r.len(), 256);
     }
 }

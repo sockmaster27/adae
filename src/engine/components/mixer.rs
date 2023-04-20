@@ -4,7 +4,7 @@ use std::fmt::Debug;
 use std::fmt::Display;
 
 use super::track::TrackKey;
-use super::track::{track, track_from_data, Track, TrackData, TrackProcessor};
+use super::track::{track, track_from_state, Track, TrackProcessor, TrackState};
 use super::MixPoint;
 use crate::engine::traits::Effect;
 use crate::engine::traits::Info;
@@ -17,7 +17,7 @@ use crate::engine::Sample;
 use crate::engine::CHANNELS;
 
 pub fn mixer(max_buffer_size: usize) -> (Mixer, MixerProcessor) {
-    let mut key_generator = KeyGenerator::new();
+    let key_generator = KeyGenerator::new();
 
     let tracks = HashMap::new();
 
@@ -52,7 +52,7 @@ pub struct Mixer {
     master: Track,
 
     track_processors: RemotePusherHashMap<TrackKey, DBox<TrackProcessor>>,
-    source_outs: RemotePusherHashMap<TrackKey, Vec<Sample>>,
+    source_outs: RemotePusherHashMap<TrackKey, DBox<Vec<Sample>>>,
 }
 impl Mixer {
     pub fn master(&self) -> &Track {
@@ -60,13 +60,6 @@ impl Mixer {
     }
     pub fn master_mut(&mut self) -> &mut Track {
         &mut self.master
-    }
-
-    pub fn tracks(&self) -> Vec<&Track> {
-        self.tracks.values().collect()
-    }
-    pub fn tracks_mut(&mut self) -> Vec<&mut Track> {
-        self.tracks.values_mut().collect()
     }
 
     pub fn track(&self, key: TrackKey) -> Result<&Track, InvalidTrackError> {
@@ -102,46 +95,25 @@ impl Mixer {
         Ok(keys)
     }
 
-    pub fn reconstruct_track(
-        &mut self,
-        data: &TrackData,
-    ) -> Result<TrackKey, TrackReconstructionError> {
-        let key = data.key;
+    pub fn reconstruct_track(&mut self, state: &TrackState) {
+        let key = state.key;
+        self.key_generator
+            .reserve(key)
+            .expect("Track key already in use");
 
-        let result = self.key_generator.reserve(key);
-        if result.is_err() {
-            return Err(TrackReconstructionError { key });
-        }
-
-        let track = track_from_data(self.max_buffer_size, data);
+        let track = track_from_state(self.max_buffer_size, state);
         self.push_track(track);
-
-        Ok(key)
     }
-    pub fn reconstruct_tracks<'a>(
-        &mut self,
-        data: impl Iterator<Item = &'a TrackData>,
-    ) -> Result<Vec<TrackKey>, TrackReconstructionError> {
-        let (min_size, max_size) = data.size_hint();
-        let size = max_size.unwrap_or(min_size);
-        let mut keys = Vec::with_capacity(size);
-        let mut tracks = Vec::with_capacity(size);
-
-        for data in data {
-            let key = data.key;
-
-            if self.tracks.contains_key(&key) {
-                return Err(TrackReconstructionError { key });
-            }
-
-            keys.push(key);
-            tracks.push(track_from_data(self.max_buffer_size, data))
-        }
-        keys.shrink_to_fit();
-        tracks.shrink_to_fit();
-
+    pub fn reconstruct_tracks<'a>(&mut self, states: impl Iterator<Item = &'a TrackState>) {
+        let tracks = states
+            .map(|state| {
+                self.key_generator
+                    .reserve(state.key)
+                    .expect("Track key already in use");
+                track_from_state(self.max_buffer_size, state)
+            })
+            .collect();
         self.push_tracks(tracks);
-        Ok(keys)
     }
 
     pub fn delete_track(&mut self, key: TrackKey) -> Result<(), InvalidTrackError> {
@@ -176,7 +148,7 @@ impl Mixer {
         let key = track.key();
         self.tracks.insert(key, track);
         self.source_outs
-            .push((key, vec![0.0; self.max_buffer_size * CHANNELS]));
+            .push((key, DBox::new(vec![0.0; self.max_buffer_size * CHANNELS])));
         self.track_processors
             .push((key, DBox::new(track_processor)))
     }
@@ -189,7 +161,7 @@ impl Mixer {
             self.tracks.insert(key, track);
 
             track_processors.push((key, DBox::new(track_processor)));
-            source_outs.push((key, vec![0.0; self.max_buffer_size * CHANNELS]));
+            source_outs.push((key, DBox::new(vec![0.0; self.max_buffer_size * CHANNELS])));
         }
         self.source_outs.push_multiple(source_outs);
         self.track_processors.push_multiple(track_processors);
@@ -197,10 +169,6 @@ impl Mixer {
 
     pub fn key_in_use(&self, key: TrackKey) -> bool {
         self.key_generator.in_use(key)
-    }
-
-    pub fn used_keys(&self) -> u32 {
-        self.key_generator.used_keys()
     }
 
     pub fn remaining_keys(&self) -> u32 {
@@ -211,11 +179,11 @@ impl Mixer {
 pub struct MixerProcessor {
     tracks: RemotePushedHashMap<TrackKey, DBox<TrackProcessor>>,
     master: DBox<TrackProcessor>,
-    source_outs: RemotePushedHashMap<TrackKey, Vec<Sample>>,
+    source_outs: RemotePushedHashMap<TrackKey, DBox<Vec<Sample>>>,
     mix_point: MixPoint,
 }
 impl MixerProcessor {
-    pub fn source_outs(&mut self) -> &mut HashMap<TrackKey, Vec<Sample>> {
+    pub fn source_outs(&mut self) -> &mut HashMap<TrackKey, DBox<Vec<Sample>>> {
         &mut self.source_outs
     }
 
@@ -276,17 +244,6 @@ impl From<key_generator::OverflowError> for TrackOverflowError {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
-pub struct TrackReconstructionError {
-    key: TrackKey,
-}
-impl Display for TrackReconstructionError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Track with key, {}, already exists on mixer", self.key)
-    }
-}
-impl Error for TrackReconstructionError {}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -327,13 +284,20 @@ mod tests {
     fn reconstruct_track() {
         let (mut m, mut mp) = mixer(10);
 
-        for key in 1..50 + 1 {
-            m.reconstruct_track(&TrackData {
-                panning: 0.0,
-                volume: 1.0,
-                key: key as TrackKey,
-            })
-            .unwrap();
+        let mut keys = Vec::new();
+        for _ in 0..50 {
+            keys.push(m.add_track().unwrap());
+        }
+
+        let mut states = Vec::new();
+        for key in keys {
+            let state = m.track(key).unwrap().state();
+            m.delete_track(key).unwrap();
+            states.push(state);
+        }
+
+        for state in states {
+            m.reconstruct_track(&state);
         }
 
         no_heap! {{
@@ -343,25 +307,18 @@ mod tests {
         assert_eq!(mp.tracks.len(), 50);
     }
     #[test]
+    #[should_panic]
     fn reconstruct_existing_track() {
-        let (mut m, mut mp) = mixer(10);
+        let (mut m, _mp) = mixer(10);
 
         let used = m.add_track().unwrap();
 
-        let result = m.reconstruct_track(&TrackData {
+        m.reconstruct_track(&TrackState {
             panning: 0.0,
             volume: 1.0,
 
             key: used,
         });
-
-        no_heap! {{
-            mp.poll();
-        }}
-
-        assert_eq!(result, Err(TrackReconstructionError { key: 0 }));
-        assert_eq!(m.tracks.len(), 1);
-        assert_eq!(mp.tracks.len(), 1);
     }
 
     #[test]
@@ -370,16 +327,16 @@ mod tests {
 
         let batch_size = 5;
 
-        let data: Vec<TrackData> = (1..50 * batch_size + 1)
-            .map(|key| TrackData {
+        let states: Vec<TrackState> = (1..50 * batch_size + 1)
+            .map(|key| TrackState {
                 panning: 0.0,
                 volume: 1.0,
                 key: key as TrackKey,
             })
             .collect();
 
-        for data in data.chunks(batch_size) {
-            m.reconstruct_tracks(data.iter()).unwrap();
+        for state in states.chunks(batch_size) {
+            m.reconstruct_tracks(state.iter());
         }
 
         no_heap! {{

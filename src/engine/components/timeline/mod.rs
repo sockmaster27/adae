@@ -24,6 +24,7 @@ use crate::{
     engine::{
         traits::Info,
         utils::{
+            dropper::DBox,
             key_generator::{self, KeyGenerator},
             rbtree_node::TreeNode,
             remote_push::{RemotePushable, RemotePushedHashMap, RemotePusherHashMap},
@@ -34,7 +35,7 @@ use crate::{
     zip,
 };
 pub use timestamp::Timestamp;
-pub use track::{TimelineTrack, TimelineTrackKey};
+pub use track::{TimelineTrack, TimelineTrackKey, TimelineTrackState};
 
 pub fn timeline(
     sample_rate: u32,
@@ -87,7 +88,7 @@ pub struct Timeline {
     position: Arc<AtomicU64>,
 
     clip_store: AudioClipStore,
-    tracks: RemotePusherHashMap<TimelineTrackKey, TimelineTrack>,
+    tracks: RemotePusherHashMap<TimelineTrackKey, DBox<TimelineTrack>>,
 
     event_sender: ringbuffer::Sender<Event>,
 }
@@ -136,10 +137,10 @@ impl Timeline {
             self.sample_rate,
             self.bpm_cents,
         );
-        self.tracks.push((key, timeline_track));
+        self.tracks.push((key, DBox::new(timeline_track)));
         Ok(key)
     }
-    pub(crate) fn add_tracks<'a>(
+    pub fn add_tracks<'a>(
         &mut self,
         outputs: Vec<TrackKey>,
     ) -> Result<Vec<TimelineTrackKey>, TimelineTrackOverflowError> {
@@ -163,12 +164,12 @@ impl Timeline {
             .map(|(&key, output)| {
                 (
                     key,
-                    TimelineTrack::new(
+                    DBox::new(TimelineTrack::new(
                         output,
                         Arc::clone(&self.position),
                         self.sample_rate,
                         self.bpm_cents,
-                    ),
+                    )),
                 )
             })
             .collect();
@@ -177,7 +178,8 @@ impl Timeline {
     }
 
     pub fn delete_track(&mut self, key: TimelineTrackKey) -> Result<(), InvalidTimelineTrackError> {
-        if !self.key_in_use(key) {
+        let result = self.key_generator.free(key);
+        if result.is_err() {
             return Err(InvalidTimelineTrackError { key });
         }
         self.tracks.remove(key);
@@ -192,20 +194,70 @@ impl Timeline {
                 return Err(InvalidTimelineTrackError { key });
             }
         }
+        for &key in &keys {
+            self.key_generator
+                .free(key)
+                .expect("key_in_use() returned true, even though free() returned error");
+        }
         self.tracks.remove_multiple(keys);
         Ok(())
+    }
+
+    pub fn reconstruct_track(&mut self, state: &TimelineTrackState, output: TrackKey) {
+        let key = state.key;
+        self.key_generator
+            .reserve(key)
+            .expect("Timeline track key already in use");
+
+        let timeline_track = TimelineTrack::new(
+            output,
+            Arc::clone(&self.position),
+            self.sample_rate,
+            self.bpm_cents,
+        );
+        self.tracks.push((key, DBox::new(timeline_track)));
+    }
+
+    pub fn reconstruct_tracks<'a>(
+        &mut self,
+        states: impl Iterator<Item = (&'a TimelineTrackState, TrackKey)>,
+    ) {
+        let tracks = states.map(|(state, output)| {
+            let key = state.key;
+            self.key_generator
+                .reserve(key)
+                .expect("Timeline track key already in use");
+
+            (
+                key,
+                DBox::new(TimelineTrack::new(
+                    output,
+                    Arc::clone(&self.position),
+                    self.sample_rate,
+                    self.bpm_cents,
+                )),
+            )
+        });
+        self.tracks.push_multiple(tracks.collect());
     }
 
     pub fn key_in_use(&self, key: TimelineTrackKey) -> bool {
         self.key_generator.in_use(key)
     }
 
-    pub fn used_keys(&self) -> u32 {
-        self.key_generator.used_keys()
-    }
-
     pub fn remaining_keys(&self) -> u32 {
         self.key_generator.remaining_keys()
+    }
+
+    pub fn track_state(
+        &self,
+        key: TimelineTrackKey,
+    ) -> Result<TimelineTrackState, InvalidTimelineTrackError> {
+        if !self.key_in_use(key) {
+            return Err(InvalidTimelineTrackError { key });
+        }
+
+        Ok(TimelineTrackState { key })
     }
 }
 
@@ -214,7 +266,7 @@ pub struct TimelineProcessor {
     // Could be Rc<Cell<u64>> if tracks was a regular HashMap.
     position: Arc<AtomicU64>,
 
-    tracks: RemotePushedHashMap<TimelineTrackKey, TimelineTrack>,
+    tracks: RemotePushedHashMap<TimelineTrackKey, DBox<TimelineTrack>>,
 
     event_receiver: ringbuffer::Receiver<Event>,
 }
@@ -248,7 +300,7 @@ impl TimelineProcessor {
         track.insert_clip(timeline_clip);
     }
 
-    pub fn output(&mut self, mixer_ins: &mut HashMap<TrackKey, Vec<Sample>>, info: &Info) {
+    pub fn output(&mut self, mixer_ins: &mut HashMap<TrackKey, DBox<Vec<Sample>>>, info: &Info) {
         let Info {
             sample_rate: _,
             buffer_size,

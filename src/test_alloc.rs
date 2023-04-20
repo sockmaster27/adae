@@ -6,13 +6,13 @@ use std::{
     thread,
 };
 
-#[cfg(not(test))]
+#[cfg(not(debug_assertions))]
 #[global_allocator]
 static GLOBAL: TestAlloc<PrintError> = TestAlloc {
     inner: System,
     error: PhantomData,
 };
-#[cfg(test)]
+#[cfg(debug_assertions)]
 #[global_allocator]
 static GLOBAL: TestAlloc<PanicError> = TestAlloc {
     inner: System,
