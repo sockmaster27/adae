@@ -23,5 +23,3 @@ record_output = ["hound"]
 
 # Print all debug info to custom function
 custom_debug_output = ["lazy_static"]
-
-# default = ["custom_debug_output"]

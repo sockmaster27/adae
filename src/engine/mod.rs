@@ -5,17 +5,16 @@ use std::collections::HashSet;
 use std::error::Error;
 use std::fmt::Display;
 use std::path::Path;
-
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
 mod components;
+mod processor;
 mod traits;
 mod utils;
-use crate::zip;
 
-use self::components::audio_clip::AudioClipKey;
+pub use self::components::audio_clip::AudioClipKey;
 use self::components::audio_clip_store::ImportError;
 use self::components::mixer::{InvalidTrackError, TrackOverflowError};
 pub use self::components::timeline::Timestamp;
@@ -24,9 +23,9 @@ use self::components::timeline::{
     TimelineTrackState,
 };
 use self::components::{TrackKey, TrackState};
-pub use components::Track;
-mod processor;
 use self::processor::{processor, Processor, ProcessorInterface};
+use crate::zip;
+pub use components::Track;
 
 /// Internally used sample format.
 type Sample = f32;
