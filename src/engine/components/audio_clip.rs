@@ -101,19 +101,54 @@ impl Source for AudioClipReader {
             buffer_size,
         } = *info;
 
-        // TODO: Resample
+        match self.resampler {
+            None => {
+                self.scale_channels(
+                    self.position..min(self.position + buffer_size, self.inner.len()),
+                );
+                self.position += buffer_size;
+                Self::interleave(
+                    &self.resample_buffer,
+                    input_range.clone(),
+                    &mut self.output_buffer[output_range],
+                );
+            }
 
-        let remaining = self.inner.len() - self.position;
-        let filled = min(remaining, buffer_size);
+            Some(resampler) => {
+                let mut filled = 0;
+                while filled < buffer_size {
+                    if self.resample_buffer_used == resampler.output_frames_max() {
+                        self.scale_channels(
+                            self.position..(self.position + resampler.input_frames_max()),
+                        );
 
-        let next_position = self.position + filled;
-        let relevant_range = self.position..next_position;
+                        resampler
+                            .process_into_buffer(
+                                &self.channel_scale_buffer,
+                                &mut self.resample_buffer,
+                                None,
+                            )
+                            .expect("Resampling failed");
+                        self.resample_buffer_used = 0;
+                    }
 
-        self.position = next_position;
-
-        self.scale_channels(relevant_range);
-
-        &mut self.output_buffer[..filled * CHANNELS]
+                    let input_range = self.resample_buffer_used
+                        ..min(
+                            self.resample_buffer_used + buffer_size,
+                            resampler.output_frames_max(),
+                        );
+                    let output_range = (filled * CHANNELS)
+                        ..((filled + input_range.end - input_range.start) * CHANNELS);
+                    Self::interleave(
+                        &self.resample_buffer,
+                        input_range.clone(),
+                        &mut self.output_buffer[output_range],
+                    );
+                    filled += input_range.end - input_range.start;
+                }
+            }
+        }
+        &mut self.output_buffer[..buffer_size * CHANNELS]
     }
 }
 impl Debug for AudioClipReader {
