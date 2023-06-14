@@ -1,5 +1,5 @@
 [package]
-name = "ardae"
+name = "adae"
 version = "0.1.0"
 edition = "2021"
 publish = false

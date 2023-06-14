@@ -1,8 +1,8 @@
-extern crate ardae;
+extern crate adae;
 
 use std::{iter::zip, path::Path};
 
-use ardae::{Engine, Timestamp};
+use adae::{Engine, Timestamp};
 
 #[test]
 fn create_engine() {
