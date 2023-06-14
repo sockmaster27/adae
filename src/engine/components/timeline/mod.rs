@@ -57,7 +57,7 @@ pub fn timeline(
 
             position: position1,
 
-            clip_store: AudioClipStore::new(max_buffer_size),
+            clip_store: AudioClipStore::new(max_buffer_size, sample_rate),
             tracks: tracks_pusher,
 
             event_sender,

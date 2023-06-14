@@ -2,7 +2,7 @@ use std::cmp::min;
 
 use crate::{
     engine::{
-        components::audio_clip::AudioClipReader,
+        components::audio_clip_reader::AudioClipReader,
         traits::{Info, Source},
         utils::rbtree_node,
         Sample,

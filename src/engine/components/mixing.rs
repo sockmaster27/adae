@@ -26,9 +26,7 @@ impl MixPoint {
     /// Resets sum and buffer size.
     pub fn reset(&mut self) {
         let dirty = self.buffer_size_samples.unwrap_or(0);
-        for sample in &mut self.sum_buffer[..dirty] {
-            *sample = 0.0;
-        }
+        self.sum_buffer[..dirty].fill(0.0);
         self.buffer_size_samples = None;
     }
 
@@ -59,24 +57,18 @@ impl MixPoint {
     }
 
     /// Get sum of all buffers added since last reset.
-    /// If no buffers have been added, this will return an `Error`, containing the full length zeroed buffer, as a suited buffer size isn't known.
+    /// Returns the full output buffer, so remember to only use the first `buffer_size * CHANNELS` samples.
     ///
     /// Result is not clipped.
-    pub fn get(&mut self) -> Result<&mut [Sample], &mut [Sample]> {
-        if let Some(buffer_size_samples) = self.buffer_size_samples {
-            // Convert back to original sample format.
-            for (output_sample, &sum_sample) in zip!(
-                self.output_buffer[..buffer_size_samples].iter_mut(),
-                self.sum_buffer.iter()
-            ) {
-                *output_sample = sum_sample as Sample;
-            }
-
-            Ok(&mut self.output_buffer[..buffer_size_samples])
-        } else {
-            // Buffer size is unknown.
-            Err(&mut self.output_buffer)
+    pub fn get(&mut self) -> &mut [Sample] {
+        // Convert back to original sample format.
+        for (output_sample, &sum_sample) in
+            zip!(self.output_buffer.iter_mut(), self.sum_buffer.iter())
+        {
+            *output_sample = sum_sample as Sample;
         }
+
+        &mut self.output_buffer
     }
 }
 
@@ -86,13 +78,13 @@ mod tests {
 
     #[test]
     fn mixing_of_two_signals() {
-        let mut mp = MixPoint::new(10);
+        let mut mp = MixPoint::new(2);
 
         mp.add(&[3.0, 5.0, -2.0]);
         mp.add(&[7.0, -2.0, -6.0]);
         let result = mp.get();
 
-        assert_eq!(result, Ok(&mut [10.0, 3.0, -8.0][..]));
+        assert_eq!(result, &mut [10.0, 3.0, -8.0, 0.0][..]);
     }
 
     // This should only happen with debug assertions enabled.
@@ -100,7 +92,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn panics_with_different_lengths() {
-        let mut mp = MixPoint::new(10);
+        let mut mp = MixPoint::new(2);
 
         mp.add(&[3.0, 5.0, -2.0]);
         mp.add(&[7.0, -2.0, -6.0, 8.0]);
@@ -108,17 +100,17 @@ mod tests {
 
     #[test]
     fn reset_resets() {
-        let mut mp = MixPoint::new(10);
+        let mut mp = MixPoint::new(2);
 
-        let mut signal1 = [3.0, 5.0, -2.0];
-        mp.add(&signal1);
-        assert_eq!(mp.get(), Ok(&mut signal1[..]));
+        let signal2 = [7.0, -2.0, -6.0, 8.0];
+        mp.add(&signal2);
+        assert_eq!(mp.get(), &[7.0, -2.0, -6.0, 8.0][..]);
 
         mp.reset();
 
-        let mut signal2 = [7.0, -2.0, -6.0, 8.0];
-        mp.add(&signal2);
-        assert_eq!(mp.get(), Ok(&mut signal2[..]));
+        let signal1 = [3.0, 5.0, -2.0];
+        mp.add(&signal1);
+        assert_eq!(mp.get(), &[3.0, 5.0, -2.0, 0.0][..]);
     }
 
     #[test]
@@ -126,14 +118,14 @@ mod tests {
         let mut mp = MixPoint::new(2);
         mp.add(&[3.0, 5.0, -2.0]);
         mp.reset();
-        assert_eq!(mp.get(), Err(&mut [0.0, 0.0, 0.0, 0.0][..]));
+        assert_eq!(mp.get(), &[0.0, 0.0, 0.0, 0.0][..]);
     }
 
     // Tests whether there are significant rounding errors while mixing a large amount of signals.
     // Fails without 64-bit summing.
     #[test]
     fn retains_precision() {
-        let mut mp = MixPoint::new(10);
+        let mut mp = MixPoint::new(5);
 
         let mut signals1 = [[0.0; 10]; 10000];
 
@@ -158,6 +150,6 @@ mod tests {
         }
 
         let result = mp.get();
-        assert_eq!(result, Ok(&mut [0.0; 10][..]));
+        assert_eq!(result, &[0.0; 10][..]);
     }
 }

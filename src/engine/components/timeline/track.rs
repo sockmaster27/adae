@@ -166,7 +166,7 @@ pub struct TimelineTrackState {
 mod tests {
 
     use crate::engine::{
-        components::audio_clip::{AudioClip, AudioClipReader},
+        components::{audio_clip::AudioClip, audio_clip_reader::AudioClipReader},
         utils::test_file_path,
     };
 
@@ -183,14 +183,14 @@ mod tests {
         max_buffer_size: usize,
     ) -> Box<TreeNode<TimelineClip>> {
         thread_local! {
-            static AC: Arc<AudioClip> = Arc::new(AudioClip::import(&test_file_path("44100 16-bit.wav")).unwrap());
+            static AC: Arc<AudioClip> = Arc::new(AudioClip::import(&test_file_path("48000 16-bit.wav")).unwrap());
         }
 
         AC.with(|ac| {
             Box::new(TreeNode::new(TimelineClip::new(
                 Timestamp::from_beat_units(start_beat_units),
                 length_beat_units.map(|l| Timestamp::from_beat_units(l)),
-                AudioClipReader::new(Arc::clone(&ac), max_buffer_size),
+                AudioClipReader::new(Arc::clone(&ac), max_buffer_size, 48_000),
             )))
         })
     }

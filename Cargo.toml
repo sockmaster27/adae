@@ -16,6 +16,7 @@ symphonia = { version = "0.5.1", features = ["mp3"]}
 num-traits = "0.2.15"
 intrusive-collections = "0.9.4"
 ouroboros = "0.15.5"
+rubato = "0.13.0"
 
 [features]
 # Record output for debug purposes

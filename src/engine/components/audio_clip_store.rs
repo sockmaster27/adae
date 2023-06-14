@@ -8,10 +8,14 @@ use std::{
 
 use crate::engine::utils::key_generator::{self, KeyGenerator};
 
-use super::audio_clip::{self, AudioClip, AudioClipKey, AudioClipReader};
+use super::{
+    audio_clip::{self, AudioClip, AudioClipKey},
+    audio_clip_reader::AudioClipReader,
+};
 
 pub struct AudioClipStore {
     max_buffer_size: usize,
+    sample_rate: u32,
 
     paths: HashMap<PathBuf, AudioClipKey>,
     clips: HashMap<AudioClipKey, Arc<AudioClip>>,
@@ -19,9 +23,10 @@ pub struct AudioClipStore {
     key_generator: KeyGenerator<AudioClipKey>,
 }
 impl AudioClipStore {
-    pub fn new(max_buffer_size: usize) -> Self {
+    pub fn new(max_buffer_size: usize, sample_rate: u32) -> Self {
         AudioClipStore {
             max_buffer_size,
+            sample_rate,
 
             paths: HashMap::new(),
             clips: HashMap::new(),
@@ -53,7 +58,11 @@ impl AudioClipStore {
 
     pub fn get(&self, key: AudioClipKey) -> Option<AudioClipReader> {
         let clip = Arc::clone(self.clips.get(&key)?);
-        Some(AudioClipReader::new(clip, self.max_buffer_size))
+        Some(AudioClipReader::new(
+            clip,
+            self.max_buffer_size,
+            self.sample_rate,
+        ))
     }
 }
 

@@ -204,10 +204,7 @@ impl MixerProcessor {
             track.process(info, buffer);
             self.mix_point.add(buffer);
         }
-        let out = match self.mix_point.get() {
-            Ok(buffer) => buffer,
-            Err(buffer) => &mut buffer[..buffer_size * CHANNELS],
-        };
+        let out = &mut self.mix_point.get()[..buffer_size * CHANNELS];
 
         self.master.process(info, out);
         out
