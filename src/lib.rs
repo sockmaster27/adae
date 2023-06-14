@@ -24,7 +24,7 @@ macro_rules! allow_heap {
     };
 }
 
-#[cfg(feature = "record_output")]
+#[cfg(any(feature = "record_output", test))]
 mod wav_recorder;
 
 mod engine;

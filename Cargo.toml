@@ -18,6 +18,10 @@ intrusive-collections = "0.9.4"
 ouroboros = "0.15.5"
 rubato = "0.13.0"
 
+[dev-dependencies]
+# Tests may want to output audio for debugging purposes
+hound = "3.4.0"
+
 [features]
 # Record output for debug purposes
 record_output = ["hound"]
