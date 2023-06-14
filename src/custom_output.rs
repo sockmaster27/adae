@@ -41,6 +41,25 @@ macro_rules! eprintln {
     }};
 }
 
+#[macro_export(crate)]
+macro_rules! dbg {
+    () => {
+        eprintln!("[{}:{}]", std::file!(), std::line!())
+    };
+    ($val:expr $(,)?) => {
+        match $val {
+            tmp => {
+                eprintln!("[{}:{}] {} = {:#?}",
+                std::file!(), std::line!(), std::stringify!($val), &tmp);
+                tmp
+            }
+        }
+    };
+    ($($val:expr),+ $(,)?) => {
+        ($(dbg!($val)),+,)
+    };
+}
+
 pub fn set_output(outputter: fn(String)) {
     let mut global_outputter = OUTPUTTER.write().expect(ERR_MSG);
 
