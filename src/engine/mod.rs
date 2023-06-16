@@ -164,6 +164,10 @@ impl Engine {
         }
     }
 
+    pub fn playhead_position(&mut self) -> Timestamp {
+        self.processor_interface.timeline.playhead_position()
+    }
+
     pub fn import_audio_clip(&mut self, path: &Path) -> Result<AudioClipKey, ImportError> {
         self.processor_interface.timeline.import_audio_clip(path)
     }

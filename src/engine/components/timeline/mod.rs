@@ -93,6 +93,14 @@ pub struct Timeline {
     event_sender: ringbuffer::Sender<Event>,
 }
 impl Timeline {
+    pub fn playhead_position(&mut self) -> Timestamp {
+        Timestamp::from_samples(
+            self.position.load(Ordering::Relaxed),
+            self.sample_rate,
+            self.bpm_cents,
+        )
+    }
+
     pub fn import_audio_clip(&mut self, path: &Path) -> Result<AudioClipKey, ImportError> {
         self.clip_store.import(path)
     }
