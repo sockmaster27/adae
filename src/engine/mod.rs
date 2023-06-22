@@ -164,6 +164,15 @@ impl Engine {
         }
     }
 
+    pub fn play(&mut self) {
+        self.processor_interface.timeline.play()
+    }
+    pub fn pause(&mut self) {
+        self.processor_interface.timeline.pause()
+    }
+    pub fn jump_to(&mut self, position: Timestamp) {
+        self.processor_interface.timeline.jump_to(position)
+    }
     pub fn playhead_position(&mut self) -> Timestamp {
         self.processor_interface.timeline.playhead_position()
     }

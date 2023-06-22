@@ -15,6 +15,31 @@ fn create_dummy_engine() {
 }
 
 #[test]
+fn play() {
+    let mut e = Engine::dummy();
+    e.play();
+}
+
+#[test]
+fn pause() {
+    let mut e = Engine::dummy();
+    e.pause();
+}
+
+#[test]
+fn jump_to() {
+    let mut e = Engine::dummy();
+    e.jump_to(Timestamp::from_beats(42));
+}
+
+#[test]
+fn get_playhead_position() {
+    let mut e = Engine::dummy();
+    let p = e.playhead_position();
+    assert_eq!(p, Timestamp::from_beats(0));
+}
+
+#[test]
 fn get_track_from_key() {
     let mut e = Engine::dummy();
     let at = e.add_audio_track().unwrap();

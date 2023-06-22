@@ -8,7 +8,7 @@ use std::{
     fmt::{Debug, Display},
     path::Path,
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc,
     },
 };
@@ -42,6 +42,9 @@ pub fn timeline(
     bpm_cents: u16,
     max_buffer_size: usize,
 ) -> (Timeline, TimelineProcessor) {
+    let playing1 = Arc::new(AtomicBool::new(false));
+    let playing2 = Arc::clone(&playing1);
+
     let position1 = Arc::new(AtomicU64::new(0));
     let position2 = Arc::clone(&position1);
 
@@ -55,6 +58,7 @@ pub fn timeline(
             bpm_cents,
             key_generator: KeyGenerator::new(),
 
+            playing: playing1,
             position: position1,
 
             clip_store: AudioClipStore::new(max_buffer_size, sample_rate),
@@ -63,6 +67,7 @@ pub fn timeline(
             event_sender,
         },
         TimelineProcessor {
+            playing: playing2,
             position: position2,
             tracks: tracks_pushed,
 
@@ -84,6 +89,7 @@ pub struct Timeline {
     bpm_cents: u16,
     key_generator: KeyGenerator<TimelineTrackKey>,
 
+    playing: Arc<AtomicBool>,
     /// Should not be mutated from here
     position: Arc<AtomicU64>,
 
@@ -93,6 +99,17 @@ pub struct Timeline {
     event_sender: ringbuffer::Sender<Event>,
 }
 impl Timeline {
+    pub fn play(&mut self) {
+        self.playing.store(true, Ordering::Release);
+    }
+    pub fn pause(&mut self) {
+        self.playing.store(false, Ordering::Release);
+    }
+    pub fn jump_to(&mut self, position: Timestamp) {
+        self.event_sender.send(Event::JumpTo(
+            position.samples(self.sample_rate, self.bpm_cents),
+        ));
+    }
     pub fn playhead_position(&mut self) -> Timestamp {
         Timestamp::from_samples(
             self.position.load(Ordering::Relaxed),
@@ -127,10 +144,6 @@ impl Timeline {
         });
 
         Ok(())
-    }
-
-    pub fn jump_to(&mut self, position: u64) {
-        self.event_sender.send(Event::JumpTo(position))
     }
 
     pub fn add_track(
@@ -270,8 +283,7 @@ impl Timeline {
 }
 
 pub struct TimelineProcessor {
-    // Only atomic to be Send.
-    // Could be Rc<Cell<u64>> if tracks was a regular HashMap.
+    playing: Arc<AtomicBool>,
     position: Arc<AtomicU64>,
 
     tracks: RemotePushedHashMap<TimelineTrackKey, DBox<TimelineTrack>>,
@@ -313,13 +325,23 @@ impl TimelineProcessor {
             sample_rate: _,
             buffer_size,
         } = *info;
+
+        const NO_BUFFER_MSG: &str = "No buffer found for output track";
+
+        if !self.playing.load(Ordering::Relaxed) {
+            for key in self.tracks.keys() {
+                let buffer =
+                    &mut mixer_ins.get_mut(key).expect(NO_BUFFER_MSG)[..buffer_size * CHANNELS];
+                buffer.fill(0.0);
+            }
+            return;
+        }
+
         for track in self.tracks.values_mut() {
             let key = track.output_track();
-
-            let buffer = &mut mixer_ins
-                .get_mut(&key)
-                .expect("No buffer found for output track")[..buffer_size * CHANNELS];
-            track.output(info, buffer);
+            let buffer =
+                &mut mixer_ins.get_mut(&key).expect(NO_BUFFER_MSG)[..buffer_size * CHANNELS];
+            track.output(info, buffer)
         }
         self.position.fetch_add(
             buffer_size
