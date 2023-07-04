@@ -1,11 +1,11 @@
 ///! Ringbuffer based channel, reallocated by the sender
-use ringbuf::RingBuffer;
+use ringbuf::{HeapConsumer, HeapProducer, HeapRb};
 
 use super::{dropper::DBox, smallest_pow2};
 
 pub fn ringbuffer_with_capacity<T: Send>(capacity: usize) -> (Sender<T>, Receiver<T>) {
     // There will be allocated enough room for capacity elements, plus one more slot for the reallocation
-    let (producer, consumer) = RingBuffer::new(capacity + 1).split();
+    let (producer, consumer) = HeapRb::new(capacity + 1).split();
     (
         Sender { inner: producer },
         Receiver {
@@ -19,7 +19,7 @@ pub fn ringbuffer<T: Send>() -> (Sender<T>, Receiver<T>) {
 }
 
 pub struct Sender<T: Send> {
-    inner: ringbuf::Producer<Event<T>>,
+    inner: HeapProducer<Event<T>>,
 }
 impl<T> Sender<T>
 where
@@ -37,9 +37,9 @@ where
     }
 
     fn ensure_capacity(&mut self) {
-        if self.inner.remaining() == 1 {
+        if self.inner.free_len() == 1 {
             let new_capacity = smallest_pow2((self.inner.capacity() + 1) as f64);
-            let (producer, consumer) = RingBuffer::new(new_capacity).split();
+            let (producer, consumer) = HeapRb::new(new_capacity).split();
             let result = self.inner.push(Event::Reallocated(Box::new(consumer)));
             self.inner = producer;
 
@@ -52,7 +52,7 @@ where
 }
 
 pub struct Receiver<T: 'static + Send> {
-    inner: DBox<ringbuf::Consumer<Event<T>>>,
+    inner: DBox<HeapConsumer<Event<T>>>,
 }
 impl<T> Receiver<T>
 where
@@ -98,7 +98,7 @@ where
 
 enum Event<T> {
     Element(T),
-    Reallocated(Box<ringbuf::Consumer<Event<T>>>),
+    Reallocated(Box<HeapConsumer<Event<T>>>),
 }
 
 #[cfg(test)]
