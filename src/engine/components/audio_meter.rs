@@ -1,9 +1,10 @@
+use std::iter::zip;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Instant;
 
 use crate::engine::utils::MovingAverage;
-use crate::{meter_scale, non_copy_array, zip};
+use crate::{meter_scale, non_copy_array};
 
 use crate::engine::utils::{rms, AtomicF32};
 use crate::engine::{Sample, CHANNELS};
@@ -68,21 +69,17 @@ impl AudioMeter {
         let mut rms = [0.0; CHANNELS];
 
         // Iterating through all channels of the first two:
-        let channel_iter = zip!(
-            self.peak.iter(),
-            self.last_peak_top.iter_mut(),
-            self.since_peak_top.iter_mut(),
-            peak.iter_mut(),
+        let channel_iter = zip(
+            zip(self.peak.iter(), self.last_peak_top.iter_mut()),
+            zip(self.since_peak_top.iter_mut(), peak.iter_mut()),
         )
-        .chain(zip!(
-            self.long_peak.iter(),
-            self.last_long_peak_top.iter_mut(),
-            self.since_long_peak_top.iter_mut(),
-            long_peak.iter_mut(),
+        .chain(zip(
+            zip(self.long_peak.iter(), self.last_long_peak_top.iter_mut()),
+            zip(self.since_long_peak_top.iter_mut(), long_peak.iter_mut()),
         ));
 
         // Falling slowly
-        for (((stat, last_top), since_last_top), result) in channel_iter {
+        for ((stat, last_top), (since_last_top, result)) in channel_iter {
             let stat = stat.load(Ordering::Relaxed);
             let scaled = meter_scale(stat);
 
@@ -101,7 +98,10 @@ impl AudioMeter {
         }
 
         // Averaged
-        for ((rms, avg), result) in zip!(self.rms.iter(), self.rms_avg.iter_mut(), rms.iter_mut()) {
+        for ((rms, avg), result) in zip(
+            zip(self.rms.iter(), self.rms_avg.iter_mut()),
+            rms.iter_mut(),
+        ) {
             let rms = rms.load(Ordering::Relaxed);
             let scaled = meter_scale(rms);
             avg.push(scaled);
@@ -116,7 +116,7 @@ impl AudioMeter {
     /// Should be called before [`Self::read`] is called the first time or after a long break,
     /// to avoid meter sliding in place from zero or a very old value.
     pub fn snap_rms(&mut self) {
-        for (rms, rms_avg) in zip!(self.rms.iter(), self.rms_avg.iter_mut()) {
+        for (rms, rms_avg) in zip(self.rms.iter(), self.rms_avg.iter_mut()) {
             let rms = rms.load(Ordering::Relaxed);
             let scaled = meter_scale(rms);
 
@@ -130,9 +130,9 @@ impl AudioMeter {
     pub fn read_raw(&self) -> [[Sample; CHANNELS]; 3] {
         let mut result = [[0.0; CHANNELS]; 3];
         for (result_frame, atomic_frame) in
-            zip!(result.iter_mut(), [&self.peak, &self.long_peak, &self.rms])
+            zip(result.iter_mut(), [&self.peak, &self.long_peak, &self.rms])
         {
-            for (result, atomic) in zip!(result_frame.iter_mut(), atomic_frame.iter()) {
+            for (result, atomic) in zip(result_frame.iter_mut(), atomic_frame.iter()) {
                 *result = atomic.load(Ordering::Relaxed);
             }
         }
@@ -165,14 +165,14 @@ impl AudioMeterProcessor {
     fn peak(&mut self, buffer: &[Sample]) {
         let mut max_values = [0.0, 0.0];
         for frame in buffer.chunks(2) {
-            for (max, &value) in zip!(max_values.iter_mut(), frame) {
+            for (max, &value) in zip(max_values.iter_mut(), frame) {
                 if value.abs() > *max {
                     *max = value.abs();
                 }
             }
         }
 
-        for (peak, max) in zip!(self.peak.iter(), max_values) {
+        for (peak, max) in zip(self.peak.iter(), max_values) {
             peak.store(max, Ordering::Relaxed);
         }
     }
@@ -182,10 +182,9 @@ impl AudioMeterProcessor {
         // How long the peak is held in seconds
         const HOLD: f32 = 1.0;
 
-        for ((a_long_peak, a_peak), since_last_peak) in zip!(
-            self.long_peak.iter(),
-            self.peak.iter(),
-            &mut self.since_last_peak
+        for ((a_long_peak, a_peak), since_last_peak) in zip(
+            zip(self.long_peak.iter(), self.peak.iter()),
+            &mut self.since_last_peak,
         ) {
             let peak = a_peak.load(Ordering::Relaxed);
             let long_peak = a_long_peak.load(Ordering::Relaxed);
@@ -205,7 +204,7 @@ impl AudioMeterProcessor {
         let rms_values = rms(buffer);
 
         // Output to atomics
-        for (rms_atomic, rms_value) in zip!(self.rms.iter(), rms_values) {
+        for (rms_atomic, rms_value) in zip(self.rms.iter(), rms_values) {
             rms_atomic.store(rms_value, Ordering::Relaxed);
         }
     }

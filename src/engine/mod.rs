@@ -4,6 +4,7 @@ use cpal::{BuildStreamError, Device, SampleFormat, SampleRate, Stream, StreamCon
 use std::collections::HashSet;
 use std::error::Error;
 use std::fmt::Display;
+use std::iter::zip;
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -24,7 +25,6 @@ use self::components::timeline::{
 };
 use self::components::{TrackKey, TrackState};
 use self::processor::{processor, Processor, ProcessorInterface};
-use crate::zip;
 pub use components::Track;
 
 /// Internally used sample format.
@@ -255,7 +255,7 @@ impl Engine {
             .unwrap();
 
         let audio_tracks =
-            zip!(track_keys, timeline_keys).map(|(track_key, timeline_key)| AudioTrack {
+            zip(track_keys, timeline_keys).map(|(track_key, timeline_key)| AudioTrack {
                 timeline_track_key: timeline_key,
                 track_key,
             });

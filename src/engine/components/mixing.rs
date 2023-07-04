@@ -1,4 +1,4 @@
-use crate::zip;
+use std::iter::zip;
 
 use crate::engine::{Sample, CHANNELS};
 
@@ -51,7 +51,7 @@ impl MixPoint {
         }
 
         // Sum
-        for (sum_sample, &input_sample) in zip!(self.sum_buffer.iter_mut(), input_buffer) {
+        for (sum_sample, &input_sample) in zip(self.sum_buffer.iter_mut(), input_buffer) {
             *sum_sample += f64::from(input_sample);
         }
     }
@@ -63,7 +63,7 @@ impl MixPoint {
     pub fn get(&mut self) -> &mut [Sample] {
         // Convert back to original sample format.
         for (output_sample, &sum_sample) in
-            zip!(self.output_buffer.iter_mut(), self.sum_buffer.iter())
+            zip(self.output_buffer.iter_mut(), self.sum_buffer.iter())
         {
             *output_sample = sum_sample as Sample;
         }

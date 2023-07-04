@@ -5,6 +5,7 @@ pub mod remote_push;
 pub mod ringbuffer;
 
 use std::fmt::Debug;
+use std::iter::zip;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -18,18 +19,6 @@ macro_rules! non_copy_array {
     ($initial:expr; $size:expr) => {
         [(); $size].map(|_| $initial)
     };
-}
-
-/// Macro for more ergonomically zipping together multiple `IntoIterator`s.
-///
-/// Tuple isn't flattened though, so it's like:
-///
-/// `zip!(a, b, c, d) -> (((a, b), c), d)`
-#[macro_export(crate)]
-macro_rules! zip {
-    ($first:expr, $($rest:expr),+ $(,)?) => {{
-        ($first.into_iter())$(.zip($rest.into_iter()))+
-    }};
 }
 
 /// Find smallest power of 2 that is greater than or equal to `x`
@@ -83,7 +72,7 @@ pub fn rms(buffer: &[Sample]) -> [f32; CHANNELS] {
     let mut averages = [0.0; CHANNELS];
 
     for frame in buffer.chunks(CHANNELS) {
-        for (sample, average) in zip!(frame, &mut averages) {
+        for (sample, average) in zip(frame, &mut averages) {
             *average += f64::from(sample.powi(2)) / buffer_size;
         }
     }
@@ -199,17 +188,6 @@ pub fn format_truncate_list<T: Debug>(max_length: usize, list: &[T]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn zip_macro() {
-        let first = [1, 4, 7];
-        let second = [2, 5, 8];
-        let third = [3, 6, 9];
-
-        let zipped: Vec<((i32, i32), i32)> = zip!(first, second, third).collect();
-
-        assert_eq!(zipped, vec![((1, 2), 3), ((4, 5), 6), ((7, 8), 9)])
-    }
 
     // Just a surface-level test, no concurrency or anything.
     #[test]

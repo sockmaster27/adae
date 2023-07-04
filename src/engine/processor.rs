@@ -1,4 +1,4 @@
-use crate::zip;
+use std::iter::zip;
 
 use cpal::StreamConfig;
 
@@ -81,7 +81,7 @@ impl Processor {
         let buffer = self.output_samples(buffer_size);
 
         // Convert to stream's sample type.
-        for (in_sample, out_sample) in zip!(buffer, data) {
+        for (in_sample, out_sample) in zip(buffer, data) {
             *out_sample = T::from(in_sample);
         }
         // TODO: Scale channel counts.

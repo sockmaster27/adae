@@ -1,8 +1,9 @@
+use std::iter::zip;
+
 use super::audio_meter::{audio_meter, AudioMeter, AudioMeterProcessor};
 use super::parameter::{f32_parameter, F32Parameter, F32ParameterProcessor};
 use crate::engine::traits::{Effect, Info};
 use crate::engine::{Sample, CHANNELS};
-use crate::zip;
 
 pub type TrackKey = u32;
 
@@ -132,9 +133,10 @@ impl Effect for TrackProcessor {
         let volume_buffer = self.volume.get(buffer_size);
         let panning_buffer = self.panning.get(buffer_size);
 
-        for ((frame, &mut volume), &mut panning) in
-            zip!(buffer.chunks_mut(CHANNELS), volume_buffer, panning_buffer)
-        {
+        for ((frame, &mut volume), &mut panning) in zip(
+            zip(buffer.chunks_mut(CHANNELS), volume_buffer),
+            panning_buffer,
+        ) {
             for sample in frame.iter_mut() {
                 *sample *= volume;
             }

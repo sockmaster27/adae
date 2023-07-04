@@ -259,8 +259,6 @@ impl<E: Send, K: Send, C: RemotePushable<E, K>> DerefMut for RemotePushed<E, K, 
 
 #[cfg(test)]
 mod tests {
-    use crate::zip;
-
     use super::*;
 
     mod vec {
@@ -340,6 +338,8 @@ mod tests {
     }
 
     mod hash_map {
+        use std::iter::zip;
+
         use super::*;
 
         #[test]
@@ -422,7 +422,7 @@ mod tests {
             let (mut rper, mut rped) = HashMap::remote_push_with_capacity(4);
 
             let pre_cap = rped.capacity();
-            for (k, v) in zip!("abcde".chars(), 0..5) {
+            for (k, v) in zip("abcde".chars(), 0..5) {
                 assert_eq!(pre_cap, rped.capacity());
                 rper.push((k, v));
 

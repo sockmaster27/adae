@@ -2,18 +2,16 @@ use std::{
     cmp::min,
     error::Error,
     fmt::{Debug, Display},
+    iter::zip,
     ops::Range,
     sync::Arc,
 };
 
 use rubato::{FftFixedOut, Resampler};
 
-use crate::{
-    engine::{
-        traits::{Info, Source},
-        Sample, CHANNELS,
-    },
-    zip,
+use crate::engine::{
+    traits::{Info, Source},
+    Sample, CHANNELS,
 };
 
 use super::audio_clip::AudioClip;
@@ -157,7 +155,7 @@ impl AudioClipReader {
 
         let input_left = &input[0][input_range.clone()];
         let input_right = &input[1][input_range];
-        for (i, (&left, &right)) in zip!(input_left.iter(), input_right.iter()).enumerate() {
+        for (i, (&left, &right)) in zip(input_left.iter(), input_right.iter()).enumerate() {
             output[i * CHANNELS] = left;
             output[i * CHANNELS + 1] = right;
         }

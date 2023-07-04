@@ -6,6 +6,7 @@ use std::{
     collections::HashMap,
     error::Error,
     fmt::{Debug, Display},
+    iter::zip,
     path::Path,
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -20,19 +21,16 @@ use super::{
     audio_clip_store::{AudioClipStore, ImportError},
     track::TrackKey,
 };
-use crate::{
-    engine::{
-        traits::Info,
-        utils::{
-            dropper::DBox,
-            key_generator::{self, KeyGenerator},
-            rbtree_node::TreeNode,
-            remote_push::{RemotePushable, RemotePushedHashMap, RemotePusherHashMap},
-            ringbuffer::{self, ringbuffer},
-        },
-        Sample, CHANNELS,
+use crate::engine::{
+    traits::Info,
+    utils::{
+        dropper::DBox,
+        key_generator::{self, KeyGenerator},
+        rbtree_node::TreeNode,
+        remote_push::{RemotePushable, RemotePushedHashMap, RemotePusherHashMap},
+        ringbuffer::{self, ringbuffer},
     },
-    zip,
+    Sample, CHANNELS,
 };
 pub use timestamp::Timestamp;
 pub use track::{TimelineTrack, TimelineTrackKey, TimelineTrackState};
@@ -181,7 +179,7 @@ impl Timeline {
             keys.push(key);
         }
 
-        let tracks = zip!(&keys, outputs)
+        let tracks = zip(&keys, outputs)
             .map(|(&key, output)| {
                 (
                     key,
