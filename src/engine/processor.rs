@@ -74,15 +74,15 @@ impl Processor {
     }
 
     /// The function called to generate each audio buffer.
-    pub fn output<T: cpal::Sample>(&mut self, data: &mut [T]) {
+    pub fn output<T: cpal::Sample + cpal::FromSample<Sample>>(&mut self, data: &mut [T]) {
         // In some cases the buffer size can vary from one buffer to the next.
         let buffer_size = data.len() / usize::from(self.output_channels);
 
         let buffer = self.output_samples(buffer_size);
 
         // Convert to stream's sample type.
-        for (in_sample, out_sample) in zip(buffer, data) {
-            *out_sample = T::from(in_sample);
+        for (&mut in_sample, out_sample) in zip(buffer, data) {
+            *out_sample = T::from_sample(in_sample);
         }
         // TODO: Scale channel counts.
         debug_assert_eq!(CHANNELS, self.output_channels.into());

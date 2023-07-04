@@ -63,10 +63,22 @@ impl Engine {
         };
         let (processor_interface, processor) = processor(&config, max_buffer_size);
 
+        use SampleFormat::*;
         let create_stream = match sample_format {
-            SampleFormat::F32 => Self::create_stream::<f32>,
-            SampleFormat::I16 => Self::create_stream::<i16>,
-            SampleFormat::U16 => Self::create_stream::<u16>,
+            I8 => Self::create_stream::<i8>,
+            I16 => Self::create_stream::<i16>,
+            I32 => Self::create_stream::<i32>,
+            I64 => Self::create_stream::<i64>,
+
+            U8 => Self::create_stream::<u8>,
+            U16 => Self::create_stream::<u16>,
+            U32 => Self::create_stream::<u32>,
+            U64 => Self::create_stream::<u64>,
+
+            F32 => Self::create_stream::<f32>,
+            F64 => Self::create_stream::<f64>,
+
+            _ => panic!("Unsupported sample format: {:?}", sample_format),
         };
 
         let stopped1 = Arc::new(AtomicBool::new(false));
@@ -105,7 +117,7 @@ impl Engine {
     }
 
     /// Create a cpal stream with the given sample type.
-    fn create_stream<T: 'static + cpal::Sample>(
+    fn create_stream<T: 'static + cpal::SizedSample + cpal::FromSample<Sample>>(
         device: &Device,
         config: &StreamConfig,
         mut processor: Processor,
@@ -119,6 +131,7 @@ impl Engine {
                 }}
             },
             |err| panic!("{}", err),
+            None,
         )?;
 
         Ok(stream)
