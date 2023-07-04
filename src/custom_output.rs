@@ -6,7 +6,6 @@ lazy_static! {
     pub static ref OUTPUTTER: RwLock<fn(String)> = RwLock::new(|_| {});
 }
 
-#[macro_export(crate)]
 macro_rules! print {
     ($($arg:tt)*) => {{
         use $crate::custom_output::*;
@@ -17,7 +16,6 @@ macro_rules! print {
     }};
 }
 
-#[macro_export(crate)]
 macro_rules! println {
     ($($arg:tt)*) => {{
         let msg = std::format!($($arg)*);
@@ -25,7 +23,6 @@ macro_rules! println {
     }};
 }
 
-#[macro_export(crate)]
 macro_rules! eprint {
     ($($arg:tt)*) => {{
         let msg = std::format!($($arg)*);
@@ -33,7 +30,6 @@ macro_rules! eprint {
     }};
 }
 
-#[macro_export(crate)]
 macro_rules! eprintln {
     ($($arg:tt)*) => {{
         let msg = std::format!($($arg)*);
@@ -41,7 +37,8 @@ macro_rules! eprintln {
     }};
 }
 
-#[macro_export(crate)]
+// To be used in tests
+#[allow(unused_macros)]
 macro_rules! dbg {
     () => {
         eprintln!("[{}:{}]", std::file!(), std::line!())

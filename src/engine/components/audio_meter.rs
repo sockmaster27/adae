@@ -3,8 +3,8 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Instant;
 
-use crate::engine::utils::MovingAverage;
-use crate::{meter_scale, non_copy_array};
+use crate::engine::utils::{non_copy_array, MovingAverage};
+use crate::meter_scale;
 
 use crate::engine::utils::{rms, AtomicF32};
 use crate::engine::{Sample, CHANNELS};

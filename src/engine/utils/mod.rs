@@ -14,12 +14,12 @@ use super::{Sample, CHANNELS};
 /// Macro for conveniently initializing a static array of a given size, of a type that is not [`Copy`].
 ///
 /// The `initial` expression is evaluated for each element in the array.
-#[macro_export(crate)]
 macro_rules! non_copy_array {
     ($initial:expr; $size:expr) => {
         [(); $size].map(|_| $initial)
     };
 }
+pub(crate) use non_copy_array;
 
 /// Find smallest power of 2 that is greater than or equal to `x`
 pub fn smallest_pow2(x: f64) -> usize {
