@@ -40,7 +40,7 @@ impl<T> TreeNode<T> {
     }
 }
 
-intrusive_adapter!(pub TreeNodeAdapter<T> = Box<TreeNode<T>>: TreeNode<T> { link: RBTreeLink });
+intrusive_adapter!(pub TreeNodeAdapter<T> = Box<TreeNode<T>>: TreeNode::<T> { link: RBTreeLink });
 impl<'a, T> KeyAdapter<'a> for TreeNodeAdapter<T>
 where
     T: Keyed,
