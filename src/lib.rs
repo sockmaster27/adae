@@ -1,7 +1,3 @@
-#[cfg(any(feature = "custom_debug_output"))]
-#[macro_use]
-extern crate lazy_static;
-
 #[cfg(feature = "custom_debug_output")]
 #[macro_use]
 mod custom_output;

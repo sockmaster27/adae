@@ -11,7 +11,6 @@ cpal = "0.15.2"
 atomicbox = "0.4.0"
 ringbuf = "0.3.3"
 hound = { version = "3.5.0", optional = true }
-lazy_static = { version = "1.4.0", optional = true }
 symphonia = { version = "0.5.3", features = ["mp3"]}
 num-traits = "0.2.15"
 intrusive-collections = "0.9.5"
@@ -27,4 +26,4 @@ hound = "3.5.0"
 record_output = ["hound"]
 
 # Print all debug info to custom function
-custom_debug_output = ["lazy_static"]
+custom_debug_output = []

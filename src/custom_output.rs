@@ -2,16 +2,14 @@ use std::sync::RwLock;
 
 pub const ERR_MSG: &str = "A panic has previously ocurred while trying to set output function";
 
-lazy_static! {
-    pub static ref OUTPUTTER: RwLock<fn(String)> = RwLock::new(|_| {});
-}
+pub static OUTPUTTER: RwLock<fn(String)> = RwLock::new(|_| {});
 
 macro_rules! print {
     ($($arg:tt)*) => {{
         use $crate::custom_output::*;
 
         let msg = std::format!($($arg)*);
-        let outputter = crate::custom_output::OUTPUTTER.read().expect(ERR_MSG);
+        let outputter = OUTPUTTER.read().expect(ERR_MSG);
         outputter(msg);
     }};
 }
