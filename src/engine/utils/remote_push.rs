@@ -43,36 +43,6 @@ pub trait RemotePushable<E: Send, K: Send>: Send + Debug + Sized {
     }
 }
 
-pub type RemotePusherVec<E> = RemotePusher<E, E, Vec<E>>;
-pub type RemotePushedVec<E> = RemotePushed<E, E, Vec<E>>;
-impl<E> RemotePushable<E, E> for Vec<E>
-where
-    E: Send + Debug + PartialEq,
-{
-    fn with_capacity(capacity: usize) -> Self {
-        Vec::with_capacity(capacity)
-    }
-
-    fn push(&mut self, element: E) {
-        self.push(element)
-    }
-
-    fn remove(&mut self, element: E) -> bool {
-        let pre_len = self.len();
-
-        self.retain(|e| *e != element);
-
-        let removed_one = self.len() == pre_len - 1;
-        removed_one
-    }
-
-    fn transplant(&mut self, other: &mut Self) {
-        for e in self.drain(..) {
-            other.push(e)
-        }
-    }
-}
-
 pub type RemotePusherHashMap<K, V> = RemotePusher<(K, V), K, HashMap<K, V>>;
 pub type RemotePushedHashMap<K, V> = RemotePushed<(K, V), K, HashMap<K, V>>;
 impl<K, V> RemotePushable<(K, V), K> for HashMap<K, V>
@@ -260,82 +230,6 @@ impl<E: Send, K: Send, C: RemotePushable<E, K>> DerefMut for RemotePushed<E, K, 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    mod vec {
-        use super::*;
-
-        #[test]
-        fn push_one() {
-            let (mut rper, mut rped) = Vec::remote_push();
-
-            rper.push(5);
-            no_heap! {{
-                rped.poll();
-            }}
-
-            assert_eq!(*rped, vec![5]);
-        }
-
-        #[test]
-        fn push_repeatedly() {
-            let (mut rper, mut rped) = Vec::remote_push();
-
-            rper.push(2);
-            rper.push(7);
-            rper.push(5);
-
-            no_heap! {{
-                rped.poll();
-            }}
-
-            assert_eq!(*rped, vec![2, 7, 5]);
-        }
-
-        #[test]
-        fn push_multiple() {
-            let (mut rper, mut rped) = Vec::remote_push();
-
-            rper.push_multiple(vec![2, 7, 5]);
-
-            no_heap! {{
-                rped.poll();
-            }}
-
-            assert_eq!(*rped, vec![2, 7, 5]);
-        }
-
-        #[test]
-        fn push_multiple_repeatedly() {
-            let (mut rper, mut rped) = Vec::remote_push();
-
-            rper.push_multiple(vec![2, 7, 5]);
-            rper.push_multiple(vec![8, 16, 1]);
-            rper.push_multiple(vec![3, 14, 4]);
-
-            no_heap! {{
-                rped.poll();
-            }}
-
-            assert_eq!(*rped, vec![2, 7, 5, 8, 16, 1, 3, 14, 4]);
-        }
-
-        #[test]
-        fn reallocate() {
-            let (mut rper, mut rped) = Vec::remote_push_with_capacity(4);
-
-            let pre_cap = rped.capacity();
-            for i in 0..5 {
-                assert_eq!(pre_cap, rped.capacity());
-                rper.push(i);
-
-                no_heap! {{
-                    rped.poll();
-                }}
-            }
-            assert_ne!(pre_cap, rped.capacity());
-            assert_eq!(*rped, vec![0, 1, 2, 3, 4]);
-        }
-    }
 
     mod hash_map {
         use std::iter::zip;
