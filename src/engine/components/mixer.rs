@@ -3,8 +3,10 @@ use std::error::Error;
 use std::fmt::Debug;
 use std::fmt::Display;
 
-use super::track::TrackKey;
-use super::track::{track, track_from_state, Track, TrackProcessor, TrackState};
+use super::track::MixerTrackKey;
+use super::track::{
+    mixer_track, mixer_track_from_state, MixerTrack, MixerTrackProcessor, MixerTrackState,
+};
 use super::MixPoint;
 use crate::engine::traits::Effect;
 use crate::engine::traits::Info;
@@ -24,7 +26,7 @@ pub fn mixer(max_buffer_size: usize) -> (Mixer, MixerProcessor) {
     let (track_processors_pusher, track_processors_pushed) = HashMap::remote_push();
     let (source_outs_pusher, source_outs_pushed) = HashMap::remote_push();
 
-    let (master, master_processor) = track(0, max_buffer_size);
+    let (master, master_processor) = mixer_track(0, max_buffer_size);
 
     (
         Mixer {
@@ -47,40 +49,48 @@ pub fn mixer(max_buffer_size: usize) -> (Mixer, MixerProcessor) {
 
 pub struct Mixer {
     max_buffer_size: usize,
-    key_generator: KeyGenerator<TrackKey>,
-    tracks: HashMap<TrackKey, Track>,
-    master: Track,
+    key_generator: KeyGenerator<MixerTrackKey>,
+    tracks: HashMap<MixerTrackKey, MixerTrack>,
+    master: MixerTrack,
 
-    track_processors: RemotePusherHashMap<TrackKey, DBox<TrackProcessor>>,
-    source_outs: RemotePusherHashMap<TrackKey, DBox<Vec<Sample>>>,
+    track_processors: RemotePusherHashMap<MixerTrackKey, DBox<MixerTrackProcessor>>,
+    source_outs: RemotePusherHashMap<MixerTrackKey, DBox<Vec<Sample>>>,
 }
 impl Mixer {
-    pub fn master(&self) -> &Track {
+    pub fn master(&self) -> &MixerTrack {
         &self.master
     }
-    pub fn master_mut(&mut self) -> &mut Track {
+    pub fn master_mut(&mut self) -> &mut MixerTrack {
         &mut self.master
     }
 
-    pub fn track(&self, key: TrackKey) -> Result<&Track, InvalidTrackError> {
-        self.tracks.get(&key).ok_or(InvalidTrackError { key })
+    pub fn track(&self, key: MixerTrackKey) -> Result<&MixerTrack, InvalidMixerTrackError> {
+        self.tracks.get(&key).ok_or(InvalidMixerTrackError { key })
     }
-    pub fn track_mut(&mut self, key: TrackKey) -> Result<&mut Track, InvalidTrackError> {
-        self.tracks.get_mut(&key).ok_or(InvalidTrackError { key })
+    pub fn track_mut(
+        &mut self,
+        key: MixerTrackKey,
+    ) -> Result<&mut MixerTrack, InvalidMixerTrackError> {
+        self.tracks
+            .get_mut(&key)
+            .ok_or(InvalidMixerTrackError { key })
     }
 
-    pub fn add_track(&mut self) -> Result<TrackKey, TrackOverflowError> {
+    pub fn add_track(&mut self) -> Result<MixerTrackKey, MixerTrackOverflowError> {
         let key = self.key_generator.next()?;
-        let track = track(key, self.max_buffer_size);
+        let track = mixer_track(key, self.max_buffer_size);
         self.push_track(track);
         Ok(key)
     }
-    pub fn add_tracks(&mut self, count: u32) -> Result<Vec<TrackKey>, TrackOverflowError> {
+    pub fn add_tracks(
+        &mut self,
+        count: u32,
+    ) -> Result<Vec<MixerTrackKey>, MixerTrackOverflowError> {
         if self.key_generator.remaining_keys() < count {
-            return Err(TrackOverflowError);
+            return Err(MixerTrackOverflowError);
         }
 
-        let count = count.try_into().or(Err(TrackOverflowError))?;
+        let count = count.try_into().or(Err(MixerTrackOverflowError))?;
         let mut keys = Vec::with_capacity(count);
         let mut tracks = Vec::with_capacity(count);
         for _ in 0..count {
@@ -88,38 +98,38 @@ impl Mixer {
                 "next_key() returned error, even though it reported remaining_keys() >= count",
             );
             keys.push(key);
-            let track = track(key, self.max_buffer_size);
+            let track = mixer_track(key, self.max_buffer_size);
             tracks.push(track);
         }
         self.push_tracks(tracks);
         Ok(keys)
     }
 
-    pub fn reconstruct_track(&mut self, state: &TrackState) {
+    pub fn reconstruct_track(&mut self, state: &MixerTrackState) {
         let key = state.key;
         self.key_generator
             .reserve(key)
             .expect("Track key already in use");
 
-        let track = track_from_state(self.max_buffer_size, state);
+        let track = mixer_track_from_state(self.max_buffer_size, state);
         self.push_track(track);
     }
-    pub fn reconstruct_tracks<'a>(&mut self, states: impl Iterator<Item = &'a TrackState>) {
+    pub fn reconstruct_tracks<'a>(&mut self, states: impl Iterator<Item = &'a MixerTrackState>) {
         let tracks = states
             .map(|state| {
                 self.key_generator
                     .reserve(state.key)
                     .expect("Track key already in use");
-                track_from_state(self.max_buffer_size, state)
+                mixer_track_from_state(self.max_buffer_size, state)
             })
             .collect();
         self.push_tracks(tracks);
     }
 
-    pub fn delete_track(&mut self, key: TrackKey) -> Result<(), InvalidTrackError> {
+    pub fn delete_track(&mut self, key: MixerTrackKey) -> Result<(), InvalidMixerTrackError> {
         let result = self.key_generator.free(key);
         if result.is_err() {
-            return Err(InvalidTrackError { key });
+            return Err(InvalidMixerTrackError { key });
         }
 
         self.tracks.remove(&key);
@@ -127,10 +137,13 @@ impl Mixer {
 
         Ok(())
     }
-    pub fn delete_tracks(&mut self, keys: Vec<TrackKey>) -> Result<(), InvalidTrackError> {
+    pub fn delete_tracks(
+        &mut self,
+        keys: Vec<MixerTrackKey>,
+    ) -> Result<(), InvalidMixerTrackError> {
         for &key in &keys {
             if !self.tracks.contains_key(&key) {
-                return Err(InvalidTrackError { key });
+                return Err(InvalidMixerTrackError { key });
             }
         }
         for key in &keys {
@@ -143,7 +156,7 @@ impl Mixer {
         Ok(())
     }
 
-    fn push_track(&mut self, track: (Track, TrackProcessor)) {
+    fn push_track(&mut self, track: (MixerTrack, MixerTrackProcessor)) {
         let (track, track_processor) = track;
         let key = track.key();
         self.tracks.insert(key, track);
@@ -152,7 +165,7 @@ impl Mixer {
         self.track_processors
             .push((key, DBox::new(track_processor)))
     }
-    fn push_tracks(&mut self, tracks: Vec<(Track, TrackProcessor)>) {
+    fn push_tracks(&mut self, tracks: Vec<(MixerTrack, MixerTrackProcessor)>) {
         let mut track_processors = vec![];
         let mut source_outs = vec![];
         for track in tracks {
@@ -167,7 +180,7 @@ impl Mixer {
         self.track_processors.push_multiple(track_processors);
     }
 
-    pub fn key_in_use(&self, key: TrackKey) -> bool {
+    pub fn key_in_use(&self, key: MixerTrackKey) -> bool {
         self.key_generator.in_use(key)
     }
 
@@ -177,13 +190,13 @@ impl Mixer {
 }
 
 pub struct MixerProcessor {
-    tracks: RemotePushedHashMap<TrackKey, DBox<TrackProcessor>>,
-    master: DBox<TrackProcessor>,
-    source_outs: RemotePushedHashMap<TrackKey, DBox<Vec<Sample>>>,
+    tracks: RemotePushedHashMap<MixerTrackKey, DBox<MixerTrackProcessor>>,
+    master: DBox<MixerTrackProcessor>,
+    source_outs: RemotePushedHashMap<MixerTrackKey, DBox<Vec<Sample>>>,
     mix_point: MixPoint,
 }
 impl MixerProcessor {
-    pub fn source_outs(&mut self) -> &mut HashMap<TrackKey, DBox<Vec<Sample>>> {
+    pub fn source_outs(&mut self) -> &mut HashMap<MixerTrackKey, DBox<Vec<Sample>>> {
         &mut self.source_outs
     }
 
@@ -217,25 +230,25 @@ impl Debug for MixerProcessor {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub struct InvalidTrackError {
-    pub key: TrackKey,
+pub struct InvalidMixerTrackError {
+    pub key: MixerTrackKey,
 }
-impl Display for InvalidTrackError {
+impl Display for InvalidMixerTrackError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "No track with key, {}, on mixer", self.key)
     }
 }
-impl Error for InvalidTrackError {}
+impl Error for InvalidMixerTrackError {}
 
 #[derive(Debug, PartialEq, Eq)]
-pub struct TrackOverflowError;
-impl Display for TrackOverflowError {
+pub struct MixerTrackOverflowError;
+impl Display for MixerTrackOverflowError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "The max number of tracks has been exceeded. Impressive")
     }
 }
-impl Error for TrackOverflowError {}
-impl From<key_generator::OverflowError> for TrackOverflowError {
+impl Error for MixerTrackOverflowError {}
+impl From<key_generator::OverflowError> for MixerTrackOverflowError {
     fn from(_: key_generator::OverflowError) -> Self {
         Self
     }
@@ -310,7 +323,7 @@ mod tests {
 
         let used = m.add_track().unwrap();
 
-        m.reconstruct_track(&TrackState {
+        m.reconstruct_track(&MixerTrackState {
             panning: 0.0,
             volume: 1.0,
 
@@ -324,11 +337,11 @@ mod tests {
 
         let batch_size = 5;
 
-        let states: Vec<TrackState> = (1..50 * batch_size + 1)
-            .map(|key| TrackState {
+        let states: Vec<MixerTrackState> = (1..50 * batch_size + 1)
+            .map(|key| MixerTrackState {
                 panning: 0.0,
                 volume: 1.0,
-                key: key as TrackKey,
+                key: key as MixerTrackKey,
             })
             .collect();
 

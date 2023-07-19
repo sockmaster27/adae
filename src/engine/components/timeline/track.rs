@@ -8,7 +8,7 @@ use intrusive_collections::{Adapter, RBTree};
 use ouroboros::self_referencing;
 
 use super::TimelineClip;
-use crate::engine::components::track::TrackKey;
+use crate::engine::components::track::MixerTrackKey;
 use crate::engine::traits::Info;
 use crate::engine::utils::rbtree_node::{TreeNode, TreeNodeAdapter};
 use crate::engine::{Sample, CHANNELS};
@@ -43,11 +43,11 @@ pub struct TimelineTrack {
 
     relevant_clip: CursorOwning<TreeNodeAdapter<TimelineClip>>,
 
-    output_track: TrackKey,
+    output_track: MixerTrackKey,
 }
 impl TimelineTrack {
     pub fn new(
-        output: TrackKey,
+        output: MixerTrackKey,
         position: Arc<AtomicU64>,
         sample_rate: u32,
         bpm_cents: u16,
@@ -65,7 +65,7 @@ impl TimelineTrack {
         }
     }
 
-    pub fn output_track(&self) -> TrackKey {
+    pub fn output_track(&self) -> MixerTrackKey {
         self.output_track
     }
 

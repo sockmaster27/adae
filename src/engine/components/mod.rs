@@ -2,7 +2,7 @@ pub mod audio_meter;
 mod delay;
 pub use delay::DelayPoint;
 mod track;
-pub use track::{Track, TrackKey, TrackState};
+pub use track::{MixerTrack, MixerTrackKey, MixerTrackState};
 pub mod mixer;
 mod mixing;
 pub use mixing::MixPoint;

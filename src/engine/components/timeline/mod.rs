@@ -19,7 +19,7 @@ use self::timeline_clip::TimelineClip;
 use super::{
     audio_clip::AudioClipKey,
     audio_clip_store::{AudioClipStore, ImportError},
-    track::TrackKey,
+    track::MixerTrackKey,
 };
 use crate::engine::{
     traits::Info,
@@ -77,7 +77,7 @@ pub fn timeline(
 enum Event {
     JumpTo(u64),
     AddClip {
-        track_key: TrackKey,
+        track_key: MixerTrackKey,
         clip: Box<TreeNode<TimelineClip>>,
     },
 }
@@ -146,7 +146,7 @@ impl Timeline {
 
     pub fn add_track(
         &mut self,
-        output: TrackKey,
+        output: MixerTrackKey,
     ) -> Result<TimelineTrackKey, TimelineTrackOverflowError> {
         let key = self.key_generator.next()?;
 
@@ -161,7 +161,7 @@ impl Timeline {
     }
     pub fn add_tracks<'a>(
         &mut self,
-        outputs: Vec<TrackKey>,
+        outputs: Vec<MixerTrackKey>,
     ) -> Result<Vec<TimelineTrackKey>, TimelineTrackOverflowError> {
         let count = outputs.len();
 
@@ -222,7 +222,7 @@ impl Timeline {
         Ok(())
     }
 
-    pub fn reconstruct_track(&mut self, state: &TimelineTrackState, output: TrackKey) {
+    pub fn reconstruct_track(&mut self, state: &TimelineTrackState, output: MixerTrackKey) {
         let key = state.key;
         self.key_generator
             .reserve(key)
@@ -239,7 +239,7 @@ impl Timeline {
 
     pub fn reconstruct_tracks<'a>(
         &mut self,
-        states: impl Iterator<Item = (&'a TimelineTrackState, TrackKey)>,
+        states: impl Iterator<Item = (&'a TimelineTrackState, MixerTrackKey)>,
     ) {
         let tracks = states.map(|(state, output)| {
             let key = state.key;
@@ -318,7 +318,11 @@ impl TimelineProcessor {
         track.insert_clip(timeline_clip);
     }
 
-    pub fn output(&mut self, mixer_ins: &mut HashMap<TrackKey, DBox<Vec<Sample>>>, info: &Info) {
+    pub fn output(
+        &mut self,
+        mixer_ins: &mut HashMap<MixerTrackKey, DBox<Vec<Sample>>>,
+        info: &Info,
+    ) {
         let Info {
             sample_rate: _,
             buffer_size,

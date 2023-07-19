@@ -5,12 +5,15 @@ use super::parameter::{f32_parameter, F32Parameter, F32ParameterProcessor};
 use crate::engine::traits::{Effect, Info};
 use crate::engine::{Sample, CHANNELS};
 
-pub type TrackKey = u32;
+pub type MixerTrackKey = u32;
 
-pub fn track(key: TrackKey, max_buffer_size: usize) -> (Track, TrackProcessor) {
-    track_from_state(
+pub fn mixer_track(
+    key: MixerTrackKey,
+    max_buffer_size: usize,
+) -> (MixerTrack, MixerTrackProcessor) {
+    mixer_track_from_state(
         max_buffer_size,
-        &TrackState {
+        &MixerTrackState {
             panning: 0.0,
             volume: 1.0,
             key,
@@ -18,20 +21,23 @@ pub fn track(key: TrackKey, max_buffer_size: usize) -> (Track, TrackProcessor) {
     )
 }
 
-pub fn track_from_state(max_buffer_size: usize, state: &TrackState) -> (Track, TrackProcessor) {
+pub fn mixer_track_from_state(
+    max_buffer_size: usize,
+    state: &MixerTrackState,
+) -> (MixerTrack, MixerTrackProcessor) {
     let (panning, panning_processor) = f32_parameter(state.panning, max_buffer_size);
     let (volume, volume_processor) = f32_parameter(state.volume, max_buffer_size);
     let (meter, meter_processor) = audio_meter();
 
     (
-        Track {
+        MixerTrack {
             key: state.key,
 
             panning,
             volume,
             meter,
         },
-        TrackProcessor {
+        MixerTrackProcessor {
             panning: panning_processor,
             volume: volume_processor,
             meter: meter_processor,
@@ -39,15 +45,15 @@ pub fn track_from_state(max_buffer_size: usize, state: &TrackState) -> (Track, T
     )
 }
 
-pub struct Track {
-    key: TrackKey,
+pub struct MixerTrack {
+    key: MixerTrackKey,
 
     panning: F32Parameter,
     volume: F32Parameter,
     meter: AudioMeter,
 }
-impl Track {
-    pub fn key(&self) -> TrackKey {
+impl MixerTrack {
+    pub fn key(&self) -> MixerTrackKey {
         self.key
     }
 
@@ -88,8 +94,8 @@ impl Track {
     }
 
     /// Takes a snapshot of the current state of the track
-    pub(crate) fn state(&self) -> TrackState {
-        TrackState {
+    pub(crate) fn state(&self) -> MixerTrackState {
+        MixerTrackState {
             panning: self.panning.get(),
             volume: self.volume.get(),
             key: self.key(),
@@ -100,20 +106,20 @@ impl Track {
 /// Contains all info about the tracks state,
 /// that is relevant to reconstructing it
 #[derive(Debug, Clone, PartialEq)]
-pub struct TrackState {
+pub struct MixerTrackState {
     pub panning: f32,
     pub volume: f32,
 
-    pub key: TrackKey,
+    pub key: MixerTrackKey,
 }
 
 #[derive(Debug)]
-pub struct TrackProcessor {
+pub struct MixerTrackProcessor {
     panning: F32ParameterProcessor,
     volume: F32ParameterProcessor,
     meter: AudioMeterProcessor,
 }
-impl TrackProcessor {
+impl MixerTrackProcessor {
     fn pan(panning: f32, frame: &mut [Sample]) {
         // TODO: Pan laws
         let left_multiplier = (-panning + 1.0).clamp(0.0, 1.0);
@@ -123,7 +129,7 @@ impl TrackProcessor {
         frame[1] *= right_multiplier;
     }
 }
-impl Effect for TrackProcessor {
+impl Effect for MixerTrackProcessor {
     fn process(&mut self, info: &Info, buffer: &mut [Sample]) {
         let Info {
             sample_rate,
@@ -156,7 +162,7 @@ mod tests {
     fn pan_center() {
         let mut signal = [2.0, 3.0];
 
-        TrackProcessor::pan(0.0, &mut signal);
+        MixerTrackProcessor::pan(0.0, &mut signal);
 
         assert_eq!(signal, [2.0, 3.0]);
     }
@@ -165,7 +171,7 @@ mod tests {
     fn pan_left() {
         let mut signal = [2.0, 3.0];
 
-        TrackProcessor::pan(-1.0, &mut signal);
+        MixerTrackProcessor::pan(-1.0, &mut signal);
 
         assert_eq!(signal, [2.0, 0.0]);
     }
@@ -174,7 +180,7 @@ mod tests {
     fn pan_right() {
         let mut signal = [2.0, 3.0];
 
-        TrackProcessor::pan(1.0, &mut signal);
+        MixerTrackProcessor::pan(1.0, &mut signal);
 
         assert_eq!(signal, [0.0, 3.0]);
     }

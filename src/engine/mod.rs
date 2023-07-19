@@ -17,15 +17,15 @@ mod utils;
 
 pub use self::components::audio_clip::AudioClipKey;
 use self::components::audio_clip_store::ImportError;
-use self::components::mixer::{InvalidTrackError, TrackOverflowError};
+use self::components::mixer::{InvalidMixerTrackError, MixerTrackOverflowError};
 pub use self::components::timeline::Timestamp;
 use self::components::timeline::{
     AddClipError, InvalidTimelineTrackError, TimelineTrackKey, TimelineTrackOverflowError,
     TimelineTrackState,
 };
-use self::components::{TrackKey, TrackState};
+use self::components::{MixerTrackKey, MixerTrackState};
 use self::processor::{processor, Processor, ProcessorInterface};
-pub use components::Track;
+pub use components::MixerTrack;
 
 /// Internally used sample format.
 type Sample = f32;
@@ -205,17 +205,20 @@ impl Engine {
             .add_clip(timeline_track_key, clip_key, start, length)
     }
 
-    pub fn master(&self) -> &Track {
+    pub fn master(&self) -> &MixerTrack {
         self.processor_interface.mixer.master()
     }
-    pub fn master_mut(&mut self) -> &mut Track {
+    pub fn master_mut(&mut self) -> &mut MixerTrack {
         self.processor_interface.mixer.master_mut()
     }
 
-    pub fn track(&self, key: TrackKey) -> Result<&Track, InvalidTrackError> {
+    pub fn mixer_track(&self, key: MixerTrackKey) -> Result<&MixerTrack, InvalidMixerTrackError> {
         self.processor_interface.mixer.track(key)
     }
-    pub fn track_mut(&mut self, key: TrackKey) -> Result<&mut Track, InvalidTrackError> {
+    pub fn mixer_track_mut(
+        &mut self,
+        key: MixerTrackKey,
+    ) -> Result<&mut MixerTrack, InvalidMixerTrackError> {
         self.processor_interface.mixer.track_mut(key)
     }
 
@@ -230,7 +233,7 @@ impl Engine {
             ));
         }
         if self.processor_interface.mixer.remaining_keys() == 0 {
-            return Err(AudioTrackOverflowError::Tracks(TrackOverflowError));
+            return Err(AudioTrackOverflowError::Tracks(MixerTrackOverflowError));
         }
 
         let track_key = self.processor_interface.mixer.add_track().unwrap();
@@ -257,7 +260,7 @@ impl Engine {
             ));
         }
         if self.processor_interface.mixer.remaining_keys() < count {
-            return Err(AudioTrackOverflowError::Tracks(TrackOverflowError));
+            return Err(AudioTrackOverflowError::Tracks(MixerTrackOverflowError));
         }
 
         let track_keys = self.processor_interface.mixer.add_tracks(count).unwrap();
@@ -329,7 +332,7 @@ impl Engine {
             .timeline
             .track_state(audio_track.timeline_track_key())
             .unwrap();
-        let track_state = self.track(audio_track.track_key()).unwrap().state();
+        let track_state = self.mixer_track(audio_track.track_key()).unwrap().state();
 
         Ok(AudioTrackState {
             timeline_track_state,
@@ -354,7 +357,7 @@ impl Engine {
             .mixer
             .key_in_use(audio_track.track_key)
         {
-            return Err(InvalidAudioTrackError::Tracks(InvalidTrackError {
+            return Err(InvalidAudioTrackError::Tracks(InvalidMixerTrackError {
                 key: audio_track.track_key,
             }));
         }
@@ -460,13 +463,13 @@ impl Drop for Engine {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AudioTrack {
     timeline_track_key: TimelineTrackKey,
-    track_key: TrackKey,
+    track_key: MixerTrackKey,
 }
 impl AudioTrack {
     pub fn timeline_track_key(&self) -> TimelineTrackKey {
         self.timeline_track_key
     }
-    pub fn track_key(&self) -> TrackKey {
+    pub fn track_key(&self) -> MixerTrackKey {
         self.track_key
     }
 }
@@ -474,7 +477,7 @@ impl AudioTrack {
 #[derive(Debug, Clone, PartialEq)]
 pub struct AudioTrackState {
     timeline_track_state: TimelineTrackState,
-    track_state: TrackState,
+    track_state: MixerTrackState,
 }
 
 /// Scaling used by [`Track::read_meter`]
@@ -492,7 +495,7 @@ pub fn inverse_meter_scale(value: Sample) -> Sample {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum AudioTrackOverflowError {
-    Tracks(TrackOverflowError),
+    Tracks(MixerTrackOverflowError),
     TimelineTracks(TimelineTrackOverflowError),
 }
 impl Display for AudioTrackOverflowError {
@@ -507,7 +510,7 @@ impl Error for AudioTrackOverflowError {}
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum InvalidAudioTrackError {
-    Tracks(InvalidTrackError),
+    Tracks(InvalidMixerTrackError),
     TimelineTracks(InvalidTimelineTrackError),
 }
 impl Display for InvalidAudioTrackError {
@@ -522,7 +525,7 @@ impl Error for InvalidAudioTrackError {}
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum AudioTrackReconstructionError {
-    Tracks(TrackKey),
+    Tracks(MixerTrackKey),
     TimelineTracks(TimelineTrackKey),
 }
 impl Display for AudioTrackReconstructionError {
