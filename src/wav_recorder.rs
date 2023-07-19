@@ -1,3 +1,6 @@
+// Should be available for testing and debugging without necessarily being used elsewhere
+#![allow(dead_code)]
+
 use std::{fs, io};
 
 pub struct WavRecorder {
