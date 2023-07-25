@@ -56,9 +56,15 @@ impl AudioClipStore {
         self.key_generator.in_use(key)
     }
 
-    pub fn get(&self, key: AudioClipKey) -> Option<AudioClipReader> {
-        let clip = Arc::clone(self.clips.get(&key)?);
-        Some(AudioClipReader::new(
+    pub fn get(&self, key: AudioClipKey) -> Result<Arc<AudioClip>, InvalidAudioClipError> {
+        match self.clips.get(&key) {
+            None => Err(InvalidAudioClipError { key }),
+            Some(clip) => Ok(Arc::clone(clip)),
+        }
+    }
+    pub fn reader(&self, key: AudioClipKey) -> Result<AudioClipReader, InvalidAudioClipError> {
+        let clip = self.get(key)?;
+        Ok(AudioClipReader::new(
             clip,
             self.max_buffer_size,
             self.sample_rate,
@@ -74,6 +80,21 @@ impl Display for ClipOverflowError {
     }
 }
 impl Error for ClipOverflowError {}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct InvalidAudioClipError {
+    pub key: AudioClipKey,
+}
+impl Display for InvalidAudioClipError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "No audio clip with key, {}, in audio clip store",
+            self.key
+        )
+    }
+}
+impl Error for InvalidAudioClipError {}
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum ImportError {

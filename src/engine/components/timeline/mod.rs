@@ -17,8 +17,8 @@ use std::{
 use self::timeline_clip::TimelineClip;
 
 use super::{
-    audio_clip::AudioClipKey,
-    audio_clip_store::{AudioClipStore, ImportError},
+    audio_clip::{AudioClip, AudioClipKey},
+    audio_clip_store::{AudioClipStore, ImportError, InvalidAudioClipError},
     track::MixerTrackKey,
 };
 use crate::engine::{
@@ -119,6 +119,9 @@ impl Timeline {
     pub fn import_audio_clip(&mut self, path: &Path) -> Result<AudioClipKey, ImportError> {
         self.clip_store.import(path)
     }
+    pub fn audio_clip(&self, key: AudioClipKey) -> Result<Arc<AudioClip>, InvalidAudioClipError> {
+        self.clip_store.get(key)
+    }
 
     pub fn add_clip(
         &mut self,
@@ -133,8 +136,8 @@ impl Timeline {
 
         let audio_clip = self
             .clip_store
-            .get(clip_key)
-            .ok_or(AddClipError::InvalidClip(clip_key))?;
+            .reader(clip_key)
+            .or(Err(AddClipError::InvalidClip(clip_key)))?;
 
         self.event_sender.send(Event::AddClip {
             track_key,

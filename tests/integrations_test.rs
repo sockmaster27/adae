@@ -2,7 +2,7 @@ extern crate adae;
 
 use std::{iter::zip, path::Path};
 
-use adae::{Engine, Timestamp};
+use adae::{AudioClipKey, Engine, Timestamp};
 
 #[test]
 fn create_engine() {
@@ -139,6 +139,29 @@ fn reconstruct_audio_tracks() {
     }
 
     assert_eq!(e.audio_tracks().count(), 42);
+}
+
+fn import_ac(e: &mut Engine) -> AudioClipKey {
+    e.import_audio_clip(Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/test_files/44100 16-bit.wav"
+    )))
+    .unwrap()
+}
+
+#[test]
+fn import_audio_clip() {
+    import_ac(&mut Engine::dummy());
+}
+
+#[test]
+fn audio_clip_length() {
+    let mut e = Engine::dummy();
+    let ck = import_ac(&mut e);
+
+    let ac = e.audio_clip(ck).unwrap();
+
+    assert_eq!(ac.len(), 1_322_978);
 }
 
 #[test]

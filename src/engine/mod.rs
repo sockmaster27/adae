@@ -15,8 +15,9 @@ mod processor;
 mod traits;
 mod utils;
 
+use self::components::audio_clip::AudioClip;
 pub use self::components::audio_clip::AudioClipKey;
-use self::components::audio_clip_store::ImportError;
+use self::components::audio_clip_store::{ImportError, InvalidAudioClipError};
 use self::components::mixer::{InvalidMixerTrackError, MixerTrackOverflowError};
 pub use self::components::timeline::Timestamp;
 use self::components::timeline::{
@@ -139,7 +140,9 @@ impl Engine {
 
     /// Creates an engine that simulates outputting without outputting to any audio device.
     ///
-    /// Spins poll- and output callback as fast as possible with a varying buffersize.  
+    /// Spins poll and output callback as fast as possible with a varying buffersize.  
+    ///
+    /// Useful for integration testing.
     pub fn dummy() -> Self {
         let (processor_interface, mut processor) = processor(
             &StreamConfig {
@@ -192,6 +195,9 @@ impl Engine {
 
     pub fn import_audio_clip(&mut self, path: &Path) -> Result<AudioClipKey, ImportError> {
         self.processor_interface.timeline.import_audio_clip(path)
+    }
+    pub fn audio_clip(&self, key: AudioClipKey) -> Result<Arc<AudioClip>, InvalidAudioClipError> {
+        self.processor_interface.timeline.audio_clip(key)
     }
     pub fn add_clip(
         &mut self,
