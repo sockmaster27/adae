@@ -10,4 +10,4 @@ Adae is the engine powering the Voil digital audio workstation. It is available 
 
 Adae is available under an [MIT license](./LICENSE).
 
-By contributing, you agree that your contributions will be licensed under the projects MIT License.
+By contributing, you agree that your contributions will be licensed under the project's MIT License.
