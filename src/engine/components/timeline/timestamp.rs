@@ -1,4 +1,7 @@
-use std::ops::{Add, Sub};
+use std::fmt::Debug;
+use std::ops::{Add, Mul, Sub};
+
+use num_traits::Float;
 
 const UNITS_PER_BEAT: u32 = 1024;
 
@@ -8,9 +11,16 @@ pub struct Timestamp {
     beat_units: u32,
 }
 impl Timestamp {
-    /// The smallest possible Timestamp representing the very beginning (regardless of unit)
+    /// The smallest possible timestamp representing the very beginning (regardless of unit)
     pub const fn zero() -> Self {
         Self { beat_units: 0 }
+    }
+    /// The largest representable timestamp, convenient for comparisons.
+    /// Converting this to anything other than beat units may overflow.
+    pub const fn infinity() -> Self {
+        Self {
+            beat_units: u32::MAX,
+        }
     }
 
     /// 1 beat = 1024 beat units
@@ -30,6 +40,7 @@ impl Timestamp {
         }
     }
 
+    /// 1 beat = 1024 beat units
     pub const fn beat_units(&self) -> u32 {
         self.beat_units
     }
@@ -54,6 +65,22 @@ impl Sub for Timestamp {
     fn sub(self, rhs: Self) -> Self::Output {
         Self {
             beat_units: self.beat_units - rhs.beat_units,
+        }
+    }
+}
+impl Mul<u32> for Timestamp {
+    type Output = Timestamp;
+    fn mul(self, rhs: u32) -> Self::Output {
+        Timestamp {
+            beat_units: self.beat_units * rhs,
+        }
+    }
+}
+impl Mul<Timestamp> for u32 {
+    type Output = Timestamp;
+    fn mul(self, rhs: Timestamp) -> Self::Output {
+        Timestamp {
+            beat_units: self * rhs.beat_units,
         }
     }
 }
@@ -106,5 +133,26 @@ mod tests {
         let ts = Timestamp::from_beat_units(u32::MAX);
         let result = ts.samples(40_000, 100_00);
         assert_eq!(result, (u32::MAX as u64 * 40_000 * 60) / (100 * 1024));
+    }
+
+    #[test]
+    fn add() {
+        let a = Timestamp::from_beat_units(42);
+        let b = Timestamp::from_beat_units(43);
+        let result = a + b;
+        assert_eq!(result.beat_units(), 85);
+    }
+    #[test]
+    fn sub() {
+        let a = Timestamp::from_beat_units(43);
+        let b = Timestamp::from_beat_units(42);
+        let result = a - b;
+        assert_eq!(result.beat_units(), 1);
+    }
+    #[test]
+    fn mul() {
+        let ts = Timestamp::from_beat_units(42);
+        assert_eq!((ts * 2).beat_units(), 84);
+        assert_eq!((2 * ts).beat_units(), 84);
     }
 }
