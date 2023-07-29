@@ -15,7 +15,7 @@ mod processor;
 mod traits;
 mod utils;
 
-use self::components::audio_clip::AudioClip;
+pub use self::components::audio_clip::AudioClip;
 pub use self::components::audio_clip::AudioClipKey;
 use self::components::audio_clip_store::{ImportError, InvalidAudioClipError};
 use self::components::mixer::{InvalidMixerTrackError, MixerTrackOverflowError};
