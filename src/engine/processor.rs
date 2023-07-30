@@ -2,14 +2,11 @@ use std::iter::zip;
 
 use cpal::StreamConfig;
 
-use super::{
-    components::{
-        mixer::{mixer, Mixer, MixerProcessor},
-        timeline::{timeline, Timeline, TimelineProcessor},
-    },
-    traits::Info,
+use super::components::{
+    mixer::{mixer, Mixer, MixerProcessor},
+    timeline::{timeline, Timeline, TimelineProcessor},
 };
-use super::{Sample, CHANNELS};
+use super::{info::Info, Sample, CHANNELS};
 #[cfg(feature = "record_output")]
 use crate::wav_recorder::WavRecorder;
 

@@ -11,8 +11,8 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
 mod components;
+mod info;
 mod processor;
-mod traits;
 mod utils;
 
 pub use self::components::audio_clip::AudioClip;

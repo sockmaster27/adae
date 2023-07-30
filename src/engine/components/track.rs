@@ -2,7 +2,7 @@ use std::iter::zip;
 
 use super::audio_meter::{audio_meter, AudioMeter, AudioMeterProcessor};
 use super::parameter::{f32_parameter, F32Parameter, F32ParameterProcessor};
-use crate::engine::traits::{Effect, Info};
+use crate::engine::info::Info;
 use crate::engine::{Sample, CHANNELS};
 
 pub type MixerTrackKey = u32;
@@ -128,9 +128,8 @@ impl MixerTrackProcessor {
         let right_multiplier = (panning + 1.0).clamp(0.0, 1.0);
         frame[1] *= right_multiplier;
     }
-}
-impl Effect for MixerTrackProcessor {
-    fn process(&mut self, info: &Info, buffer: &mut [Sample]) {
+
+    pub fn process(&mut self, info: &Info, buffer: &mut [Sample]) {
         let Info {
             sample_rate,
             buffer_size,

@@ -9,7 +9,7 @@ use ouroboros::self_referencing;
 
 use super::TimelineClip;
 use crate::engine::components::track::MixerTrackKey;
-use crate::engine::traits::Info;
+use crate::engine::info::Info;
 use crate::engine::utils::rbtree_node::{TreeNode, TreeNodeAdapter};
 use crate::engine::{Sample, CHANNELS};
 use crate::Timestamp;

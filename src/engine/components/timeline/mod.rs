@@ -22,7 +22,7 @@ use super::{
     track::MixerTrackKey,
 };
 use crate::engine::{
-    traits::Info,
+    info::Info,
     utils::{
         dropper::DBox,
         key_generator::{self, KeyGenerator},

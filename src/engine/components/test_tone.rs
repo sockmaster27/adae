@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-use crate::engine::traits::{Info, Source};
+use crate::engine::info::Info;
 use crate::engine::utils::format_truncate_list;
 use crate::engine::{Sample, CHANNELS};
 
@@ -16,8 +16,7 @@ impl TestTone {
             sample_clock: 0.0,
         }
     }
-}
-impl Source for TestTone {
+
     fn output(&mut self, info: &Info) -> &mut [Sample] {
         let Info {
             sample_rate,

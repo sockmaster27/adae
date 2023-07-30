@@ -9,10 +9,7 @@ use std::{
 
 use rubato::{FftFixedOut, Resampler};
 
-use crate::engine::{
-    traits::{Info, Source},
-    Sample, CHANNELS,
-};
+use crate::engine::{info::Info, Sample, CHANNELS};
 
 use super::audio_clip::AudioClip;
 
@@ -252,11 +249,10 @@ impl AudioClipReader {
 
         &mut self.output_buffer[..output_size * CHANNELS]
     }
-}
-impl Source for AudioClipReader {
+
     /// Outputs to a buffer of at most the requested size (via the info parameter).
     /// If the end is reached the returned buffer is smaller than this size.
-    fn output(&mut self, info: &Info) -> &mut [Sample] {
+    pub fn output(&mut self, info: &Info) -> &mut [Sample] {
         if self.resampler.is_some() {
             self.output_resampling(info)
         } else {

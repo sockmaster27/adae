@@ -8,8 +8,7 @@ use super::track::{
     mixer_track, mixer_track_from_state, MixerTrack, MixerTrackProcessor, MixerTrackState,
 };
 use super::MixPoint;
-use crate::engine::traits::Effect;
-use crate::engine::traits::Info;
+use crate::engine::info::Info;
 use crate::engine::utils::dropper::DBox;
 use crate::engine::utils::key_generator;
 use crate::engine::utils::key_generator::KeyGenerator;
