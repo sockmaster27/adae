@@ -10,5 +10,4 @@ pub mod audio_clip;
 mod audio_clip_reader;
 pub mod audio_clip_store;
 mod parameter;
-pub mod test_tone;
 pub mod timeline;

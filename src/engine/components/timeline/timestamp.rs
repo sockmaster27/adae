@@ -1,8 +1,6 @@
 use std::fmt::Debug;
 use std::ops::{Add, Mul, Sub};
 
-use num_traits::Float;
-
 const UNITS_PER_BEAT: u32 = 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -52,10 +52,6 @@ impl AudioClipStore {
         Ok(key)
     }
 
-    pub fn key_in_use(&self, key: AudioClipKey) -> bool {
-        self.key_generator.in_use(key)
-    }
-
     pub fn get(&self, key: AudioClipKey) -> Result<Arc<AudioClip>, InvalidAudioClipError> {
         match self.clips.get(&key) {
             None => Err(InvalidAudioClipError { key }),
