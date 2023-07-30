@@ -11,10 +11,10 @@ use rubato::{FftFixedOut, Resampler};
 
 use crate::engine::{info::Info, Sample, CHANNELS};
 
-use super::audio_clip::AudioClip;
+use super::stored_audio_clip::StoredAudioClip;
 
 pub struct AudioClipReader {
-    inner: Arc<AudioClip>,
+    inner: Arc<StoredAudioClip>,
     position: usize,
     resampler: Option<FftFixedOut<Sample>>,
 
@@ -25,7 +25,7 @@ pub struct AudioClipReader {
     output_buffer: Vec<Sample>,
 }
 impl AudioClipReader {
-    pub fn new(clip: Arc<AudioClip>, max_buffer_size: usize, sample_rate: u32) -> Self {
+    pub fn new(clip: Arc<StoredAudioClip>, max_buffer_size: usize, sample_rate: u32) -> Self {
         let resampler_chunk_size = 1024;
 
         let clip_sample_rate: usize = clip
@@ -287,7 +287,7 @@ mod tests {
 
     #[test]
     fn output() {
-        let ac = AudioClip::import(&test_file_path("48000 16-bit.wav")).unwrap();
+        let ac = StoredAudioClip::import(&test_file_path("48000 16-bit.wav")).unwrap();
         let mut acr = AudioClipReader::new(Arc::new(ac), 50, 48_000);
 
         for _ in 0..5 {
@@ -319,7 +319,7 @@ mod tests {
 
     #[test]
     fn output_resampling() {
-        let ac = AudioClip::import(&test_file_path("44100 16-bit.wav")).unwrap();
+        let ac = StoredAudioClip::import(&test_file_path("44100 16-bit.wav")).unwrap();
         let mut acr = AudioClipReader::new(Arc::new(ac), 50, 48_000);
 
         for _ in 0..5 {
@@ -338,7 +338,7 @@ mod tests {
 
     #[test]
     fn output_big_buffer() {
-        let ac = AudioClip::import(&test_file_path("48000 16-bit.wav")).unwrap();
+        let ac = StoredAudioClip::import(&test_file_path("48000 16-bit.wav")).unwrap();
         let mut acr = AudioClipReader::new(Arc::new(ac), 2050, 48_000);
 
         for _ in 0..2 {
@@ -380,7 +380,7 @@ mod tests {
 
     #[test]
     fn output_big_buffer_resampling() {
-        let ac = AudioClip::import(&test_file_path("44100 16-bit.wav")).unwrap();
+        let ac = StoredAudioClip::import(&test_file_path("44100 16-bit.wav")).unwrap();
         let mut acr = AudioClipReader::new(Arc::new(ac), 2050, 48_000);
 
         for _ in 0..2 {
@@ -399,7 +399,7 @@ mod tests {
 
     #[test]
     fn output_past_end() {
-        let ac = AudioClip::import(&test_file_path("48000 16-bit.wav")).unwrap();
+        let ac = StoredAudioClip::import(&test_file_path("48000 16-bit.wav")).unwrap();
         let mut acr = AudioClipReader::new(Arc::new(ac), 1_322_978 + 10, 48_000);
 
         let output = acr.output(&Info {
@@ -418,7 +418,7 @@ mod tests {
     fn output_past_end_resampling() {
         let full_length = (1_322_978.0f64 * (48_000.0 / 44_100.0)).ceil() as usize;
 
-        let ac = AudioClip::import(&test_file_path("44100 16-bit.wav")).unwrap();
+        let ac = StoredAudioClip::import(&test_file_path("44100 16-bit.wav")).unwrap();
         let mut acr = AudioClipReader::new(Arc::new(ac), full_length + 10, 48_000);
 
         let output = acr.output(&Info {
@@ -435,7 +435,7 @@ mod tests {
 
     #[test]
     fn jump() {
-        let ac = AudioClip::import(&test_file_path("48000 16-bit.wav")).unwrap();
+        let ac = StoredAudioClip::import(&test_file_path("48000 16-bit.wav")).unwrap();
         let mut acr = AudioClipReader::new(Arc::new(ac), 50, 48_000);
 
         let output = acr.output(&Info {
@@ -467,7 +467,7 @@ mod tests {
 
     #[test]
     fn jump_out_of_bounds() {
-        let ac = AudioClip::import(&test_file_path("48000 16-bit.wav")).unwrap();
+        let ac = StoredAudioClip::import(&test_file_path("48000 16-bit.wav")).unwrap();
         let mut acr = AudioClipReader::new(Arc::new(ac), 50, 48_000);
 
         assert_eq!(acr.jump(1_322_978), Err(JumpOutOfBounds));

@@ -9,18 +9,18 @@ use std::{
 use crate::engine::utils::key_generator::{self, KeyGenerator};
 
 use super::{
-    audio_clip::{self, AudioClip, AudioClipKey},
     audio_clip_reader::AudioClipReader,
+    stored_audio_clip::{self, StoredAudioClip, StoredAudioClipKey},
 };
 
 pub struct AudioClipStore {
     max_buffer_size: usize,
     sample_rate: u32,
 
-    paths: HashMap<PathBuf, AudioClipKey>,
-    clips: HashMap<AudioClipKey, Arc<AudioClip>>,
+    paths: HashMap<PathBuf, StoredAudioClipKey>,
+    clips: HashMap<StoredAudioClipKey, Arc<StoredAudioClip>>,
 
-    key_generator: KeyGenerator<AudioClipKey>,
+    key_generator: KeyGenerator<StoredAudioClipKey>,
 }
 impl AudioClipStore {
     pub fn new(max_buffer_size: usize, sample_rate: u32) -> Self {
@@ -35,7 +35,7 @@ impl AudioClipStore {
         }
     }
 
-    pub fn import(&mut self, path: &Path) -> Result<AudioClipKey, ImportError> {
+    pub fn import(&mut self, path: &Path) -> Result<StoredAudioClipKey, ImportError> {
         if let Some(&key) = self.paths.get(path) {
             // Clip is already imported
             return Ok(key);
@@ -43,7 +43,7 @@ impl AudioClipStore {
 
         let key = self.key_generator.next()?;
 
-        let clip = AudioClip::import(path)?;
+        let clip = StoredAudioClip::import(path)?;
 
         // Commit only if no errors occur
         self.clips.insert(key, Arc::new(clip));
@@ -52,13 +52,19 @@ impl AudioClipStore {
         Ok(key)
     }
 
-    pub fn get(&self, key: AudioClipKey) -> Result<Arc<AudioClip>, InvalidAudioClipError> {
+    pub fn get(
+        &self,
+        key: StoredAudioClipKey,
+    ) -> Result<Arc<StoredAudioClip>, InvalidAudioClipError> {
         match self.clips.get(&key) {
             None => Err(InvalidAudioClipError { key }),
             Some(clip) => Ok(Arc::clone(clip)),
         }
     }
-    pub fn reader(&self, key: AudioClipKey) -> Result<AudioClipReader, InvalidAudioClipError> {
+    pub fn reader(
+        &self,
+        key: StoredAudioClipKey,
+    ) -> Result<AudioClipReader, InvalidAudioClipError> {
         let clip = self.get(key)?;
         Ok(AudioClipReader::new(
             clip,
@@ -79,7 +85,7 @@ impl Error for ClipOverflowError {}
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct InvalidAudioClipError {
-    pub key: AudioClipKey,
+    pub key: StoredAudioClipKey,
 }
 impl Display for InvalidAudioClipError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -95,7 +101,7 @@ impl Error for InvalidAudioClipError {}
 #[derive(Debug, PartialEq, Eq)]
 pub enum ImportError {
     OverFlow(ClipOverflowError),
-    Other(audio_clip::ImportError),
+    Other(stored_audio_clip::ImportError),
 }
 impl Display for ImportError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -111,8 +117,8 @@ impl From<key_generator::OverflowError> for ImportError {
         ImportError::OverFlow(ClipOverflowError)
     }
 }
-impl From<audio_clip::ImportError> for ImportError {
-    fn from(e: audio_clip::ImportError) -> Self {
+impl From<stored_audio_clip::ImportError> for ImportError {
+    fn from(e: stored_audio_clip::ImportError) -> Self {
         ImportError::Other(e)
     }
 }

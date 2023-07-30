@@ -20,16 +20,17 @@ use symphonia::core::{
 
 use crate::engine::Sample;
 
-pub type AudioClipKey = u32;
+pub type StoredAudioClipKey = u32;
 
+/// An audio clip that has been imported.
 #[derive(PartialEq)]
-pub struct AudioClip {
+pub struct StoredAudioClip {
     pub sample_rate: u32,
 
     /// List of channel buffers
     pub data: Vec<Vec<Sample>>,
 }
-impl AudioClip {
+impl StoredAudioClip {
     pub fn import(path: &Path) -> Result<Self, ImportError> {
         // Currently the entire clip just gets loaded into memory immediately.
         // I guess that could be improved.
@@ -141,7 +142,7 @@ impl AudioClip {
         self.data[0].len()
     }
 }
-impl Debug for AudioClip {
+impl Debug for StoredAudioClip {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -188,7 +189,7 @@ mod tests {
 
     use super::*;
 
-    fn test_lossless(ac: AudioClip) {
+    fn test_lossless(ac: StoredAudioClip) {
         assert_eq!(ac.channels(), 2);
         assert_eq!(ac.sample_rate, 48000);
 
@@ -200,7 +201,7 @@ mod tests {
         let first_right_sample = ac.data[1][0];
         assert!(-1.001 <= first_right_sample && first_right_sample <= -0.999);
     }
-    fn test_lossy(ac: AudioClip) {
+    fn test_lossy(ac: StoredAudioClip) {
         assert_eq!(ac.channels(), 2);
         assert_eq!(ac.sample_rate, 48000);
 
@@ -211,53 +212,54 @@ mod tests {
 
     #[test]
     fn import_wav_48000_16_bit() {
-        let ac = AudioClip::import(&test_file_path("48000 16-bit.wav")).unwrap();
+        let ac = StoredAudioClip::import(&test_file_path("48000 16-bit.wav")).unwrap();
         test_lossless(ac);
     }
     #[test]
     fn import_wav_48000_24_bit() {
-        let ac = AudioClip::import(&test_file_path("48000 24-bit.wav")).unwrap();
+        let ac = StoredAudioClip::import(&test_file_path("48000 24-bit.wav")).unwrap();
         test_lossless(ac);
     }
     #[test]
     fn import_wav_48000_32_float() {
-        let ac = AudioClip::import(&test_file_path("48000 32-float.wav")).unwrap();
+        let ac = StoredAudioClip::import(&test_file_path("48000 32-float.wav")).unwrap();
         test_lossless(ac);
     }
 
     #[test]
     fn import_flac_4410_l5_16_bit() {
-        let ac = AudioClip::import(&test_file_path("48000 L5 16-bit.flac")).unwrap();
+        let ac = StoredAudioClip::import(&test_file_path("48000 L5 16-bit.flac")).unwrap();
         test_lossless(ac);
     }
 
     #[test]
     fn import_mp3_48000_joint_stereo() {
-        let ac =
-            AudioClip::import(&test_file_path("48000 preset-standard joint-stereo.mp3")).unwrap();
+        let ac = StoredAudioClip::import(&test_file_path("48000 preset-standard joint-stereo.mp3"))
+            .unwrap();
         test_lossy(ac);
     }
     #[test]
     fn import_mp3_48000_stereo() {
-        let ac = AudioClip::import(&test_file_path("48000 preset-standard stereo.mp3")).unwrap();
+        let ac =
+            StoredAudioClip::import(&test_file_path("48000 preset-standard stereo.mp3")).unwrap();
         test_lossy(ac);
     }
 
     #[test]
     fn import_ogg_48000_q5() {
-        let ac = AudioClip::import(&test_file_path("48000 Q5.ogg")).unwrap();
+        let ac = StoredAudioClip::import(&test_file_path("48000 Q5.ogg")).unwrap();
         test_lossy(ac);
     }
 
     #[test]
     fn bad_test_file_path() {
         let test_file_path = test_file_path("lorem ipsum");
-        let result = AudioClip::import(&test_file_path);
+        let result = StoredAudioClip::import(&test_file_path);
         assert_eq!(result, Err(ImportError::FileNotFound(test_file_path)));
     }
     #[test]
     fn unsupported_file() {
-        let result = AudioClip::import(&test_file_path("44100 Q160 [unsupported].m4a"));
+        let result = StoredAudioClip::import(&test_file_path("44100 Q160 [unsupported].m4a"));
         assert_eq!(result, Err(ImportError::UknownFormat));
     }
 }

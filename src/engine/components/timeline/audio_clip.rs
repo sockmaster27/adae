@@ -8,7 +8,7 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub struct TimelineClip {
+pub struct AudioClip {
     /// Start on the timeline
     pub start: Timestamp,
     /// Duration on the timeline.
@@ -20,13 +20,13 @@ pub struct TimelineClip {
 
     inner: AudioClipReader,
 }
-impl TimelineClip {
-    pub fn new(start: Timestamp, length: Option<Timestamp>, audio_clip: AudioClipReader) -> Self {
-        TimelineClip {
+impl AudioClip {
+    pub fn new(start: Timestamp, length: Option<Timestamp>, reader: AudioClipReader) -> Self {
+        AudioClip {
             start,
             length,
             start_offset: 0,
-            inner: audio_clip,
+            inner: reader,
         }
     }
 
@@ -70,7 +70,7 @@ impl TimelineClip {
         })
     }
 }
-impl rbtree_node::Keyed for TimelineClip {
+impl rbtree_node::Keyed for AudioClip {
     type Key = Timestamp;
 
     fn key(&self) -> Self::Key {

@@ -7,7 +7,7 @@ use intrusive_collections::rbtree::{CursorMut, RBTreeOps};
 use intrusive_collections::{Adapter, RBTree};
 use ouroboros::self_referencing;
 
-use super::TimelineClip;
+use super::AudioClip;
 use crate::engine::components::track::MixerTrackKey;
 use crate::engine::info::Info;
 use crate::engine::utils::rbtree_node::{TreeNode, TreeNodeAdapter};
@@ -41,7 +41,7 @@ pub struct TimelineTrack {
     sample_rate: u32,
     bpm_cents: u16,
 
-    relevant_clip: CursorOwning<TreeNodeAdapter<TimelineClip>>,
+    relevant_clip: CursorOwning<TreeNodeAdapter<AudioClip>>,
 
     output_track: MixerTrackKey,
 }
@@ -69,7 +69,7 @@ impl TimelineTrack {
         self.output_track
     }
 
-    pub fn insert_clip(&mut self, clip: Box<TreeNode<TimelineClip>>) {
+    pub fn insert_clip(&mut self, clip: Box<TreeNode<AudioClip>>) {
         self.relevant_clip.with_cursor_mut(|cursor| {
             let position = Timestamp::from_samples(
                 self.position.load(Ordering::Relaxed),
@@ -166,7 +166,7 @@ pub struct TimelineTrackState {
 mod tests {
 
     use crate::engine::{
-        components::{audio_clip::AudioClip, audio_clip_reader::AudioClipReader},
+        components::{audio_clip_reader::AudioClipReader, stored_audio_clip::StoredAudioClip},
         utils::test_file_path,
     };
 
@@ -181,13 +181,13 @@ mod tests {
         start_beat_units: u32,
         length_beat_units: Option<u32>,
         max_buffer_size: usize,
-    ) -> Box<TreeNode<TimelineClip>> {
+    ) -> Box<TreeNode<AudioClip>> {
         thread_local! {
-            static AC: Arc<AudioClip> = Arc::new(AudioClip::import(&test_file_path("48000 16-bit.wav")).unwrap());
+            static AC: Arc<StoredAudioClip> = Arc::new(StoredAudioClip::import(&test_file_path("48000 16-bit.wav")).unwrap());
         }
 
         AC.with(|ac| {
-            Box::new(TreeNode::new(TimelineClip::new(
+            Box::new(TreeNode::new(AudioClip::new(
                 Timestamp::from_beat_units(start_beat_units),
                 length_beat_units.map(|l| Timestamp::from_beat_units(l)),
                 AudioClipReader::new(Arc::clone(&ac), max_buffer_size, 48_000),

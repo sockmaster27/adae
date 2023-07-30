@@ -1,4 +1,4 @@
-mod timeline_clip;
+mod audio_clip;
 mod timestamp;
 mod track;
 
@@ -14,11 +14,11 @@ use std::{
     },
 };
 
-use self::timeline_clip::TimelineClip;
+use self::audio_clip::AudioClip;
 
 use super::{
-    audio_clip::{AudioClip, AudioClipKey},
     audio_clip_store::{AudioClipStore, ImportError, InvalidAudioClipError},
+    stored_audio_clip::{StoredAudioClip, StoredAudioClipKey},
     track::MixerTrackKey,
 };
 use crate::engine::{
@@ -78,7 +78,7 @@ enum Event {
     JumpTo(u64),
     AddClip {
         track_key: MixerTrackKey,
-        clip: Box<TreeNode<TimelineClip>>,
+        clip: Box<TreeNode<AudioClip>>,
     },
 }
 
@@ -116,17 +116,20 @@ impl Timeline {
         )
     }
 
-    pub fn import_audio_clip(&mut self, path: &Path) -> Result<AudioClipKey, ImportError> {
+    pub fn import_audio_clip(&mut self, path: &Path) -> Result<StoredAudioClipKey, ImportError> {
         self.clip_store.import(path)
     }
-    pub fn audio_clip(&self, key: AudioClipKey) -> Result<Arc<AudioClip>, InvalidAudioClipError> {
+    pub fn stored_audio_clip(
+        &self,
+        key: StoredAudioClipKey,
+    ) -> Result<Arc<StoredAudioClip>, InvalidAudioClipError> {
         self.clip_store.get(key)
     }
 
     pub fn add_clip(
         &mut self,
         track_key: TimelineTrackKey,
-        clip_key: AudioClipKey,
+        clip_key: StoredAudioClipKey,
         start: Timestamp,
         length: Option<Timestamp>,
     ) -> Result<(), AddClipError> {
@@ -141,7 +144,7 @@ impl Timeline {
 
         self.event_sender.send(Event::AddClip {
             track_key,
-            clip: Box::new(TreeNode::new(TimelineClip::new(start, length, audio_clip))),
+            clip: Box::new(TreeNode::new(AudioClip::new(start, length, audio_clip))),
         });
 
         Ok(())
@@ -308,11 +311,7 @@ impl TimelineProcessor {
         }
     }
 
-    fn add_clip(
-        &mut self,
-        track_key: TimelineTrackKey,
-        timeline_clip: Box<TreeNode<TimelineClip>>,
-    ) {
+    fn add_clip(&mut self, track_key: TimelineTrackKey, timeline_clip: Box<TreeNode<AudioClip>>) {
         let track = self
             .tracks
             .get_mut(&track_key)
@@ -385,7 +384,7 @@ impl Error for InvalidTimelineTrackError {}
 #[derive(Debug, PartialEq, Eq)]
 pub enum AddClipError {
     InvalidTimelineTrack(TimelineTrackKey),
-    InvalidClip(AudioClipKey),
+    InvalidClip(StoredAudioClipKey),
 }
 impl Display for AddClipError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
