@@ -169,12 +169,7 @@ fn add_audio_clip() {
     let mut e = Engine::dummy();
     let at = e.add_audio_track().unwrap();
 
-    let ck = e
-        .import_audio_clip(Path::new(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/test_files/44100 16-bit.wav"
-        )))
-        .unwrap();
+    let ck = import_ac(&mut e);
     let r = e.add_clip(at.timeline_track_key(), ck, Timestamp::from_beats(0), None);
 
     assert!(r.is_ok());

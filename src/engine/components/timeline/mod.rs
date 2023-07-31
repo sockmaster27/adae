@@ -65,6 +65,10 @@ pub fn timeline(
             event_sender,
         },
         TimelineProcessor {
+            sample_rate,
+            bpm_cents,
+            max_buffer_size,
+
             playing: playing2,
             position: position2,
             tracks: tracks_pushed,
@@ -75,7 +79,7 @@ pub fn timeline(
 }
 
 enum Event {
-    JumpTo(u64),
+    JumpTo(Timestamp),
     AddClip {
         track_key: MixerTrackKey,
         clip: Box<TreeNode<AudioClip>>,
@@ -104,9 +108,7 @@ impl Timeline {
         self.playing.store(false, Ordering::Release);
     }
     pub fn jump_to(&mut self, position: Timestamp) {
-        self.event_sender.send(Event::JumpTo(
-            position.samples(self.sample_rate, self.bpm_cents),
-        ));
+        self.event_sender.send(Event::JumpTo(position));
     }
     pub fn playhead_position(&mut self) -> Timestamp {
         Timestamp::from_samples(
@@ -287,6 +289,10 @@ impl Timeline {
 }
 
 pub struct TimelineProcessor {
+    sample_rate: u32,
+    bpm_cents: u16,
+    max_buffer_size: usize,
+
     playing: Arc<AtomicBool>,
     position: Arc<AtomicU64>,
 
@@ -304,10 +310,18 @@ impl TimelineProcessor {
                 None => break,
 
                 Some(event) => match event {
-                    Event::JumpTo(pos) => self.position.store(pos, Ordering::Relaxed),
+                    Event::JumpTo(pos) => self.jump_to(pos),
                     Event::AddClip { track_key, clip } => self.add_clip(track_key, clip),
                 },
             }
+        }
+    }
+
+    fn jump_to(&mut self, pos: Timestamp) {
+        let pos_samples = pos.samples(self.sample_rate, self.bpm_cents);
+        self.position.store(pos_samples, Ordering::Relaxed);
+        for track in self.tracks.values_mut() {
+            track.jump_to(pos, self.max_buffer_size);
         }
     }
 
@@ -317,7 +331,7 @@ impl TimelineProcessor {
             .get_mut(&track_key)
             .expect("Track doesn't exist");
 
-        track.insert_clip(timeline_clip);
+        track.insert_clip(timeline_clip, self.max_buffer_size);
     }
 
     pub fn output(

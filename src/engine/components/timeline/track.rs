@@ -1,10 +1,11 @@
+use std::cell::RefMut;
 use std::cmp::min;
 use std::fmt::Debug;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use intrusive_collections::rbtree::{CursorMut, RBTreeOps};
-use intrusive_collections::{Adapter, RBTree};
+use intrusive_collections::{Adapter, Bound, RBTree};
 use ouroboros::self_referencing;
 
 use super::AudioClip;
@@ -41,7 +42,9 @@ pub struct TimelineTrack {
     sample_rate: u32,
     bpm_cents: u16,
 
-    relevant_clip: CursorOwning<TreeNodeAdapter<AudioClip>>,
+    /// Optional because it needs to be swapped out in jump_to.
+    /// Should always be safely unwrappable.
+    relevant_clip: Option<CursorOwning<TreeNodeAdapter<AudioClip>>>,
 
     output_track: MixerTrackKey,
 }
@@ -57,9 +60,10 @@ impl TimelineTrack {
             sample_rate,
             bpm_cents,
 
-            relevant_clip: CursorOwning::new(RBTree::new(TreeNodeAdapter::new()), |tree| {
-                tree.front_mut()
-            }),
+            relevant_clip: Some(CursorOwning::new(
+                RBTree::new(TreeNodeAdapter::new()),
+                |tree| tree.front_mut(),
+            )),
 
             output_track: output,
         }
@@ -69,30 +73,85 @@ impl TimelineTrack {
         self.output_track
     }
 
-    pub fn insert_clip(&mut self, clip: Box<TreeNode<AudioClip>>) {
-        self.relevant_clip.with_cursor_mut(|cursor| {
-            let position = Timestamp::from_samples(
-                self.position.load(Ordering::Relaxed),
-                self.sample_rate,
-                self.bpm_cents,
-            );
-            let clip_end = clip.borrow().end(self.sample_rate, self.bpm_cents);
-            let next = cursor.get();
+    pub fn insert_clip(&mut self, clip: Box<TreeNode<AudioClip>>, max_buffer_size: usize) {
+        self.relevant_clip
+            .as_mut()
+            .unwrap()
+            .with_cursor_mut(|cursor| {
+                let mut clip_ref: RefMut<AudioClip> = (*clip).borrow_mut();
 
-            let is_more_relevant = match next {
-                Some(next) => position < clip_end && clip_end <= next.borrow().start,
-                None => position < clip_end,
-            };
+                let pos_samples = self.position.load(Ordering::Relaxed);
+                let position =
+                    Timestamp::from_samples(pos_samples, self.sample_rate, self.bpm_cents);
+                let clip_end = clip_ref.end(self.sample_rate, self.bpm_cents);
+                let next = cursor.get();
 
-            cursor.insert(clip);
-            if is_more_relevant {
-                cursor.move_prev();
-            }
-        })
+                let is_more_relevant = match next {
+                    Some(next) => position < clip_end && clip_end <= next.borrow().start,
+                    None => position < clip_end,
+                };
+
+                if clip_ref.start <= position && position < clip_end {
+                    clip_ref
+                        .jump_to(position, self.sample_rate, self.bpm_cents, max_buffer_size)
+                        .unwrap();
+                }
+
+                drop(clip_ref);
+                cursor.insert(clip);
+                if is_more_relevant {
+                    cursor.move_prev();
+                }
+            })
     }
 
-    pub fn jump(&mut self, position: Timestamp) {
-        todo!("Update relevant_clip");
+    pub fn jump_to(&mut self, pos: Timestamp, max_buffer_size: usize) {
+        self.relevant_clip
+            .as_mut()
+            .unwrap()
+            .with_cursor_mut(|cursor| {
+                cursor.get().map(|clip_cell| {
+                    let mut clip = clip_cell.borrow_mut();
+                    clip.reset(self.sample_rate, max_buffer_size);
+                })
+            });
+
+        // :(
+        // TODO: use intrusive_collections's built in CursorOwning when it comes out
+        allow_heap! {{
+            self.relevant_clip = Some(CursorOwning::new(self.relevant_clip.take().unwrap().into_heads().tree, |tree| {
+                tree.upper_bound_mut(Bound::Included(&pos))
+            }));
+        }};
+
+        self.relevant_clip
+            .as_mut()
+            .unwrap()
+            .with_cursor_mut(|cursor| {
+                let clip = cursor.get();
+                match clip {
+                    None => cursor.move_next(),
+                    Some(clip) => {
+                        let clip_end = clip.borrow().end(self.sample_rate, self.bpm_cents);
+                        if clip_end <= pos {
+                            cursor.move_next();
+                        }
+                    }
+                }
+
+                cursor.get().map(|clip_cell| {
+                    let mut clip = clip_cell.borrow_mut();
+
+                    let pos_samples = self.position.load(Ordering::Relaxed);
+                    let position =
+                        Timestamp::from_samples(pos_samples, self.sample_rate, self.bpm_cents);
+
+                    if clip.start <= position {
+                        clip.jump_to(position, self.sample_rate, self.bpm_cents, max_buffer_size)
+                            .unwrap();
+                    }
+                });
+            });
     }
 
     pub fn output(&mut self, info: &Info, buffer: &mut [Sample]) {
@@ -101,54 +160,57 @@ impl TimelineTrack {
             buffer_size,
         } = *info;
 
-        self.relevant_clip.with_cursor_mut(|cursor| {
-            let mut progress = 0;
+        self.relevant_clip
+            .as_mut()
+            .unwrap()
+            .with_cursor_mut(|cursor| {
+                let mut progress = 0;
 
-            while progress < buffer_size {
-                let should_move;
-                match cursor.get() {
-                    Some(clip) => {
-                        let position = self.position.load(Ordering::Relaxed);
-                        let mut clip_ref = clip.borrow_mut();
+                while progress < buffer_size {
+                    let should_move;
+                    match cursor.get() {
+                        Some(clip) => {
+                            let position = self.position.load(Ordering::Relaxed);
+                            let mut clip_ref = clip.borrow_mut();
 
-                        // Pad start with zero
-                        let clip_start = clip_ref.start.samples(sample_rate, self.bpm_cents);
-                        if position + (progress as u64) < clip_start {
-                            let end_zeroes = min((clip_start - position) as usize, buffer_size);
-                            buffer[progress * CHANNELS..end_zeroes * CHANNELS].fill(0.0);
-                            progress = end_zeroes;
+                            // Pad start with zero
+                            let clip_start = clip_ref.start.samples(sample_rate, self.bpm_cents);
+                            if position + (progress as u64) < clip_start {
+                                let end_zeroes = min((clip_start - position) as usize, buffer_size);
+                                buffer[progress * CHANNELS..end_zeroes * CHANNELS].fill(0.0);
+                                progress = end_zeroes;
+                            }
+
+                            // Fill with content
+                            let requested_buffer = buffer_size - progress;
+                            let output = clip_ref.output(
+                                self.bpm_cents,
+                                &Info {
+                                    sample_rate,
+                                    buffer_size: requested_buffer,
+                                },
+                            );
+                            buffer[progress * CHANNELS..progress * CHANNELS + output.len()]
+                                .copy_from_slice(&output);
+                            progress += output.len() / CHANNELS;
+
+                            // Determine if we should move on to next clip
+                            should_move = output.len() < requested_buffer;
                         }
 
-                        // Fill with content
-                        let requested_buffer = buffer_size - progress;
-                        let output = clip_ref.output(
-                            self.bpm_cents,
-                            &Info {
-                                sample_rate,
-                                buffer_size: requested_buffer,
-                            },
-                        );
-                        buffer[progress * CHANNELS..progress * CHANNELS + output.len()]
-                            .copy_from_slice(&output);
-                        progress += output.len() / CHANNELS;
-
-                        // Determine if we should move on to next clip
-                        should_move = output.len() < requested_buffer;
+                        None => {
+                            // No more clips, pad with zero
+                            buffer[progress * CHANNELS..buffer_size * CHANNELS].fill(0.0);
+                            break;
+                        }
                     }
 
-                    None => {
-                        // No more clips, pad with zero
-                        buffer[progress * CHANNELS..buffer_size * CHANNELS].fill(0.0);
-                        break;
+                    // Needs to be out here to access &mut cursor
+                    if should_move {
+                        cursor.move_next();
                     }
                 }
-
-                // Needs to be out here to access &mut cursor
-                if should_move {
-                    cursor.move_next();
-                }
-            }
-        });
+            });
     }
 }
 impl Debug for TimelineTrack {
@@ -202,12 +264,12 @@ mod tests {
         let c2 = clip(1, Some(2), 100);
 
         no_heap! {{
-            t.insert_clip(c1);
-            t.insert_clip(c2);
+            t.insert_clip(c1, 100);
+            t.insert_clip(c2, 100);
         }}
 
         // c2 should be inserted before c1
-        t.relevant_clip.with_cursor_mut(|cur| {
+        t.relevant_clip.unwrap().with_cursor_mut(|cur| {
             let clip = cur.get().unwrap().borrow();
             let length = clip.length.unwrap();
             assert_eq!(length.beat_units(), 2);
@@ -227,8 +289,8 @@ mod tests {
         let c2 = clip(3, Some(2), 100);
 
         no_heap! {{
-            t.insert_clip(c1);
-            t.insert_clip(c2);
+            t.insert_clip(c1, 100);
+            t.insert_clip(c2, 100);
 
             // Empty
             let mut out = [0.0; BUFFER_SIZE * CHANNELS];
@@ -239,7 +301,7 @@ mod tests {
             pos.fetch_add(info.buffer_size as u64, Ordering::Relaxed);
 
             // c1
-            t.relevant_clip.with_cursor_mut(|cur| {
+            t.relevant_clip.as_mut().unwrap().with_cursor_mut(|cur| {
                 let clip = cur.get().unwrap().borrow();
                 let length = clip.length.unwrap();
                 assert_eq!(length.beat_units(), 1);
@@ -261,7 +323,8 @@ mod tests {
             pos.fetch_add(info.buffer_size as u64, Ordering::Relaxed);
 
             // c2
-            t.relevant_clip.with_cursor_mut(|cur| {
+            t.relevant_clip
+            .as_mut().unwrap().with_cursor_mut(|cur| {
                 let clip = cur.get().unwrap().borrow();
                 let length = clip.length.unwrap();
                 assert_eq!(length.beat_units(), 2);
@@ -280,7 +343,8 @@ mod tests {
             }
 
             // end
-            t.relevant_clip.with_cursor_mut(|cur| {
+            t.relevant_clip
+            .as_mut().unwrap().with_cursor_mut(|cur| {
                 let clip = cur.get();
                 assert!(clip.is_none());
             });
@@ -289,7 +353,8 @@ mod tests {
             for &mut s in out.iter_mut() {
                 assert_eq!(s, 0.0);
             }
-            t.relevant_clip.with_cursor_mut(|cur| {
+            t.relevant_clip
+            .as_mut().unwrap().with_cursor_mut(|cur| {
                 let clip = cur.get();
                 assert!(clip.is_none());
             });
@@ -305,10 +370,10 @@ mod tests {
         let c4 = clip(5, Some(1), 200);
 
         no_heap! {{
-            t.insert_clip(c1);
-            t.insert_clip(c2);
-            t.insert_clip(c3);
-            t.insert_clip(c4);
+            t.insert_clip(c1, 200);
+            t.insert_clip(c2, 200);
+            t.insert_clip(c3, 200);
+            t.insert_clip(c4, 200);
 
             let mut out = [0.0; 6 * SBU * CHANNELS];
             t.output(&Info {
@@ -336,6 +401,93 @@ mod tests {
                 // Something
                 assert_ne!(s, 0.0);
             }
+        }}
+    }
+
+    #[test]
+    fn jump() {
+        const BUFFER_SIZE: usize = SBU;
+        let info = Info {
+            sample_rate: SAMPLE_RATE,
+            buffer_size: BUFFER_SIZE,
+        };
+        let pos = Arc::new(AtomicU64::new(0));
+        let mut t = TimelineTrack::new(0, Arc::clone(&pos), SAMPLE_RATE, BPM_CENTS);
+        let c1 = clip(1, Some(1), 100);
+        let c2 = clip(3, Some(2), 100);
+
+        no_heap! {{
+            t.insert_clip(c1, 100);
+            t.insert_clip(c2, 100);
+
+            t.jump_to(Timestamp::zero(), 100);
+
+            // Empty
+            let mut out = [0.0; BUFFER_SIZE * CHANNELS];
+            t.output(&info, &mut out[..]);
+            for &mut s in out.iter_mut() {
+                assert_eq!(s, 0.0);
+            }
+            pos.fetch_add(info.buffer_size as u64, Ordering::Relaxed);
+
+            // c1
+            t.relevant_clip.as_mut().unwrap().with_cursor_mut(|cur| {
+                let clip = cur.get().unwrap().borrow();
+                let length = clip.length.unwrap();
+                assert_eq!(length.beat_units(), 1);
+            });
+
+            let mut out = [0.0; BUFFER_SIZE * CHANNELS];
+            t.output(&info, &mut out[..]);
+            for &mut s in out.iter_mut() {
+                assert_ne!(s, 0.0);
+            }
+            pos.fetch_add(info.buffer_size as u64, Ordering::Relaxed);
+
+            // Empty
+            let mut out = [0.0; BUFFER_SIZE * CHANNELS];
+            t.output(&info, &mut out[..]);
+            for &mut s in out.iter_mut() {
+                assert_eq!(s, 0.0);
+            }
+            pos.fetch_add(info.buffer_size as u64, Ordering::Relaxed);
+
+            // c2
+            t.relevant_clip
+            .as_mut().unwrap().with_cursor_mut(|cur| {
+                let clip = cur.get().unwrap().borrow();
+                let length = clip.length.unwrap();
+                assert_eq!(length.beat_units(), 2);
+            });
+
+            let mut out = [0.0; 3 * SBU * CHANNELS];
+            t.output(&Info {
+                sample_rate: SAMPLE_RATE,
+                buffer_size: 3 * SBU,
+            }, &mut out[..]);
+            for &s in &out[..CHANNELS * (2 * SBU)] {
+                assert_ne!(s, 0.0);
+            }
+            for &s in &out[CHANNELS * (2 * SBU)..] {
+                assert_eq!(s, 0.0);
+            }
+
+            // end
+            t.relevant_clip
+            .as_mut().unwrap().with_cursor_mut(|cur| {
+                let clip = cur.get();
+                assert!(clip.is_none());
+            });
+            let mut out = [0.0; BUFFER_SIZE * CHANNELS];
+            t.output(&info, &mut out[..]);
+            for &mut s in out.iter_mut() {
+                assert_eq!(s, 0.0);
+            }
+            t.relevant_clip
+            .as_mut().unwrap().with_cursor_mut(|cur| {
+                let clip = cur.get();
+                assert!(clip.is_none());
+            });
         }}
     }
 }

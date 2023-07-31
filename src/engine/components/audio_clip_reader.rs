@@ -9,7 +9,7 @@ use std::{
 
 use rubato::{FftFixedOut, Resampler};
 
-use crate::engine::{info::Info, Sample, CHANNELS};
+use crate::engine::{info::Info, utils::non_copy_array, Sample, CHANNELS};
 
 use super::stored_audio_clip::StoredAudioClip;
 
@@ -18,10 +18,10 @@ pub struct AudioClipReader {
     position: usize,
     resampler: Option<FftFixedOut<Sample>>,
 
-    channel_scale_buffer: Vec<Vec<Sample>>,
+    channel_scale_buffer: [Vec<Sample>; CHANNELS],
     /// How many frames in the resample buffer are unused (at the end)
     resample_buffer_unused: usize,
-    resample_buffer: Vec<Vec<Sample>>,
+    resample_buffer: [Vec<Sample>; CHANNELS],
     output_buffer: Vec<Sample>,
 }
 impl AudioClipReader {
@@ -54,9 +54,9 @@ impl AudioClipReader {
             position: 0,
             resampler,
 
-            channel_scale_buffer: vec![vec![0.0; max_input_size]; CHANNELS],
+            channel_scale_buffer: non_copy_array![vec![0.0; max_input_size]; CHANNELS],
             resample_buffer_unused: 0,
-            resample_buffer: vec![vec![0.0; resampler_chunk_size]; CHANNELS],
+            resample_buffer: non_copy_array![vec![0.0; resampler_chunk_size]; CHANNELS],
             output_buffer: vec![0.0; max_buffer_size * CHANNELS],
         };
 
@@ -82,18 +82,42 @@ impl AudioClipReader {
         });
     }
 
-    pub fn position(&self) -> usize {
-        self.position
+    /// Returns the current position in samples relative to the start of the clip, within the given `sample_rate`.
+    pub fn position(&self, sample_rate: u32) -> usize {
+        let resample_ratio = self.inner.sample_rate as f64 / sample_rate as f64;
+        (self.position as f64 * resample_ratio).floor() as usize
     }
 
-    // Jump to position with sample precision
-    pub fn jump(&mut self, position: usize) -> Result<(), JumpOutOfBounds> {
-        if position >= self.len() {
-            Err(JumpOutOfBounds)
-        } else {
-            self.position = position;
-            Ok(())
+    /// Jump to position with sample precision relative to the start of the clip.
+    ///
+    /// - `sample_rate` is the sample rate of the output.
+    /// - `position` is converted from `sample_rate` into the clips original sample rate.
+    pub fn jump(
+        &mut self,
+        position: usize,
+        sample_rate: u32,
+        max_buffer_size: usize,
+    ) -> Result<(), JumpOutOfBounds> {
+        if self.len() <= position {
+            return Err(JumpOutOfBounds);
         }
+
+        let resample_ratio = sample_rate as f64 / self.inner.sample_rate as f64;
+        self.position = position * resample_ratio as usize;
+
+        let delay = self
+            .resampler
+            .as_mut()
+            .map(|r| {
+                r.reset();
+                r.output_delay()
+            })
+            .unwrap_or(0);
+        self.chop_delay(delay, sample_rate, max_buffer_size);
+
+        self.resample_buffer_unused = 0;
+
+        Ok(())
     }
 
     pub fn len(&self) -> usize {
@@ -274,7 +298,10 @@ impl Debug for AudioClipReader {
 pub struct JumpOutOfBounds;
 impl Display for JumpOutOfBounds {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Attempted to jump past end of audio clip data")
+        write!(
+            f,
+            "Attempted to jump before the start or past end of audio clip data"
+        )
     }
 }
 impl Error for JumpOutOfBounds {}
@@ -450,7 +477,7 @@ mod tests {
         let rs = output[1];
         assert!(-1.001 <= rs && rs <= -0.999, "Sample: {}", rs);
 
-        acr.jump(0).unwrap();
+        acr.jump(0, 48_000, 50).unwrap();
 
         let output = acr.output(&Info {
             sample_rate: 48_000,
@@ -470,6 +497,6 @@ mod tests {
         let ac = StoredAudioClip::import(&test_file_path("48000 16-bit.wav")).unwrap();
         let mut acr = AudioClipReader::new(Arc::new(ac), 50, 48_000);
 
-        assert_eq!(acr.jump(1_322_978), Err(JumpOutOfBounds));
+        assert_eq!(acr.jump(1_322_978, 48_000, 50), Err(JumpOutOfBounds));
     }
 }

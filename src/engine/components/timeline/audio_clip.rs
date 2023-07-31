@@ -2,7 +2,10 @@ use std::cmp::min;
 
 use crate::{
     engine::{
-        components::audio_clip_reader::AudioClipReader, info::Info, utils::rbtree_node, Sample,
+        components::audio_clip_reader::{AudioClipReader, JumpOutOfBounds},
+        info::Info,
+        utils::rbtree_node,
+        Sample,
     },
     Timestamp,
 };
@@ -46,6 +49,37 @@ impl AudioClip {
         }
     }
 
+    /// Resets the position to the start of the clip.
+    pub fn reset(&mut self, sample_rate: u32, max_buffer_size: usize) {
+        self.inner
+            .jump(self.start_offset, sample_rate, max_buffer_size)
+            .unwrap();
+    }
+
+    /// Jumps to the given position relative to the start of the timeline.
+    pub fn jump_to(
+        &mut self,
+        pos: Timestamp,
+        sample_rate: u32,
+        bpm_cents: u16,
+        max_buffer_size: usize,
+    ) -> Result<(), JumpOutOfBounds> {
+        let start_samples = self.start.samples(sample_rate, bpm_cents) as usize;
+        let pos_samples = pos.samples(sample_rate, bpm_cents) as usize;
+
+        if pos_samples < start_samples + self.start_offset {
+            return Err(JumpOutOfBounds);
+        }
+
+        self.inner.jump(
+            pos_samples - (start_samples + self.start_offset),
+            sample_rate,
+            max_buffer_size,
+        )?;
+
+        Ok(())
+    }
+
     /// Outputs to a buffer of at most the requested size (via the info parameter).
     /// If the end is reached the returned buffer is smaller.
     pub fn output(&mut self, bpm_cents: u16, info: &Info) -> &mut [Sample] {
@@ -57,9 +91,12 @@ impl AudioClip {
         let capped_buffer_size = match self.length {
             None => buffer_size,
             Some(length) => {
-                let remaining = length.samples(sample_rate, bpm_cents) as usize
-                    - self.inner.position()
-                    + self.start_offset;
+                let length = length.samples(sample_rate, bpm_cents) as usize;
+                let pos = self.inner.position(sample_rate);
+                if pos + self.start_offset >= length {
+                    return &mut [];
+                }
+                let remaining = length - (pos + self.start_offset);
                 min(buffer_size, remaining)
             }
         };
