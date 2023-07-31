@@ -16,8 +16,7 @@ ringbuf = "0.3.3"
 hound = { version = "3.5.0", optional = true }
 symphonia = { version = "0.5.3", features = ["mp3"] }
 num-traits = "0.2.15"
-intrusive-collections = "0.9.5"
-ouroboros = "0.17.0"
+intrusive-collections = "0.9.6"
 rubato = "0.14.1"
 
 [dev-dependencies]

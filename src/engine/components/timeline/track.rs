@@ -4,9 +4,8 @@ use std::fmt::Debug;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use intrusive_collections::rbtree::{CursorMut, RBTreeOps};
-use intrusive_collections::{Adapter, Bound, RBTree};
-use ouroboros::self_referencing;
+use intrusive_collections::rbtree::CursorOwning;
+use intrusive_collections::{Bound, RBTree};
 
 use super::AudioClip;
 use crate::engine::components::track::MixerTrackKey;
@@ -16,26 +15,6 @@ use crate::engine::{Sample, CHANNELS};
 use crate::Timestamp;
 
 pub type TimelineTrackKey = u32;
-
-#[self_referencing]
-struct CursorOwning<A: Adapter + 'static>
-where
-    <A as intrusive_collections::Adapter>::LinkOps: RBTreeOps,
-{
-    tree: RBTree<A>,
-    #[borrows(mut tree)]
-    #[covariant]
-    cursor: CursorMut<'this, A>,
-}
-
-// Allow sending to another thread if the ownership (represented by the <A::PointerOps as PointerOps>::Pointer owned
-// pointer type) can be transferred to another thread.
-unsafe impl<A: Adapter + Send> Send for CursorOwning<A>
-where
-    RBTree<A>: Send,
-    <A as intrusive_collections::Adapter>::LinkOps: RBTreeOps,
-{
-}
 
 pub struct TimelineTrack {
     position: Arc<AtomicU64>,
@@ -55,15 +34,15 @@ impl TimelineTrack {
         sample_rate: u32,
         bpm_cents: u16,
     ) -> Self {
+        let tree = RBTree::new(TreeNodeAdapter::new());
+        let relevant_clip = Some(tree.cursor_owning());
+
         TimelineTrack {
             position,
             sample_rate,
             bpm_cents,
 
-            relevant_clip: Some(CursorOwning::new(
-                RBTree::new(TreeNodeAdapter::new()),
-                |tree| tree.front_mut(),
-            )),
+            relevant_clip,
 
             output_track: output,
         }
@@ -116,13 +95,8 @@ impl TimelineTrack {
                 })
             });
 
-        // :(
-        // TODO: use intrusive_collections's built in CursorOwning when it comes out
-        allow_heap! {{
-            self.relevant_clip = Some(CursorOwning::new(self.relevant_clip.take().unwrap().into_heads().tree, |tree| {
-                tree.upper_bound_mut(Bound::Included(&pos))
-            }));
-        }};
+        let tree = self.relevant_clip.take().unwrap().into_inner();
+        self.relevant_clip = Some(tree.upper_bound_owning(Bound::Included(&pos)));
 
         self.relevant_clip
             .as_mut()
