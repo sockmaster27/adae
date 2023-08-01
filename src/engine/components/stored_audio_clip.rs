@@ -189,9 +189,9 @@ mod tests {
 
     use super::*;
 
-    fn test_lossless(ac: StoredAudioClip) {
+    fn test_lossless(ac: StoredAudioClip, sample_rate: u32) {
         assert_eq!(ac.channels(), 2);
-        assert_eq!(ac.sample_rate, 48000);
+        assert_eq!(ac.sample_rate, sample_rate);
 
         assert_eq!(ac.len(), 1_322_978);
 
@@ -201,9 +201,9 @@ mod tests {
         let first_right_sample = ac.data[1][0];
         assert!(-1.001 <= first_right_sample && first_right_sample <= -0.999);
     }
-    fn test_lossy(ac: StoredAudioClip) {
+    fn test_lossy(ac: StoredAudioClip, sample_rate: u32) {
         assert_eq!(ac.channels(), 2);
-        assert_eq!(ac.sample_rate, 48000);
+        assert_eq!(ac.sample_rate, sample_rate);
 
         // Lossy encoding might introduce some extra samples in the beginning and end
         assert!(ac.len() >= 1_322_978);
@@ -211,44 +211,126 @@ mod tests {
     }
 
     #[test]
+    fn import_wav_22050_16_bit() {
+        let ac = StoredAudioClip::import(&test_file_path("22050 16-bit.wav")).unwrap();
+        test_lossless(ac, 22050);
+    }
+    #[test]
+    fn import_wav_22050_24_bit() {
+        let ac = StoredAudioClip::import(&test_file_path("22050 24-bit.wav")).unwrap();
+        test_lossless(ac, 22050);
+    }
+    #[test]
+    fn import_wav_22050_32_float() {
+        let ac = StoredAudioClip::import(&test_file_path("22050 32-float.wav")).unwrap();
+        test_lossless(ac, 22050);
+    }
+
+    #[test]
+    fn import_flac_22050_l5_16_bit() {
+        let ac = StoredAudioClip::import(&test_file_path("22050 L5 16-bit.flac")).unwrap();
+        test_lossless(ac, 22050);
+    }
+
+    #[test]
+    fn import_mp3_22050_joint_stereo() {
+        let ac = StoredAudioClip::import(&test_file_path("22050 preset-standard joint-stereo.mp3"))
+            .unwrap();
+        test_lossy(ac, 22050);
+    }
+    #[test]
+    fn import_mp3_22050_stereo() {
+        let ac =
+            StoredAudioClip::import(&test_file_path("22050 preset-standard stereo.mp3")).unwrap();
+        test_lossy(ac, 22050);
+    }
+
+    #[test]
+    fn import_ogg_22050_q5() {
+        let ac = StoredAudioClip::import(&test_file_path("22050 Q5.ogg")).unwrap();
+        test_lossy(ac, 22050);
+    }
+
+    #[test]
+    fn import_wav_44100_16_bit() {
+        let ac = StoredAudioClip::import(&test_file_path("44100 16-bit.wav")).unwrap();
+        test_lossless(ac, 44100);
+    }
+    #[test]
+    fn import_wav_44100_24_bit() {
+        let ac = StoredAudioClip::import(&test_file_path("44100 24-bit.wav")).unwrap();
+        test_lossless(ac, 44100);
+    }
+    #[test]
+    fn import_wav_44100_32_float() {
+        let ac = StoredAudioClip::import(&test_file_path("44100 32-float.wav")).unwrap();
+        test_lossless(ac, 44100);
+    }
+
+    #[test]
+    fn import_flac_44100_l5_16_bit() {
+        let ac = StoredAudioClip::import(&test_file_path("44100 L5 16-bit.flac")).unwrap();
+        test_lossless(ac, 44100);
+    }
+
+    #[test]
+    fn import_mp3_44100_joint_stereo() {
+        let ac = StoredAudioClip::import(&test_file_path("44100 preset-standard joint-stereo.mp3"))
+            .unwrap();
+        test_lossy(ac, 44100);
+    }
+    #[test]
+    fn import_mp3_44100_stereo() {
+        let ac =
+            StoredAudioClip::import(&test_file_path("44100 preset-standard stereo.mp3")).unwrap();
+        test_lossy(ac, 44100);
+    }
+
+    #[test]
+    fn import_ogg_44100_q5() {
+        let ac = StoredAudioClip::import(&test_file_path("44100 Q5.ogg")).unwrap();
+        test_lossy(ac, 44100);
+    }
+
+    #[test]
     fn import_wav_48000_16_bit() {
         let ac = StoredAudioClip::import(&test_file_path("48000 16-bit.wav")).unwrap();
-        test_lossless(ac);
+        test_lossless(ac, 48000);
     }
     #[test]
     fn import_wav_48000_24_bit() {
         let ac = StoredAudioClip::import(&test_file_path("48000 24-bit.wav")).unwrap();
-        test_lossless(ac);
+        test_lossless(ac, 48000);
     }
     #[test]
     fn import_wav_48000_32_float() {
         let ac = StoredAudioClip::import(&test_file_path("48000 32-float.wav")).unwrap();
-        test_lossless(ac);
+        test_lossless(ac, 48000);
     }
 
     #[test]
-    fn import_flac_4410_l5_16_bit() {
+    fn import_flac_48000_l5_16_bit() {
         let ac = StoredAudioClip::import(&test_file_path("48000 L5 16-bit.flac")).unwrap();
-        test_lossless(ac);
+        test_lossless(ac, 48000);
     }
 
     #[test]
     fn import_mp3_48000_joint_stereo() {
         let ac = StoredAudioClip::import(&test_file_path("48000 preset-standard joint-stereo.mp3"))
             .unwrap();
-        test_lossy(ac);
+        test_lossy(ac, 48000);
     }
     #[test]
     fn import_mp3_48000_stereo() {
         let ac =
             StoredAudioClip::import(&test_file_path("48000 preset-standard stereo.mp3")).unwrap();
-        test_lossy(ac);
+        test_lossy(ac, 48000);
     }
 
     #[test]
     fn import_ogg_48000_q5() {
         let ac = StoredAudioClip::import(&test_file_path("48000 Q5.ogg")).unwrap();
-        test_lossy(ac);
+        test_lossy(ac, 48000);
     }
 
     #[test]
