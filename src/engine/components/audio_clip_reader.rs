@@ -60,12 +60,15 @@ impl AudioClipReader {
             output_buffer: vec![0.0; max_buffer_size * CHANNELS],
         };
 
-        audio_clip_reader.chop_delay(delay, sample_rate, max_buffer_size);
+        audio_clip_reader.chop_delay(delay, sample_rate);
 
         audio_clip_reader
     }
 
-    fn chop_delay(&mut self, delay: usize, sample_rate: u32, max_buffer_size: usize) {
+    /// Throws out the given delay from the start of the clip.
+    fn chop_delay(&mut self, delay: usize, sample_rate: u32) {
+        let max_buffer_size = self.output_buffer.len() / CHANNELS;
+
         let reps = delay / max_buffer_size;
 
         for _ in 0..reps {
@@ -92,12 +95,7 @@ impl AudioClipReader {
     ///
     /// - `sample_rate` is the sample rate of the output.
     /// - `position` is converted from `sample_rate` into the clips original sample rate.
-    pub fn jump(
-        &mut self,
-        position: usize,
-        sample_rate: u32,
-        max_buffer_size: usize,
-    ) -> Result<(), JumpOutOfBounds> {
+    pub fn jump(&mut self, position: usize, sample_rate: u32) -> Result<(), JumpOutOfBounds> {
         if self.len() <= position {
             return Err(JumpOutOfBounds);
         }
@@ -113,7 +111,7 @@ impl AudioClipReader {
                 r.output_delay()
             })
             .unwrap_or(0);
-        self.chop_delay(delay, sample_rate, max_buffer_size);
+        self.chop_delay(delay, sample_rate);
 
         self.resample_buffer_unused = 0;
 
@@ -477,7 +475,7 @@ mod tests {
         let rs = output[1];
         assert!(-1.001 <= rs && rs <= -0.999, "Sample: {}", rs);
 
-        acr.jump(0, 48_000, 50).unwrap();
+        acr.jump(0, 48_000).unwrap();
 
         let output = acr.output(&Info {
             sample_rate: 48_000,
@@ -497,6 +495,6 @@ mod tests {
         let ac = StoredAudioClip::import(&test_file_path("48000 16-bit.wav")).unwrap();
         let mut acr = AudioClipReader::new(Arc::new(ac), 50, 48_000);
 
-        assert_eq!(acr.jump(1_322_978, 48_000, 50), Err(JumpOutOfBounds));
+        assert_eq!(acr.jump(1_322_978, 48_000), Err(JumpOutOfBounds));
     }
 }

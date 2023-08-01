@@ -50,10 +50,8 @@ impl AudioClip {
     }
 
     /// Resets the position to the start of the clip.
-    pub fn reset(&mut self, sample_rate: u32, max_buffer_size: usize) {
-        self.inner
-            .jump(self.start_offset, sample_rate, max_buffer_size)
-            .unwrap();
+    pub fn reset(&mut self, sample_rate: u32) {
+        self.inner.jump(self.start_offset, sample_rate).unwrap();
     }
 
     /// Jumps to the given position relative to the start of the timeline.
@@ -62,7 +60,6 @@ impl AudioClip {
         pos: Timestamp,
         sample_rate: u32,
         bpm_cents: u16,
-        max_buffer_size: usize,
     ) -> Result<(), JumpOutOfBounds> {
         let start_samples = self.start.samples(sample_rate, bpm_cents) as usize;
         let pos_samples = pos.samples(sample_rate, bpm_cents) as usize;
@@ -74,7 +71,6 @@ impl AudioClip {
         self.inner.jump(
             pos_samples - (start_samples + self.start_offset),
             sample_rate,
-            max_buffer_size,
         )?;
 
         Ok(())

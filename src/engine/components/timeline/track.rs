@@ -52,7 +52,7 @@ impl TimelineTrack {
         self.output_track
     }
 
-    pub fn insert_clip(&mut self, clip: Box<TreeNode<AudioClip>>, max_buffer_size: usize) {
+    pub fn insert_clip(&mut self, clip: Box<TreeNode<AudioClip>>) {
         self.relevant_clip
             .as_mut()
             .unwrap()
@@ -72,7 +72,7 @@ impl TimelineTrack {
 
                 if clip_ref.start <= position && position < clip_end {
                     clip_ref
-                        .jump_to(position, self.sample_rate, self.bpm_cents, max_buffer_size)
+                        .jump_to(position, self.sample_rate, self.bpm_cents)
                         .unwrap();
                 }
 
@@ -84,14 +84,14 @@ impl TimelineTrack {
             })
     }
 
-    pub fn jump_to(&mut self, pos: Timestamp, max_buffer_size: usize) {
+    pub fn jump_to(&mut self, pos: Timestamp) {
         self.relevant_clip
             .as_mut()
             .unwrap()
             .with_cursor_mut(|cursor| {
                 cursor.get().map(|clip_cell| {
                     let mut clip = clip_cell.borrow_mut();
-                    clip.reset(self.sample_rate, max_buffer_size);
+                    clip.reset(self.sample_rate);
                 })
             });
 
@@ -121,7 +121,7 @@ impl TimelineTrack {
                         Timestamp::from_samples(pos_samples, self.sample_rate, self.bpm_cents);
 
                     if clip.start <= position {
-                        clip.jump_to(position, self.sample_rate, self.bpm_cents, max_buffer_size)
+                        clip.jump_to(position, self.sample_rate, self.bpm_cents)
                             .unwrap();
                     }
                 });
@@ -238,8 +238,8 @@ mod tests {
         let c2 = clip(1, Some(2), 100);
 
         no_heap! {{
-            t.insert_clip(c1, 100);
-            t.insert_clip(c2, 100);
+            t.insert_clip(c1);
+            t.insert_clip(c2);
         }}
 
         // c2 should be inserted before c1
@@ -263,8 +263,8 @@ mod tests {
         let c2 = clip(3, Some(2), 100);
 
         no_heap! {{
-            t.insert_clip(c1, 100);
-            t.insert_clip(c2, 100);
+            t.insert_clip(c1);
+            t.insert_clip(c2);
 
             // Empty
             let mut out = [0.0; BUFFER_SIZE * CHANNELS];
@@ -344,10 +344,10 @@ mod tests {
         let c4 = clip(5, Some(1), 200);
 
         no_heap! {{
-            t.insert_clip(c1, 200);
-            t.insert_clip(c2, 200);
-            t.insert_clip(c3, 200);
-            t.insert_clip(c4, 200);
+            t.insert_clip(c1);
+            t.insert_clip(c2);
+            t.insert_clip(c3);
+            t.insert_clip(c4);
 
             let mut out = [0.0; 6 * SBU * CHANNELS];
             t.output(&Info {
@@ -391,10 +391,10 @@ mod tests {
         let c2 = clip(3, Some(2), 100);
 
         no_heap! {{
-            t.insert_clip(c1, 100);
-            t.insert_clip(c2, 100);
+            t.insert_clip(c1);
+            t.insert_clip(c2);
 
-            t.jump_to(Timestamp::zero(), 100);
+            t.jump_to(Timestamp::zero());
 
             // Empty
             let mut out = [0.0; BUFFER_SIZE * CHANNELS];

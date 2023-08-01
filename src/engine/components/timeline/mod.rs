@@ -67,7 +67,6 @@ pub fn timeline(
         TimelineProcessor {
             sample_rate,
             bpm_cents,
-            max_buffer_size,
 
             playing: playing2,
             position: position2,
@@ -291,7 +290,6 @@ impl Timeline {
 pub struct TimelineProcessor {
     sample_rate: u32,
     bpm_cents: u16,
-    max_buffer_size: usize,
 
     playing: Arc<AtomicBool>,
     position: Arc<AtomicU64>,
@@ -321,7 +319,7 @@ impl TimelineProcessor {
         let pos_samples = pos.samples(self.sample_rate, self.bpm_cents);
         self.position.store(pos_samples, Ordering::Relaxed);
         for track in self.tracks.values_mut() {
-            track.jump_to(pos, self.max_buffer_size);
+            track.jump_to(pos);
         }
     }
 
@@ -331,7 +329,7 @@ impl TimelineProcessor {
             .get_mut(&track_key)
             .expect("Track doesn't exist");
 
-        track.insert_clip(timeline_clip, self.max_buffer_size);
+        track.insert_clip(timeline_clip);
     }
 
     pub fn output(
