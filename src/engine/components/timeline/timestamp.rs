@@ -30,9 +30,32 @@ impl Timestamp {
             beat_units: beats * UNITS_PER_BEAT,
         }
     }
+    /// Converts a number of samples to a timestamp.
+    ///
+    /// This rounds down. If this is undesirable, see `Timestamp::from_samples_ceil`.
     pub const fn from_samples(samples: u64, sample_rate: u32, bpm_cents: u16) -> Self {
         let beat_units =
             (samples * bpm_cents as u64 * UNITS_PER_BEAT as u64) / (sample_rate as u64 * 60 * 100);
+        Self {
+            beat_units: beat_units as u32,
+        }
+    }
+    /// Like [`Timestamp::from_samples`], but rounds up instead of down.
+    pub const fn from_samples_ceil(samples: u64, sample_rate: u32, bpm_cents: u16) -> Self {
+        const fn div_ceil(a: u64, b: u64) -> u64 {
+            let d = a / b;
+            let r = a % b;
+            if r != 0 {
+                d + 1
+            } else {
+                d
+            }
+        }
+
+        let beat_units = div_ceil(
+            samples * bpm_cents as u64 * UNITS_PER_BEAT as u64,
+            sample_rate as u64 * 60 * 100,
+        );
         Self {
             beat_units: beat_units as u32,
         }

@@ -28,10 +28,10 @@ where
     /// Might heap-allocate a new ringbuffer
     pub fn send(&mut self, element: T) {
         self.ensure_capacity();
-        let result = self.inner.push(Event::Element(element));
+        let _result = self.inner.push(Event::Element(element));
 
         #[cfg(debug_assertions)]
-        if result.is_err() {
+        if _result.is_err() {
             panic!("Sender::ensure_capacity failed to do its job")
         }
     }
@@ -40,11 +40,11 @@ where
         if self.inner.free_len() == 1 {
             let new_capacity = smallest_pow2((self.inner.capacity() + 1) as f64);
             let (producer, consumer) = HeapRb::new(new_capacity).split();
-            let result = self.inner.push(Event::Reallocated(Box::new(consumer)));
+            let _result = self.inner.push(Event::Reallocated(Box::new(consumer)));
             self.inner = producer;
 
             #[cfg(debug_assertions)]
-            if result.is_err() {
+            if _result.is_err() {
                 panic!("what")
             }
         }

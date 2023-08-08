@@ -84,6 +84,8 @@ impl TimelineTrack {
             })
     }
 
+    /// Jump to a timestamp on the timeline track.
+    /// The global `position` must be set before calling this function.
     pub fn jump_to(&mut self, pos: Timestamp) {
         self.relevant_clip
             .as_mut()
@@ -170,6 +172,9 @@ impl TimelineTrack {
 
                             // Determine if we should move on to next clip
                             should_move = output.len() < requested_buffer;
+                            if should_move {
+                                clip_ref.reset(sample_rate);
+                            }
                         }
 
                         None => {
@@ -219,7 +224,7 @@ mod tests {
         max_buffer_size: usize,
     ) -> Box<TreeNode<AudioClip>> {
         thread_local! {
-            static AC: Arc<StoredAudioClip> = Arc::new(StoredAudioClip::import(&test_file_path("48000 16-bit.wav")).unwrap());
+            static AC: Arc<StoredAudioClip> = Arc::new(StoredAudioClip::import(&test_file_path("44100 16-bit.wav")).unwrap());
         }
 
         AC.with(|ac| {
@@ -259,8 +264,8 @@ mod tests {
         };
         let pos = Arc::new(AtomicU64::new(0));
         let mut t = TimelineTrack::new(0, Arc::clone(&pos), SAMPLE_RATE, BPM_CENTS);
-        let c1 = clip(1, Some(1), 100);
-        let c2 = clip(3, Some(2), 100);
+        let c1 = clip(1, Some(1), 3 * SBU);
+        let c2 = clip(3, Some(2), 3 * SBU);
 
         no_heap! {{
             t.insert_clip(c1);
@@ -337,43 +342,83 @@ mod tests {
 
     #[test]
     fn output_many() {
+        const BUFFER_SIZE: usize = 10_000_000;
+        const SBUC: usize = SBU * CHANNELS;
+        let mut out = vec![0.0; BUFFER_SIZE * CHANNELS];
+
         let mut t = TimelineTrack::new(0, Arc::new(AtomicU64::new(0)), SAMPLE_RATE, BPM_CENTS);
-        let c1 = clip(0, Some(1), 200);
-        let c2 = clip(2, Some(1), 200);
-        let c3 = clip(4, Some(1), 200);
-        let c4 = clip(5, Some(1), 200);
+        let c1 = clip(0, Some(1), BUFFER_SIZE);
+        let c2 = clip(2, Some(1), BUFFER_SIZE);
+        let c3 = clip(4, Some(1), BUFFER_SIZE);
+        let c4 = clip(6, None, BUFFER_SIZE);
+        let c4_end = c4.borrow().end(SAMPLE_RATE, BPM_CENTS).beat_units() as usize;
+        let c5 = clip((c4_end as u32) + 1, Some(1), BUFFER_SIZE);
 
         no_heap! {{
             t.insert_clip(c1);
             t.insert_clip(c2);
             t.insert_clip(c3);
             t.insert_clip(c4);
+            t.insert_clip(c5);
 
-            let mut out = [0.0; 6 * SBU * CHANNELS];
+            // Output everything in one go
             t.output(&Info {
                 sample_rate: SAMPLE_RATE,
-                buffer_size: 6 * SBU,
+                buffer_size: (c4_end + 3) * SBUC,
             }, &mut out[..]);
-            const SBUC: usize = SBU * CHANNELS;
+
+            // c1
             for &s in &out[..SBUC] {
-                // Something
                 assert_ne!(s, 0.0);
             }
+
+            // Nothing
             for &s in &out[SBUC..2 * SBUC] {
-                // Nothing
                 assert_eq!(s, 0.0);
             }
+
+            // c2
             for &s in &out[2 * SBUC..3 * SBUC] {
-                // Something
                 assert_ne!(s, 0.0);
             }
+
+            // Nothing
             for &s in &out[3 * SBUC..4 * SBUC] {
-                // Nothing
                 assert_eq!(s, 0.0);
             }
-            for &s in &out[4 * SBUC..] {
-                // Something
+
+            // c3
+            for &s in &out[4 * SBUC..5 * SBUC] {
                 assert_ne!(s, 0.0);
+            }
+
+            // Nothing
+            for &s in &out[5 * SBUC..6 * SBUC] {
+                assert_eq!(s, 0.0);
+            }
+
+            // c4
+            for &s in &out[6 * SBUC..8 * SBUC] {
+                assert_ne!(s, 0.0);
+            }
+            for &s in &out[(c4_end - 3) * SBUC..(c4_end - 1) * SBUC] {
+                assert_ne!(s, 0.0);
+            }
+            // c4 ends somewhere inbetween (c4_end - 1) and c4_end
+
+            // Nothing
+            for &s in &out[c4_end * SBUC..(c4_end + 1) * SBUC] {
+                assert_eq!(s, 0.0);
+            }
+
+            // c5
+            for &s in &out[(c4_end + 1) * SBUC..(c4_end + 2) * SBUC] {
+                assert_ne!(s, 0.0);
+            }
+
+            // Nothing
+            for &s in &out[(c4_end + 2) * SBUC..(c4_end + 3) * SBUC] {
+                assert_eq!(s, 0.0);
             }
         }}
     }
@@ -394,29 +439,8 @@ mod tests {
             t.insert_clip(c1);
             t.insert_clip(c2);
 
-            t.jump_to(Timestamp::zero());
-
-            // Empty
-            let mut out = [0.0; BUFFER_SIZE * CHANNELS];
-            t.output(&info, &mut out[..]);
-            for &mut s in out.iter_mut() {
-                assert_eq!(s, 0.0);
-            }
-            pos.fetch_add(info.buffer_size as u64, Ordering::Relaxed);
-
-            // c1
-            t.relevant_clip.as_mut().unwrap().with_cursor_mut(|cur| {
-                let clip = cur.get().unwrap().borrow();
-                let length = clip.length.unwrap();
-                assert_eq!(length.beat_units(), 1);
-            });
-
-            let mut out = [0.0; BUFFER_SIZE * CHANNELS];
-            t.output(&info, &mut out[..]);
-            for &mut s in out.iter_mut() {
-                assert_ne!(s, 0.0);
-            }
-            pos.fetch_add(info.buffer_size as u64, Ordering::Relaxed);
+            t.jump_to(Timestamp::from_beat_units(2));
+            pos.store(2 * SBU as u64, Ordering::Relaxed);
 
             // Empty
             let mut out = [0.0; BUFFER_SIZE * CHANNELS];
@@ -445,6 +469,7 @@ mod tests {
             for &s in &out[CHANNELS * (2 * SBU)..] {
                 assert_eq!(s, 0.0);
             }
+            pos.fetch_add(3 * SBU as u64, Ordering::Relaxed);
 
             // end
             t.relevant_clip
@@ -462,6 +487,32 @@ mod tests {
                 let clip = cur.get();
                 assert!(clip.is_none());
             });
+            pos.fetch_add(info.buffer_size as u64, Ordering::Relaxed);
+
+            pos.store(0, Ordering::Relaxed);
+            t.jump_to(Timestamp::zero());
+
+            // Empty
+            let mut out = [0.0; BUFFER_SIZE * CHANNELS];
+            t.output(&info, &mut out[..]);
+            for &mut s in out.iter_mut() {
+                assert_eq!(s, 0.0);
+            }
+            pos.fetch_add(info.buffer_size as u64, Ordering::Relaxed);
+
+            // c1
+            t.relevant_clip.as_mut().unwrap().with_cursor_mut(|cur| {
+                let clip = cur.get().unwrap().borrow();
+                let length = clip.length.unwrap();
+                assert_eq!(length.beat_units(), 1);
+            });
+
+            let mut out = [0.0; BUFFER_SIZE * CHANNELS];
+            t.output(&info, &mut out[..]);
+            for &mut s in out.iter_mut() {
+                assert_ne!(s, 0.0);
+            }
+            pos.fetch_add(info.buffer_size as u64, Ordering::Relaxed);
         }}
     }
 }

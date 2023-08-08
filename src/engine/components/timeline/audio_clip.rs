@@ -38,11 +38,8 @@ impl AudioClip {
             self.start + length
         } else {
             self.start
-                + Timestamp::from_samples(
-                    self.inner
-                        .len()
-                        .try_into()
-                        .expect("Length of audio clip too long"),
+                + Timestamp::from_samples_ceil(
+                    self.inner.len(sample_rate) as u64,
                     sample_rate,
                     bpm_cents,
                 )
@@ -76,6 +73,13 @@ impl AudioClip {
         Ok(())
     }
 
+    fn length_samples(&self, sample_rate: u32, bpm_cents: u16) -> usize {
+        match self.length {
+            None => self.inner.len(sample_rate),
+            Some(length) => length.samples(sample_rate, bpm_cents) as usize,
+        }
+    }
+
     /// Outputs to a buffer of at most the requested size (via the info parameter).
     /// If the end is reached the returned buffer is smaller.
     pub fn output(&mut self, bpm_cents: u16, info: &Info) -> &mut [Sample] {
@@ -84,18 +88,10 @@ impl AudioClip {
             buffer_size,
         } = *info;
 
-        let capped_buffer_size = match self.length {
-            None => buffer_size,
-            Some(length) => {
-                let length = length.samples(sample_rate, bpm_cents) as usize;
-                let pos = self.inner.position(sample_rate);
-                if pos + self.start_offset >= length {
-                    return &mut [];
-                }
-                let remaining = length - (pos + self.start_offset);
-                min(buffer_size, remaining)
-            }
-        };
+        let length = self.length_samples(sample_rate, bpm_cents);
+        let pos = self.inner.position();
+        let remaining = length - min(pos + self.start_offset, length);
+        let capped_buffer_size = min(buffer_size, remaining);
 
         self.inner.output(&Info {
             sample_rate,

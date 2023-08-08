@@ -136,9 +136,14 @@ impl StoredAudioClip {
         self.data.len()
     }
 
-    /// Number of frames in total / Number of samples per channel
+    /// Number of frames (samples per channel) in total
     pub fn len(&self) -> usize {
-        // This should be equal across all channels
+        // All channels should have the same length
+        debug_assert!(self
+            .data
+            .iter()
+            .all(|channel| channel.len() == self.data[0].len()));
+
         self.data[0].len()
     }
 }
