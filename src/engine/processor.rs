@@ -28,6 +28,7 @@ pub fn processor(
         Processor {
             output_channels,
             sample_rate,
+            #[cfg(debug_assertions)]
             max_buffer_size,
 
             mixer: mixer_processor,
@@ -55,6 +56,7 @@ pub struct ProcessorInterface {
 pub struct Processor {
     output_channels: u16,
     sample_rate: u32,
+    #[cfg(debug_assertions)]
     max_buffer_size: usize,
 
     mixer: MixerProcessor,
