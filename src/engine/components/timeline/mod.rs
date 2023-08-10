@@ -14,7 +14,7 @@ use std::{
     },
 };
 
-use self::audio_clip::AudioClip;
+use self::audio_clip::{AudioClip, AudioClipKey};
 
 use super::{
     audio_clip_store::{AudioClipStore, ImportError, InvalidAudioClipError},
@@ -54,13 +54,15 @@ pub fn timeline(
         Timeline {
             sample_rate,
             bpm_cents,
-            key_generator: KeyGenerator::new(),
+            track_key_generator: KeyGenerator::new(),
+            clip_key_generator: KeyGenerator::new(),
 
             playing: playing1,
             position: position1,
 
             clip_store: AudioClipStore::new(max_buffer_size, sample_rate),
-            tracks: tracks_pusher,
+            tracks: HashMap::new(),
+            track_processors: tracks_pusher,
 
             event_sender,
         },
@@ -88,14 +90,16 @@ enum Event {
 pub struct Timeline {
     sample_rate: u32,
     bpm_cents: u16,
-    key_generator: KeyGenerator<TimelineTrackKey>,
+    track_key_generator: KeyGenerator<TimelineTrackKey>,
+    clip_key_generator: KeyGenerator<AudioClipKey>,
 
     playing: Arc<AtomicBool>,
     /// Should not be mutated from here
     position: Arc<AtomicU64>,
 
     clip_store: AudioClipStore,
-    tracks: RemotePusherHashMap<TimelineTrackKey, DBox<TimelineTrack>>,
+    tracks: HashMap<TimelineTrackKey, HashMap<AudioClipKey, AudioClip>>,
+    track_processors: RemotePusherHashMap<TimelineTrackKey, DBox<TimelineTrack>>,
 
     event_sender: ringbuffer::Sender<Event>,
 }
@@ -130,7 +134,7 @@ impl Timeline {
     pub fn add_clip(
         &mut self,
         track_key: TimelineTrackKey,
-        clip_key: StoredAudioClipKey,
+        stored_clip_key: StoredAudioClipKey,
         start: Timestamp,
         length: Option<Timestamp>,
     ) -> Result<(), AddClipError> {
@@ -138,14 +142,31 @@ impl Timeline {
             return Err(AddClipError::InvalidTimelineTrack(track_key));
         }
 
-        let audio_clip = self
+        let reader1 = self
             .clip_store
-            .reader(clip_key)
-            .or(Err(AddClipError::InvalidClip(clip_key)))?;
+            .reader(stored_clip_key)
+            .or(Err(AddClipError::InvalidClip(stored_clip_key)))?;
+        let audio_clip1 = AudioClip::new(start, length, reader1);
+
+        let reader2 = self
+            .clip_store
+            .reader(stored_clip_key)
+            .or(Err(AddClipError::InvalidClip(stored_clip_key)))?;
+        let audio_clip2 = AudioClip::new(start, length, reader2);
+
+        let track = self.tracks.get_mut(&track_key).unwrap();
+        for clip in track.values() {
+            if clip.overlaps(&audio_clip1, self.sample_rate, self.bpm_cents) {
+                return Err(AddClipError::Overlapping);
+            }
+        }
+
+        let clip_key = self.clip_key_generator.next().unwrap();
+        track.insert(clip_key, audio_clip1);
 
         self.event_sender.send(Event::AddClip {
             track_key,
-            clip: Box::new(TreeNode::new(AudioClip::new(start, length, audio_clip))),
+            clip: Box::new(TreeNode::new(audio_clip2)),
         });
 
         Ok(())
@@ -155,7 +176,9 @@ impl Timeline {
         &mut self,
         output: MixerTrackKey,
     ) -> Result<TimelineTrackKey, TimelineTrackOverflowError> {
-        let key = self.key_generator.next()?;
+        let key = self.track_key_generator.next()?;
+
+        self.tracks.insert(key, HashMap::new());
 
         let timeline_track = TimelineTrack::new(
             output,
@@ -163,7 +186,7 @@ impl Timeline {
             self.sample_rate,
             self.bpm_cents,
         );
-        self.tracks.push((key, DBox::new(timeline_track)));
+        self.track_processors.push((key, DBox::new(timeline_track)));
         Ok(key)
     }
     pub fn add_tracks<'a>(
@@ -172,7 +195,7 @@ impl Timeline {
     ) -> Result<Vec<TimelineTrackKey>, TimelineTrackOverflowError> {
         let count = outputs.len();
 
-        if self.key_generator.remaining_keys()
+        if self.track_key_generator.remaining_keys()
             < count.try_into().or(Err(TimelineTrackOverflowError))?
         {
             return Err(TimelineTrackOverflowError);
@@ -180,13 +203,17 @@ impl Timeline {
 
         let mut keys = Vec::with_capacity(count);
         for _ in 0..count {
-            let key = self.key_generator.next().expect(
+            let key = self.track_key_generator.next().expect(
                 "next_key() returned error, even though it reported remaining_keys() >= count",
             );
             keys.push(key);
         }
 
-        let tracks = zip(&keys, outputs)
+        for &key in &keys {
+            self.tracks.insert(key, HashMap::new());
+        }
+
+        let track_processors = zip(&keys, outputs)
             .map(|(&key, output)| {
                 (
                     key,
@@ -199,16 +226,16 @@ impl Timeline {
                 )
             })
             .collect();
-        self.tracks.push_multiple(tracks);
+        self.track_processors.push_multiple(track_processors);
         Ok(keys)
     }
 
     pub fn delete_track(&mut self, key: TimelineTrackKey) -> Result<(), InvalidTimelineTrackError> {
-        let result = self.key_generator.free(key);
+        let result = self.track_key_generator.free(key);
         if result.is_err() {
             return Err(InvalidTimelineTrackError { key });
         }
-        self.tracks.remove(key);
+        self.track_processors.remove(key);
         Ok(())
     }
     pub fn delete_tracks(
@@ -221,19 +248,22 @@ impl Timeline {
             }
         }
         for &key in &keys {
-            self.key_generator
+            self.track_key_generator
                 .free(key)
                 .expect("key_in_use() returned true, even though free() returned error");
+            self.tracks.remove(&key);
         }
-        self.tracks.remove_multiple(keys);
+        self.track_processors.remove_multiple(keys);
         Ok(())
     }
 
     pub fn reconstruct_track(&mut self, state: &TimelineTrackState, output: MixerTrackKey) {
         let key = state.key;
-        self.key_generator
+        self.track_key_generator
             .reserve(key)
             .expect("Timeline track key already in use");
+
+        self.tracks.insert(key, HashMap::new());
 
         let timeline_track = TimelineTrack::new(
             output,
@@ -241,18 +271,20 @@ impl Timeline {
             self.sample_rate,
             self.bpm_cents,
         );
-        self.tracks.push((key, DBox::new(timeline_track)));
+        self.track_processors.push((key, DBox::new(timeline_track)));
     }
 
     pub fn reconstruct_tracks<'a>(
         &mut self,
         states: impl Iterator<Item = (&'a TimelineTrackState, MixerTrackKey)>,
     ) {
-        let tracks = states.map(|(state, output)| {
+        let track_processors = states.map(|(state, output)| {
             let key = state.key;
-            self.key_generator
+            self.track_key_generator
                 .reserve(key)
                 .expect("Timeline track key already in use");
+
+            self.tracks.insert(key, HashMap::new());
 
             (
                 key,
@@ -264,15 +296,16 @@ impl Timeline {
                 )),
             )
         });
-        self.tracks.push_multiple(tracks.collect());
+        self.track_processors
+            .push_multiple(track_processors.collect());
     }
 
     pub fn key_in_use(&self, key: TimelineTrackKey) -> bool {
-        self.key_generator.in_use(key)
+        self.track_key_generator.in_use(key)
     }
 
     pub fn remaining_keys(&self) -> u32 {
-        self.key_generator.remaining_keys()
+        self.track_key_generator.remaining_keys()
     }
 
     pub fn track_state(
@@ -397,6 +430,7 @@ impl Error for InvalidTimelineTrackError {}
 pub enum AddClipError {
     InvalidTimelineTrack(TimelineTrackKey),
     InvalidClip(StoredAudioClipKey),
+    Overlapping,
 }
 impl Display for AddClipError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -405,6 +439,7 @@ impl Display for AddClipError {
                 write!(f, "No timeline track with key, {}, on timeline", key)
             }
             Self::InvalidClip(key) => write!(f, "No audio clip with key, {}", key),
+            Self::Overlapping => write!(f, "Clip overlaps with another clip"),
         }
     }
 }
@@ -426,7 +461,6 @@ mod tests {
 
         no_heap! {{
             tlp.poll();
-
         }}
 
         assert_eq!(tl.remaining_keys(), u32::MAX - 50);
@@ -446,7 +480,34 @@ mod tests {
 
         no_heap! {{
             tlp.poll();
-
         }}
+    }
+
+    #[test]
+    fn add_overlapping() {
+        let (mut tl, _) = timeline(40_000, 100_00, 10);
+
+        let ck = tl
+            .import_audio_clip(&test_file_path("44100 16-bit.wav"))
+            .unwrap();
+        let tk = tl.add_track(0).unwrap();
+
+        tl.add_clip(
+            tk,
+            ck,
+            Timestamp::from_beat_units(42),
+            Some(Timestamp::from_beat_units(8)),
+        )
+        .unwrap();
+        tl.add_clip(tk, ck, Timestamp::from_beat_units(50), None)
+            .unwrap();
+        let res = tl.add_clip(
+            tk,
+            ck,
+            Timestamp::from_beat_units(0),
+            Some(Timestamp::from_beat_units(43)),
+        );
+
+        assert_eq!(res, Err(AddClipError::Overlapping));
     }
 }

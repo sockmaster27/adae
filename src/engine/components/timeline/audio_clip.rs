@@ -10,6 +10,8 @@ use crate::{
     Timestamp,
 };
 
+pub type AudioClipKey = u32;
+
 #[derive(Debug)]
 pub struct AudioClip {
     /// Start on the timeline
@@ -97,6 +99,16 @@ impl AudioClip {
             sample_rate,
             buffer_size: capped_buffer_size,
         })
+    }
+
+    pub fn overlaps(&self, other: &AudioClip, sample_rate: u32, bpm_cents: u16) -> bool {
+        let start1 = self.start;
+        let end1 = self.end(sample_rate, bpm_cents);
+
+        let start2 = other.start;
+        let end2 = other.end(sample_rate, bpm_cents);
+
+        start1 <= start2 && start2 < end1 || start2 <= start1 && start1 < end2
     }
 }
 impl rbtree_node::Keyed for AudioClip {
