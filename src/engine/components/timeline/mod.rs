@@ -3,7 +3,7 @@ mod timestamp;
 mod track;
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     error::Error,
     fmt::{Debug, Display},
     iter::zip,
@@ -14,10 +14,13 @@ use std::{
     },
 };
 
-use self::audio_clip::{AudioClip, AudioClipKey};
+use self::{
+    audio_clip::{AudioClip, AudioClipKey, AudioClipProcessor},
+    track::TimelineTrack,
+};
 
 use super::{
-    audio_clip_store::{AudioClipStore, ImportError, InvalidAudioClipError},
+    audio_clip_store::{AudioClipStore, AudioClipStoreState, ImportError, InvalidAudioClipError},
     stored_audio_clip::{StoredAudioClip, StoredAudioClipKey},
     track::MixerTrackKey,
 };
@@ -33,49 +36,108 @@ use crate::engine::{
     Sample, CHANNELS,
 };
 pub use timestamp::Timestamp;
-pub use track::{TimelineTrack, TimelineTrackKey, TimelineTrackState};
+pub use track::{TimelineTrackKey, TimelineTrackProcessor, TimelineTrackState};
 
 pub fn timeline(
+    state: &TimelineState,
     sample_rate: u32,
-    bpm_cents: u16,
     max_buffer_size: usize,
-) -> (Timeline, TimelineProcessor) {
+) -> (Timeline, TimelineProcessor, Vec<ImportError>) {
+    let TimelineState {
+        bpm_cents,
+        audio_clip_store: store_state,
+        tracks: track_states,
+    } = state;
+
     let playing1 = Arc::new(AtomicBool::new(false));
     let playing2 = Arc::clone(&playing1);
 
-    let position1 = Arc::new(AtomicU64::new(0));
-    let position2 = Arc::clone(&position1);
+    let position = Arc::new(AtomicU64::new(0));
 
-    let (tracks_pusher, tracks_pushed) = HashMap::remote_push();
+    let (clip_store, import_errors) =
+        AudioClipStore::new(&store_state, sample_rate, max_buffer_size);
+
+    let tracks = HashMap::from_iter(track_states.iter().map(|state| {
+        (
+            state.key,
+            TimelineTrack {
+                output_track: state.output_track,
+                clips: HashMap::from_iter(state.clips.iter().map(|state| {
+                    (
+                        state.key,
+                        AudioClip {
+                            key: state.key,
+                            start: state.start,
+                            length: state.length,
+                            start_offset: state.start_offset,
+                            inner: clip_store
+                                .reader(state.inner)
+                                .expect("An invalid audio clip was referenced"),
+                        },
+                    )
+                })),
+            },
+        )
+    }));
+
+    let (tracks_pusher, tracks_pushed) = HashMap::from_iter(track_states.iter().map(|state| {
+        let mut track = TimelineTrackProcessor::new(
+            state.output_track,
+            Arc::clone(&position),
+            sample_rate,
+            *bpm_cents,
+        );
+
+        for state in state.clips.iter() {
+            track.insert_clip(Box::new(TreeNode::new(AudioClipProcessor::new(
+                state.start,
+                state.length,
+                state.start_offset,
+                clip_store
+                    .reader(state.inner)
+                    .expect("An invalid audio clip was referenced"),
+            ))));
+        }
+        (state.key, DBox::new(track))
+    }))
+    .into_remote_push();
+
+    let track_key_generator = KeyGenerator::from_iter(tracks.keys().copied());
+    let clip_key_generator = KeyGenerator::from_iter(
+        tracks
+            .values()
+            .flat_map(|track| track.clips.keys().copied()),
+    );
 
     let (event_sender, event_receiver) = ringbuffer();
 
     (
         Timeline {
             sample_rate,
-            bpm_cents,
-            track_key_generator: KeyGenerator::new(),
-            clip_key_generator: KeyGenerator::new(),
+            bpm_cents: *bpm_cents,
+            track_key_generator,
+            clip_key_generator,
 
             playing: playing1,
-            position: position1,
+            position: Arc::clone(&position),
 
-            clip_store: AudioClipStore::new(max_buffer_size, sample_rate),
-            tracks: HashMap::new(),
+            clip_store,
+            tracks,
             track_processors: tracks_pusher,
 
             event_sender,
         },
         TimelineProcessor {
             sample_rate,
-            bpm_cents,
+            bpm_cents: *bpm_cents,
 
             playing: playing2,
-            position: position2,
+            position: position,
             tracks: tracks_pushed,
 
             event_receiver,
         },
+        import_errors,
     )
 }
 
@@ -83,7 +145,7 @@ enum Event {
     JumpTo(Timestamp),
     AddClip {
         track_key: MixerTrackKey,
-        clip: Box<TreeNode<AudioClip>>,
+        clip: Box<TreeNode<AudioClipProcessor>>,
     },
 }
 
@@ -98,8 +160,8 @@ pub struct Timeline {
     position: Arc<AtomicU64>,
 
     clip_store: AudioClipStore,
-    tracks: HashMap<TimelineTrackKey, HashMap<AudioClipKey, AudioClip>>,
-    track_processors: RemotePusherHashMap<TimelineTrackKey, DBox<TimelineTrack>>,
+    tracks: HashMap<TimelineTrackKey, TimelineTrack>,
+    track_processors: RemotePusherHashMap<TimelineTrackKey, DBox<TimelineTrackProcessor>>,
 
     event_sender: ringbuffer::Sender<Event>,
 }
@@ -142,27 +204,37 @@ impl Timeline {
             return Err(AddClipError::InvalidTimelineTrack(track_key));
         }
 
+        let clip_key = self.clip_key_generator.peek_next().unwrap();
+        let start_offset = 0;
+
         let reader1 = self
             .clip_store
             .reader(stored_clip_key)
             .or(Err(AddClipError::InvalidClip(stored_clip_key)))?;
-        let audio_clip1 = AudioClip::new(start, length, reader1);
+        let audio_clip1 = AudioClip {
+            key: clip_key,
+            start,
+            length,
+            start_offset,
+            inner: reader1,
+        };
 
         let reader2 = self
             .clip_store
             .reader(stored_clip_key)
             .or(Err(AddClipError::InvalidClip(stored_clip_key)))?;
-        let audio_clip2 = AudioClip::new(start, length, reader2);
+        let audio_clip2 = AudioClipProcessor::new(start, length, 0, reader2);
 
         let track = self.tracks.get_mut(&track_key).unwrap();
-        for clip in track.values() {
+        for clip in track.clips.values() {
             if clip.overlaps(&audio_clip1, self.sample_rate, self.bpm_cents) {
                 return Err(AddClipError::Overlapping);
             }
         }
 
-        let clip_key = self.clip_key_generator.next().unwrap();
-        track.insert(clip_key, audio_clip1);
+        self.clip_key_generator.reserve(clip_key).unwrap();
+
+        track.clips.insert(clip_key, audio_clip1);
 
         self.event_sender.send(Event::AddClip {
             track_key,
@@ -178,9 +250,9 @@ impl Timeline {
     ) -> Result<TimelineTrackKey, TimelineTrackOverflowError> {
         let key = self.track_key_generator.next()?;
 
-        self.tracks.insert(key, HashMap::new());
+        self.tracks.insert(key, TimelineTrack::new(output));
 
-        let timeline_track = TimelineTrack::new(
+        let timeline_track = TimelineTrackProcessor::new(
             output,
             Arc::clone(&self.position),
             self.sample_rate,
@@ -209,15 +281,15 @@ impl Timeline {
             keys.push(key);
         }
 
-        for &key in &keys {
-            self.tracks.insert(key, HashMap::new());
+        for (&key, &output) in zip(&keys, outputs.iter()) {
+            self.tracks.insert(key, TimelineTrack::new(output));
         }
 
-        let track_processors = zip(&keys, outputs)
-            .map(|(&key, output)| {
+        let track_processors = zip(&keys, outputs.iter())
+            .map(|(&key, &output)| {
                 (
                     key,
-                    DBox::new(TimelineTrack::new(
+                    DBox::new(TimelineTrackProcessor::new(
                         output,
                         Arc::clone(&self.position),
                         self.sample_rate,
@@ -263,9 +335,9 @@ impl Timeline {
             .reserve(key)
             .expect("Timeline track key already in use");
 
-        self.tracks.insert(key, HashMap::new());
+        self.tracks.insert(key, TimelineTrack::new(output));
 
-        let timeline_track = TimelineTrack::new(
+        let timeline_track = TimelineTrackProcessor::new(
             output,
             Arc::clone(&self.position),
             self.sample_rate,
@@ -284,11 +356,11 @@ impl Timeline {
                 .reserve(key)
                 .expect("Timeline track key already in use");
 
-            self.tracks.insert(key, HashMap::new());
+            self.tracks.insert(key, TimelineTrack::new(output));
 
             (
                 key,
-                DBox::new(TimelineTrack::new(
+                DBox::new(TimelineTrackProcessor::new(
                     output,
                     Arc::clone(&self.position),
                     self.sample_rate,
@@ -316,7 +388,27 @@ impl Timeline {
             return Err(InvalidTimelineTrackError { key });
         }
 
-        Ok(TimelineTrackState { key })
+        let track = self.tracks.get(&key).unwrap();
+        let clips = track.clips.values().map(|clip| clip.state()).collect();
+        let output_track = track.output_track;
+
+        Ok(TimelineTrackState {
+            key,
+            clips,
+            output_track,
+        })
+    }
+
+    pub fn state(&self) -> TimelineState {
+        TimelineState {
+            bpm_cents: self.bpm_cents,
+            audio_clip_store: self.clip_store.state(),
+            tracks: self
+                .tracks
+                .keys()
+                .map(|&key| self.track_state(key).unwrap())
+                .collect(),
+        }
     }
 }
 
@@ -327,7 +419,7 @@ pub struct TimelineProcessor {
     playing: Arc<AtomicBool>,
     position: Arc<AtomicU64>,
 
-    tracks: RemotePushedHashMap<TimelineTrackKey, DBox<TimelineTrack>>,
+    tracks: RemotePushedHashMap<TimelineTrackKey, DBox<TimelineTrackProcessor>>,
 
     event_receiver: ringbuffer::Receiver<Event>,
 }
@@ -356,7 +448,11 @@ impl TimelineProcessor {
         }
     }
 
-    fn add_clip(&mut self, track_key: TimelineTrackKey, timeline_clip: Box<TreeNode<AudioClip>>) {
+    fn add_clip(
+        &mut self,
+        track_key: TimelineTrackKey,
+        timeline_clip: Box<TreeNode<AudioClipProcessor>>,
+    ) {
         let track = self
             .tracks
             .get_mut(&track_key)
@@ -400,6 +496,47 @@ impl TimelineProcessor {
         );
     }
 }
+
+#[derive(Debug, Clone, Hash)]
+pub struct TimelineState {
+    pub bpm_cents: u16,
+    pub audio_clip_store: AudioClipStoreState,
+    pub tracks: Vec<TimelineTrackState>,
+}
+impl Default for TimelineState {
+    /// Create an empty timeline with a BPM of 120
+    fn default() -> Self {
+        Self {
+            bpm_cents: 120_00,
+            audio_clip_store: Default::default(),
+            tracks: Default::default(),
+        }
+    }
+}
+impl PartialEq for TimelineState {
+    fn eq(&self, other: &Self) -> bool {
+        let self_set: HashSet<_> = HashSet::from_iter(self.tracks.iter());
+        let other_set: HashSet<_> = HashSet::from_iter(other.tracks.iter());
+
+        debug_assert_eq!(
+            self_set.len(),
+            self.tracks.len(),
+            "Duplicate timeline tracks in TimelineState: {:?}",
+            self.tracks
+        );
+        debug_assert_eq!(
+            other_set.len(),
+            other.tracks.len(),
+            "Duplicate timeline tracks in TimelineState: {:?}",
+            other.tracks
+        );
+
+        self.bpm_cents == other.bpm_cents
+            && self.audio_clip_store == other.audio_clip_store
+            && self_set == other_set
+    }
+}
+impl Eq for TimelineState {}
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct TimelineTrackOverflowError;
@@ -453,7 +590,8 @@ mod tests {
 
     #[test]
     fn add_track() {
-        let (mut tl, mut tlp) = timeline(40_000, 100_00, 10);
+        let (mut tl, mut tlp, ie) = timeline(&TimelineState::default(), 40_000, 10);
+        assert!(ie.is_empty());
 
         for _ in 0..50 {
             tl.add_track(0).unwrap();
@@ -469,7 +607,8 @@ mod tests {
 
     #[test]
     fn add_clip() {
-        let (mut tl, mut tlp) = timeline(40_000, 100_00, 10);
+        let (mut tl, mut tlp, ie) = timeline(&TimelineState::default(), 40_000, 10);
+        assert!(ie.is_empty());
 
         let ck = tl
             .import_audio_clip(&test_file_path("44100 16-bit.wav"))
@@ -485,7 +624,8 @@ mod tests {
 
     #[test]
     fn add_overlapping() {
-        let (mut tl, _) = timeline(40_000, 100_00, 10);
+        let (mut tl, _, ie) = timeline(&TimelineState::default(), 40_000, 10);
+        assert!(ie.is_empty());
 
         let ck = tl
             .import_audio_clip(&test_file_path("44100 16-bit.wav"))

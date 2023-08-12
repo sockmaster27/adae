@@ -59,4 +59,11 @@ fn play_around() {
 
     sleep(Duration::from_secs(1));
     engine.pause();
+
+    // Close and load from state
+    let state = engine.state();
+    drop(engine);
+    let (engine, import_erros) = adae::Engine::dummy_from_state(&state);
+    assert!(import_erros.is_empty());
+    assert_eq!(engine.state(), state);
 }

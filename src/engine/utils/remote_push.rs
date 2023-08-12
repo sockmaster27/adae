@@ -15,6 +15,9 @@ use super::{
 };
 
 pub trait RemotePushable<E: Send, K: Send>: Send + Debug + Sized {
+    fn len(&self) -> usize;
+    fn capacity(&self) -> usize;
+
     fn with_capacity(capacity: usize) -> Self;
     fn push(&mut self, element: E);
     fn remove(&mut self, key: K) -> bool;
@@ -41,6 +44,25 @@ pub trait RemotePushable<E: Send, K: Send>: Send + Debug + Sized {
     fn remote_push() -> (RemotePusher<E, K, Self>, RemotePushed<E, K, Self>) {
         Self::remote_push_with_capacity(16)
     }
+
+    fn into_remote_push(self) -> (RemotePusher<E, K, Self>, RemotePushed<E, K, Self>) {
+        let (event_sender, event_receiver) = ringbuffer_with_capacity(16);
+
+        let length = self.len();
+        let capacity = self.capacity();
+
+        (
+            RemotePusher {
+                length,
+                capacity,
+                event_sender,
+            },
+            RemotePushed {
+                inner: DBox::new(self),
+                event_receiver,
+            },
+        )
+    }
 }
 
 pub type RemotePusherHashMap<K, V> = RemotePusher<(K, V), K, HashMap<K, V>>;
@@ -50,6 +72,14 @@ where
     K: Send + Debug + Eq + Hash,
     V: Send + Debug,
 {
+    fn len(&self) -> usize {
+        self.len()
+    }
+
+    fn capacity(&self) -> usize {
+        self.capacity()
+    }
+
     fn with_capacity(capacity: usize) -> Self {
         HashMap::with_capacity(2 * capacity)
     }

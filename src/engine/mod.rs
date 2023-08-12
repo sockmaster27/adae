@@ -25,7 +25,7 @@ use self::components::timeline::{
     TimelineTrackState,
 };
 use self::components::{MixerTrackKey, MixerTrackState};
-use self::processor::{processor, Processor, ProcessorInterface};
+use self::processor::{processor, Processor, ProcessorInterface, ProcessorState};
 pub use components::MixerTrack;
 
 /// Internally used sample format.
@@ -47,6 +47,72 @@ pub struct Engine {
 }
 impl Engine {
     pub fn new() -> Self {
+        let (engine, import_errors) = Engine::from_state(&EngineState::default());
+        debug_assert!(
+            import_errors.is_empty(),
+            "Empty engine should not have import errors"
+        );
+
+        engine
+    }
+
+    pub fn from_state(state: &EngineState) -> (Self, Vec<ImportError>) {
+        let (stopped, join_handle, processor_interface, import_errors) = Self::start_stream(state);
+
+        let engine = Engine {
+            stopped,
+            join_handle: Some(join_handle),
+            processor_interface,
+            audio_tracks: HashSet::from_iter(state.audio_tracks.iter().map(|track| track.clone())),
+        };
+
+        (engine, import_errors)
+    }
+
+    /// Creates an engine that simulates outputting without outputting to any audio device.
+    ///
+    /// Spins poll and output callback as fast as possible with a varying buffersize.  
+    ///
+    /// Useful for integration testing.
+    pub fn dummy() -> Self {
+        let (stopped, join_handle, processor_interface, import_errors) =
+            Self::start_dummy_stream(&EngineState::default());
+        debug_assert!(
+            import_errors.is_empty(),
+            "Empty engine should not have import errors"
+        );
+
+        Engine {
+            stopped,
+            join_handle: Some(join_handle),
+            processor_interface,
+            audio_tracks: HashSet::new(),
+        }
+    }
+
+    /// Like [`Engine::dummy()`], but uses the given state instead of the default state.
+    pub fn dummy_from_state(state: &EngineState) -> (Self, Vec<ImportError>) {
+        let (stopped, join_handle, processor_interface, import_errors) =
+            Self::start_dummy_stream(state);
+
+        let engine = Engine {
+            stopped,
+            join_handle: Some(join_handle),
+            processor_interface,
+            audio_tracks: HashSet::from_iter(state.audio_tracks.iter().map(|track| track.clone())),
+        };
+
+        (engine, import_errors)
+    }
+
+    fn start_stream(
+        state: &EngineState,
+    ) -> (
+        Arc<AtomicBool>,
+        JoinHandle<()>,
+        ProcessorInterface,
+        Vec<ImportError>,
+    ) {
         let host = cpal::default_host();
         let device = host
             .default_output_device()
@@ -62,7 +128,8 @@ impl Engine {
             cpal::BufferSize::Fixed(size) => size.try_into().expect("Buffer size overflows usize"),
             cpal::BufferSize::Default => MAX_BUFFER_SIZE_DEFAULT,
         };
-        let (processor_interface, processor) = processor(&config, max_buffer_size);
+        let (processor_interface, processor, import_errors) =
+            processor(&state.processor, &config, max_buffer_size);
 
         use SampleFormat::*;
         let create_stream = match sample_format {
@@ -107,44 +174,20 @@ impl Engine {
             println!("Stream terminated.");
         });
 
-        let join_handle = Some(join_handle);
-
-        Engine {
-            stopped: stopped1,
-            join_handle,
-            processor_interface,
-            audio_tracks: HashSet::new(),
-        }
+        (stopped1, join_handle, processor_interface, import_errors)
     }
 
-    /// Create a cpal stream with the given sample type.
-    fn create_stream<T: 'static + cpal::SizedSample + cpal::FromSample<Sample>>(
-        device: &Device,
-        config: &StreamConfig,
-        mut processor: Processor,
-    ) -> Result<Stream, BuildStreamError> {
-        let stream = device.build_output_stream(
-            config,
-            move |data: &mut [T], _info| {
-                no_heap! {{
-                    processor.poll();
-                    processor.output(data);
-                }}
-            },
-            |err| panic!("{}", err),
-            None,
-        )?;
-
-        Ok(stream)
-    }
-
-    /// Creates an engine that simulates outputting without outputting to any audio device.
-    ///
-    /// Spins poll and output callback as fast as possible with a varying buffersize.  
-    ///
-    /// Useful for integration testing.
-    pub fn dummy() -> Self {
-        let (processor_interface, mut processor) = processor(
+    /// Starts a stream that simulates outputting without outputting to any audio device.
+    fn start_dummy_stream(
+        state: &EngineState,
+    ) -> (
+        Arc<AtomicBool>,
+        JoinHandle<()>,
+        ProcessorInterface,
+        Vec<ImportError>,
+    ) {
+        let (processor_interface, mut processor, import_errors) = processor(
+            &state.processor,
             &StreamConfig {
                 channels: 2,
                 sample_rate: SampleRate(48_000),
@@ -172,12 +215,37 @@ impl Engine {
             }
         });
 
-        Engine {
-            stopped: stopped1,
-            join_handle: Some(join_handle),
-            processor_interface,
-            audio_tracks: HashSet::new(),
-        }
+        (stopped1, join_handle, processor_interface, import_errors)
+    }
+
+    /// Stops the stream if it is running.
+    fn stop_stream(&mut self) {
+        self.stopped.store(true, Ordering::Release);
+        self.join_handle.take().map(|h| {
+            h.thread().unpark();
+            h.join().unwrap();
+        });
+    }
+
+    /// Create a cpal stream with the given sample type.
+    fn create_stream<T: 'static + cpal::SizedSample + cpal::FromSample<Sample>>(
+        device: &Device,
+        config: &StreamConfig,
+        mut processor: Processor,
+    ) -> Result<Stream, BuildStreamError> {
+        let stream = device.build_output_stream(
+            config,
+            move |data: &mut [T], _info| {
+                no_heap! {{
+                    processor.poll();
+                    processor.output(data);
+                }}
+            },
+            |err| panic!("{}", err),
+            None,
+        )?;
+
+        Ok(stream)
     }
 
     pub fn play(&mut self) {
@@ -456,18 +524,58 @@ impl Engine {
 
         Ok(audio_tracks)
     }
+
+    pub fn state(&self) -> EngineState {
+        EngineState {
+            processor: self.processor_interface.state(),
+
+            audio_tracks: self
+                .audio_tracks
+                .iter()
+                .map(|audio_track| audio_track.clone())
+                .collect(),
+        }
+    }
 }
 impl Drop for Engine {
     fn drop(&mut self) {
-        self.stopped.store(true, Ordering::Release);
-        let join_handle = self
-            .join_handle
-            .take()
-            .expect("Stream was terminated more than once.");
-        join_handle.thread().unpark();
-        join_handle.join().unwrap();
+        self.stop_stream();
     }
 }
+
+/// The state of the [`Engine`].
+///
+/// This can be used to recreate this exact state at a later time,
+/// suitable for saving to a file.
+#[derive(Debug, Clone, Default, Hash)]
+pub struct EngineState {
+    processor: ProcessorState,
+
+    // AudioTrackState is not used because the individual track's states are kept in the mixer and timeline's state.
+    audio_tracks: Vec<AudioTrack>,
+}
+impl PartialEq for EngineState {
+    fn eq(&self, other: &Self) -> bool {
+        let self_set: HashSet<_> = HashSet::from_iter(self.audio_tracks.iter());
+        let other_set = HashSet::from_iter(other.audio_tracks.iter());
+
+        debug_assert_eq!(
+            self_set.len(),
+            self.audio_tracks.len(),
+            "Duplicate audio tracks in EngineState: {:?}",
+            self.audio_tracks
+        );
+        debug_assert_eq!(
+            other_set.len(),
+            other.audio_tracks.len(),
+            "Duplicate audio tracks in EngineState: {:?}",
+            other.audio_tracks
+        );
+
+        self.processor == other.processor && self_set == other_set
+    }
+}
+impl Eq for EngineState {}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AudioTrack {
@@ -489,13 +597,13 @@ pub struct AudioTrackState {
     track_state: MixerTrackState,
 }
 
-/// Scaling used by [`Track::read_meter`]
+/// Scaling used by [`MixerTrack::read_meter`]
 ///
 /// `∛|sample / 2|`
 pub fn meter_scale(sample: Sample) -> Sample {
     (sample / 2.0).abs().powf(1.0 / 3.0)
 }
-/// Approximate inverse of scaling used by [`Track::read_meter`]
+/// Approximate inverse of scaling used by [`MixerTrack::read_meter`]
 ///
 /// `2 ⋅ value³`
 pub fn inverse_meter_scale(value: Sample) -> Sample {

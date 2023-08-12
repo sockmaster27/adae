@@ -1,3 +1,4 @@
+use std::hash::{Hash, Hasher};
 use std::iter::zip;
 
 use super::audio_meter::{audio_meter, AudioMeter, AudioMeterProcessor};
@@ -12,18 +13,18 @@ pub fn mixer_track(
     max_buffer_size: usize,
 ) -> (MixerTrack, MixerTrackProcessor) {
     mixer_track_from_state(
-        max_buffer_size,
         &MixerTrackState {
             panning: 0.0,
             volume: 1.0,
             key,
         },
+        max_buffer_size,
     )
 }
 
 pub fn mixer_track_from_state(
-    max_buffer_size: usize,
     state: &MixerTrackState,
+    max_buffer_size: usize,
 ) -> (MixerTrack, MixerTrackProcessor) {
     let (panning, panning_processor) = f32_parameter(state.panning, max_buffer_size);
     let (volume, volume_processor) = f32_parameter(state.volume, max_buffer_size);
@@ -105,12 +106,46 @@ impl MixerTrack {
 
 /// Contains all info about the tracks state,
 /// that is relevant to reconstructing it
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct MixerTrackState {
     pub panning: f32,
     pub volume: f32,
 
     pub key: MixerTrackKey,
+}
+impl Default for MixerTrackState {
+    fn default() -> Self {
+        Self {
+            panning: 0.0,
+            volume: 1.0,
+
+            key: 0,
+        }
+    }
+}
+impl PartialEq for MixerTrackState {
+    fn eq(&self, other: &Self) -> bool {
+        let res = self.key == other.key;
+
+        if res {
+            debug_assert_eq!(
+                self.panning, other.panning,
+                "Two tracks with the same key have different panning"
+            );
+            debug_assert_eq!(
+                self.volume, other.volume,
+                "Two tracks with the same key have different volume"
+            );
+        }
+
+        res
+    }
+}
+impl Eq for MixerTrackState {}
+impl Hash for MixerTrackState {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.key.hash(state);
+    }
 }
 
 #[derive(Debug)]

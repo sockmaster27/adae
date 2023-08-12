@@ -22,11 +22,24 @@ impl<K> KeyGenerator<K>
 where
     K: PrimInt + Unsigned + WrappingAdd + Hash + Debug,
 {
+    /// Create new `KeyGenerator` with no keys in use.
     pub fn new() -> Self {
         KeyGenerator {
             last_key: K::max_value(),
             used_keys: HashSet::new(),
         }
+    }
+
+    /// Create new `KeyGenerator` with all keys in the given iterator already reserved.
+    pub fn from_iter(iter: impl IntoIterator<Item = K>) -> Self {
+        let mut kg = Self::new();
+        let mut max = K::zero();
+        for key in iter {
+            kg.reserve(key).expect("Duplicate key in iterator");
+            max = max.max(key);
+        }
+        kg.last_key = max;
+        kg
     }
 
     /// Amount of keys currently in use.
@@ -52,6 +65,17 @@ where
     /// Return new unique key, registering it as occupied
     /// until [`Self::free()`] is called with this key as argument.
     pub fn next(&mut self) -> Result<K, OverflowError> {
+        let key = self.peek_next()?;
+        self.reserve(key).unwrap();
+        self.last_key = key;
+        Ok(key)
+    }
+
+    /// Checks what the next key will be, without actually reserving it.
+    ///
+    /// NOTE: Calling `self.next()` will redo this calculation,
+    /// so if you need the key it is more efficient to call `self.reserve()`.
+    pub fn peek_next(&self) -> Result<K, OverflowError> {
         if self.remaining_keys() == K::zero() {
             return Err(OverflowError);
         }
@@ -61,8 +85,6 @@ where
         loop {
             key = key.wrapping_add(&K::one());
             if !self.used_keys.contains(&key) {
-                self.last_key = key;
-                self.used_keys.insert(key);
                 return Ok(key);
             }
         }

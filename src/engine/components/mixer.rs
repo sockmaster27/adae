@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::error::Error;
 use std::fmt::Debug;
 use std::fmt::Display;
@@ -17,15 +18,27 @@ use crate::engine::utils::remote_push::{RemotePushedHashMap, RemotePusherHashMap
 use crate::engine::Sample;
 use crate::engine::CHANNELS;
 
-pub fn mixer(max_buffer_size: usize) -> (Mixer, MixerProcessor) {
-    let key_generator = KeyGenerator::new();
+pub fn mixer(state: &MixerState, max_buffer_size: usize) -> (Mixer, MixerProcessor) {
+    let key_generator = KeyGenerator::from_iter(state.tracks.iter().map(|state| state.key));
 
-    let tracks = HashMap::new();
+    let mut tracks = HashMap::new();
+    let mut track_processors = HashMap::new();
+    for state in &state.tracks {
+        let (track, track_processor) = mixer_track_from_state(state, max_buffer_size);
+        tracks.insert(state.key, track);
+        track_processors.insert(state.key, DBox::new(track_processor));
+    }
+    let (track_processors_pusher, track_processors_pushed) = track_processors.into_remote_push();
 
-    let (track_processors_pusher, track_processors_pushed) = HashMap::remote_push();
-    let (source_outs_pusher, source_outs_pushed) = HashMap::remote_push();
+    let (source_outs_pusher, source_outs_pushed) =
+        HashMap::from_iter(state.tracks.iter().map(|state| {
+            let key = state.key;
+            let source_out = DBox::new(vec![0.0; max_buffer_size * CHANNELS]);
+            (key, source_out)
+        }))
+        .into_remote_push();
 
-    let (master, master_processor) = mixer_track(0, max_buffer_size);
+    let (master, master_processor) = mixer_track_from_state(&state.master, max_buffer_size);
 
     (
         Mixer {
@@ -110,7 +123,7 @@ impl Mixer {
             .reserve(key)
             .expect("Track key already in use");
 
-        let track = mixer_track_from_state(self.max_buffer_size, state);
+        let track = mixer_track_from_state(state, self.max_buffer_size);
         self.push_track(track);
     }
     pub fn reconstruct_tracks<'a>(&mut self, states: impl Iterator<Item = &'a MixerTrackState>) {
@@ -119,7 +132,7 @@ impl Mixer {
                 self.key_generator
                     .reserve(state.key)
                     .expect("Track key already in use");
-                mixer_track_from_state(self.max_buffer_size, state)
+                mixer_track_from_state(state, self.max_buffer_size)
             })
             .collect();
         self.push_tracks(tracks);
@@ -186,6 +199,13 @@ impl Mixer {
     pub fn remaining_keys(&self) -> u32 {
         self.key_generator.remaining_keys()
     }
+
+    pub fn state(&self) -> MixerState {
+        MixerState {
+            tracks: self.tracks.values().map(|track| track.state()).collect(),
+            master: self.master.state(),
+        }
+    }
 }
 
 pub struct MixerProcessor {
@@ -228,6 +248,34 @@ impl Debug for MixerProcessor {
     }
 }
 
+#[derive(Debug, Clone, Default, Hash)]
+pub struct MixerState {
+    pub tracks: Vec<MixerTrackState>,
+    pub master: MixerTrackState,
+}
+impl PartialEq for MixerState {
+    fn eq(&self, other: &Self) -> bool {
+        let self_set: HashSet<_> = HashSet::from_iter(self.tracks.iter());
+        let other_set = HashSet::from_iter(other.tracks.iter());
+
+        debug_assert_eq!(
+            self_set.len(),
+            self.tracks.len(),
+            "Duplicate mixer tracks in MixerState: {:?}",
+            self.tracks
+        );
+        debug_assert_eq!(
+            other_set.len(),
+            other.tracks.len(),
+            "Duplicate mixeer tracks in MixerState: {:?}",
+            other.tracks
+        );
+
+        self_set == other_set && self.master == other.master
+    }
+}
+impl Eq for MixerState {}
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct InvalidMixerTrackError {
     pub key: MixerTrackKey,
@@ -259,7 +307,7 @@ mod tests {
 
     #[test]
     fn add_track() {
-        let (mut m, mut mp) = mixer(10);
+        let (mut m, mut mp) = mixer(&MixerState::default(), 10);
 
         for _ in 0..50 {
             m.add_track().unwrap();
@@ -275,7 +323,7 @@ mod tests {
 
     #[test]
     fn add_tracks() {
-        let (mut m, mut mp) = mixer(10);
+        let (mut m, mut mp) = mixer(&MixerState::default(), 10);
 
         for _ in 0..50 {
             m.add_tracks(5).unwrap();
@@ -291,7 +339,7 @@ mod tests {
 
     #[test]
     fn reconstruct_track() {
-        let (mut m, mut mp) = mixer(10);
+        let (mut m, mut mp) = mixer(&MixerState::default(), 10);
 
         let mut keys = Vec::new();
         for _ in 0..50 {
@@ -318,7 +366,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn reconstruct_existing_track() {
-        let (mut m, _mp) = mixer(10);
+        let (mut m, _mp) = mixer(&MixerState::default(), 10);
 
         let used = m.add_track().unwrap();
 
@@ -332,7 +380,7 @@ mod tests {
 
     #[test]
     fn reconstruct_tracks() {
-        let (mut m, mut mp) = mixer(10);
+        let (mut m, mut mp) = mixer(&MixerState::default(), 10);
 
         let batch_size = 5;
 
@@ -357,7 +405,7 @@ mod tests {
 
     #[test]
     fn delete_track_immediately() {
-        let (mut m, mut mp) = mixer(10);
+        let (mut m, mut mp) = mixer(&MixerState::default(), 10);
 
         let k = m.add_track().unwrap();
         m.delete_track(k).unwrap();
@@ -372,7 +420,7 @@ mod tests {
 
     #[test]
     fn delete_track_delayed() {
-        let (mut m, mut mp) = mixer(10);
+        let (mut m, mut mp) = mixer(&MixerState::default(), 10);
 
         let mut poll = || {
             no_heap! {{

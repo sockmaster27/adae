@@ -1,5 +1,6 @@
 use std::cell::RefMut;
 use std::cmp::min;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -7,7 +8,8 @@ use std::sync::Arc;
 use intrusive_collections::rbtree::CursorOwning;
 use intrusive_collections::{Bound, RBTree};
 
-use super::AudioClip;
+use super::audio_clip::{AudioClip, AudioClipKey, AudioClipState};
+use super::AudioClipProcessor;
 use crate::engine::components::track::MixerTrackKey;
 use crate::engine::info::Info;
 use crate::engine::utils::rbtree_node::{TreeNode, TreeNodeAdapter};
@@ -16,18 +18,33 @@ use crate::Timestamp;
 
 pub type TimelineTrackKey = u32;
 
+/// A mirror for the state of a `TimelineTrackProcessor`.
+/// Unlike the convention, this does not do any synchronization with the `TimelineTrackProcessor`.
 pub struct TimelineTrack {
+    pub clips: HashMap<AudioClipKey, AudioClip>,
+    pub output_track: MixerTrackKey,
+}
+impl TimelineTrack {
+    pub fn new(output: MixerTrackKey) -> Self {
+        TimelineTrack {
+            clips: HashMap::new(),
+            output_track: output,
+        }
+    }
+}
+
+pub struct TimelineTrackProcessor {
     position: Arc<AtomicU64>,
     sample_rate: u32,
     bpm_cents: u16,
 
     /// Optional because it needs to be swapped out in jump_to.
     /// Should always be safely unwrappable.
-    relevant_clip: Option<CursorOwning<TreeNodeAdapter<AudioClip>>>,
+    relevant_clip: Option<CursorOwning<TreeNodeAdapter<AudioClipProcessor>>>,
 
     output_track: MixerTrackKey,
 }
-impl TimelineTrack {
+impl TimelineTrackProcessor {
     pub fn new(
         output: MixerTrackKey,
         position: Arc<AtomicU64>,
@@ -37,7 +54,7 @@ impl TimelineTrack {
         let tree = RBTree::new(TreeNodeAdapter::new());
         let relevant_clip = Some(tree.cursor_owning());
 
-        TimelineTrack {
+        TimelineTrackProcessor {
             position,
             sample_rate,
             bpm_cents,
@@ -52,12 +69,12 @@ impl TimelineTrack {
         self.output_track
     }
 
-    pub fn insert_clip(&mut self, clip: Box<TreeNode<AudioClip>>) {
+    pub fn insert_clip(&mut self, clip: Box<TreeNode<AudioClipProcessor>>) {
         self.relevant_clip
             .as_mut()
             .unwrap()
             .with_cursor_mut(|cursor| {
-                let mut clip_ref: RefMut<AudioClip> = (*clip).borrow_mut();
+                let mut clip_ref: RefMut<AudioClipProcessor> = (*clip).borrow_mut();
 
                 let pos_samples = self.position.load(Ordering::Relaxed);
                 let position =
@@ -192,16 +209,40 @@ impl TimelineTrack {
             });
     }
 }
-impl Debug for TimelineTrack {
+impl Debug for TimelineTrackProcessor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "TimelineTrack")
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Hash)]
 pub struct TimelineTrackState {
     pub key: TimelineTrackKey,
+    pub clips: Vec<AudioClipState>,
+    pub output_track: MixerTrackKey,
 }
+impl PartialEq for TimelineTrackState {
+    fn eq(&self, other: &Self) -> bool {
+        let self_set: HashSet<_> = HashSet::from_iter(self.clips.iter());
+        let other_set = HashSet::from_iter(other.clips.iter());
+
+        debug_assert_eq!(
+            self_set.len(),
+            self.clips.len(),
+            "Duplicate clips in TimelineTrackState: {:?}",
+            self.clips
+        );
+        debug_assert_eq!(
+            other_set.len(),
+            other.clips.len(),
+            "Duplicate clips in TimelineTrackState: {:?}",
+            other.clips
+        );
+
+        self.key == other.key && self_set == other_set && self.output_track == other.output_track
+    }
+}
+impl Eq for TimelineTrackState {}
 
 #[cfg(test)]
 mod tests {
@@ -222,15 +263,16 @@ mod tests {
         start_beat_units: u32,
         length_beat_units: Option<u32>,
         max_buffer_size: usize,
-    ) -> Box<TreeNode<AudioClip>> {
+    ) -> Box<TreeNode<AudioClipProcessor>> {
         thread_local! {
-            static AC: Arc<StoredAudioClip> = Arc::new(StoredAudioClip::import(&test_file_path("44100 16-bit.wav")).unwrap());
+            static AC: Arc<StoredAudioClip> = Arc::new(StoredAudioClip::import(0, &test_file_path("44100 16-bit.wav")).unwrap());
         }
 
         AC.with(|ac| {
-            Box::new(TreeNode::new(AudioClip::new(
+            Box::new(TreeNode::new(AudioClipProcessor::new(
                 Timestamp::from_beat_units(start_beat_units),
                 length_beat_units.map(|l| Timestamp::from_beat_units(l)),
+                0,
                 AudioClipReader::new(Arc::clone(&ac), max_buffer_size, 48_000),
             )))
         })
@@ -238,7 +280,8 @@ mod tests {
 
     #[test]
     fn insert() {
-        let mut t = TimelineTrack::new(0, Arc::new(AtomicU64::new(0)), SAMPLE_RATE, BPM_CENTS);
+        let mut t =
+            TimelineTrackProcessor::new(0, Arc::new(AtomicU64::new(0)), SAMPLE_RATE, BPM_CENTS);
         let c1 = clip(3, Some(1), 100);
         let c2 = clip(1, Some(2), 100);
 
@@ -263,7 +306,7 @@ mod tests {
             buffer_size: BUFFER_SIZE,
         };
         let pos = Arc::new(AtomicU64::new(0));
-        let mut t = TimelineTrack::new(0, Arc::clone(&pos), SAMPLE_RATE, BPM_CENTS);
+        let mut t = TimelineTrackProcessor::new(0, Arc::clone(&pos), SAMPLE_RATE, BPM_CENTS);
         let c1 = clip(1, Some(1), 3 * SBU);
         let c2 = clip(3, Some(2), 3 * SBU);
 
@@ -346,7 +389,8 @@ mod tests {
         const SBUC: usize = SBU * CHANNELS;
         let mut out = vec![0.0; BUFFER_SIZE * CHANNELS];
 
-        let mut t = TimelineTrack::new(0, Arc::new(AtomicU64::new(0)), SAMPLE_RATE, BPM_CENTS);
+        let mut t =
+            TimelineTrackProcessor::new(0, Arc::new(AtomicU64::new(0)), SAMPLE_RATE, BPM_CENTS);
         let c1 = clip(0, Some(1), BUFFER_SIZE);
         let c2 = clip(2, Some(1), BUFFER_SIZE);
         let c3 = clip(4, Some(1), BUFFER_SIZE);
@@ -431,7 +475,7 @@ mod tests {
             buffer_size: BUFFER_SIZE,
         };
         let pos = Arc::new(AtomicU64::new(0));
-        let mut t = TimelineTrack::new(0, Arc::clone(&pos), SAMPLE_RATE, BPM_CENTS);
+        let mut t = TimelineTrackProcessor::new(0, Arc::clone(&pos), SAMPLE_RATE, BPM_CENTS);
         let c1 = clip(1, Some(1), 100);
         let c2 = clip(3, Some(2), 100);
 

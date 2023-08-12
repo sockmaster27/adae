@@ -7,13 +7,64 @@ use crate::{
         utils::rbtree_node,
         Sample,
     },
-    Timestamp,
+    StoredAudioClipKey, Timestamp,
 };
 
 pub type AudioClipKey = u32;
 
-#[derive(Debug)]
+/// A mirror of `AudioClipProcessor`'s state.
+/// Does no synchronization.
 pub struct AudioClip {
+    pub key: AudioClipKey,
+
+    /// Start on the timeline
+    pub start: Timestamp,
+    /// Duration on the timeline.
+    /// If `None` clip should play till end.
+    pub length: Option<Timestamp>,
+    /// Where in the source clip this sound starts.
+    /// Relevant if the start has been trimmed off.
+    pub start_offset: usize,
+
+    pub inner: AudioClipReader,
+}
+impl AudioClip {
+    pub fn end(&self, sample_rate: u32, bpm_cents: u16) -> Timestamp {
+        if let Some(length) = self.length {
+            self.start + length
+        } else {
+            self.start
+                + Timestamp::from_samples_ceil(
+                    self.inner.len(sample_rate) as u64,
+                    sample_rate,
+                    bpm_cents,
+                )
+        }
+    }
+
+    pub fn overlaps(&self, other: &Self, sample_rate: u32, bpm_cents: u16) -> bool {
+        let start1 = self.start;
+        let end1 = self.end(sample_rate, bpm_cents);
+
+        let start2 = other.start;
+        let end2 = other.end(sample_rate, bpm_cents);
+
+        start1 <= start2 && start2 < end1 || start2 <= start1 && start1 < end2
+    }
+
+    pub fn state(&self) -> AudioClipState {
+        AudioClipState {
+            key: self.key,
+            start_offset: self.start_offset,
+            start: self.start,
+            length: self.length,
+            inner: self.inner.key(),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct AudioClipProcessor {
     /// Start on the timeline
     pub start: Timestamp,
     /// Duration on the timeline.
@@ -25,12 +76,17 @@ pub struct AudioClip {
 
     inner: AudioClipReader,
 }
-impl AudioClip {
-    pub fn new(start: Timestamp, length: Option<Timestamp>, reader: AudioClipReader) -> Self {
-        AudioClip {
+impl AudioClipProcessor {
+    pub fn new(
+        start: Timestamp,
+        length: Option<Timestamp>,
+        start_offset: usize,
+        reader: AudioClipReader,
+    ) -> Self {
+        AudioClipProcessor {
             start,
             length,
-            start_offset: 0,
+            start_offset,
             inner: reader,
         }
     }
@@ -100,21 +156,20 @@ impl AudioClip {
             buffer_size: capped_buffer_size,
         })
     }
-
-    pub fn overlaps(&self, other: &AudioClip, sample_rate: u32, bpm_cents: u16) -> bool {
-        let start1 = self.start;
-        let end1 = self.end(sample_rate, bpm_cents);
-
-        let start2 = other.start;
-        let end2 = other.end(sample_rate, bpm_cents);
-
-        start1 <= start2 && start2 < end1 || start2 <= start1 && start1 < end2
-    }
 }
-impl rbtree_node::Keyed for AudioClip {
+impl rbtree_node::Keyed for AudioClipProcessor {
     type Key = Timestamp;
 
     fn key(&self) -> Self::Key {
         self.start
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct AudioClipState {
+    pub key: AudioClipKey,
+    pub start_offset: usize,
+    pub start: Timestamp,
+    pub length: Option<Timestamp>,
+    pub inner: StoredAudioClipKey,
 }

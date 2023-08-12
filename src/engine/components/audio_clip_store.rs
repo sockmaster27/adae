@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     error::Error,
     fmt::Display,
     path::{Path, PathBuf},
@@ -23,16 +23,53 @@ pub struct AudioClipStore {
     key_generator: KeyGenerator<StoredAudioClipKey>,
 }
 impl AudioClipStore {
-    pub fn new(max_buffer_size: usize, sample_rate: u32) -> Self {
-        AudioClipStore {
+    /// Will reconstruct the store from the given state, importing all clips.
+    ///
+    /// Returns a list of errors that occured during import.
+    /// If a track fails to import, it will be skipped.
+    /// If the state contains no tracks, it is guaranteed that no errors will occur.
+    ///
+    /// # Panics
+    /// If the state contains duplicate keys.
+    pub fn new(
+        state: &AudioClipStoreState,
+        sample_rate: u32,
+        max_buffer_size: usize,
+    ) -> (Self, Vec<ImportError>) {
+        let paths = HashMap::from_iter(
+            state
+                .clips
+                .iter()
+                .map(|(path, key)| (path.to_owned(), *key)),
+        );
+
+        let mut key_generator = KeyGenerator::new();
+
+        let mut clips = HashMap::with_capacity(paths.len());
+        let mut errors = Vec::new();
+        for (path, &key) in paths.iter() {
+            match StoredAudioClip::import(key, path) {
+                Ok(clip) => {
+                    key_generator
+                        .reserve(key)
+                        .expect("State contains duplicate keys");
+                    clips.insert(key, Arc::new(clip));
+                }
+                Err(error) => errors.push(error.into()),
+            }
+        }
+
+        let store = AudioClipStore {
             max_buffer_size,
             sample_rate,
 
-            paths: HashMap::new(),
-            clips: HashMap::new(),
+            paths,
+            clips,
 
-            key_generator: KeyGenerator::new(),
-        }
+            key_generator,
+        };
+
+        (store, errors)
     }
 
     pub fn import(&mut self, path: &Path) -> Result<StoredAudioClipKey, ImportError> {
@@ -43,7 +80,7 @@ impl AudioClipStore {
 
         let key = self.key_generator.next()?;
 
-        let clip = StoredAudioClip::import(path)?;
+        let clip = StoredAudioClip::import(key, path)?;
 
         // Commit only if no errors occur
         self.clips.insert(key, Arc::new(clip));
@@ -72,7 +109,44 @@ impl AudioClipStore {
             self.sample_rate,
         ))
     }
+
+    pub fn state(&self) -> AudioClipStoreState {
+        AudioClipStoreState {
+            clips: self
+                .paths
+                .iter()
+                .map(|(path, &key)| (path.to_owned(), key))
+                .collect(),
+        }
+    }
 }
+
+#[derive(Debug, Clone, Default, Hash)]
+pub struct AudioClipStoreState {
+    pub clips: Vec<(PathBuf, StoredAudioClipKey)>,
+}
+impl PartialEq for AudioClipStoreState {
+    fn eq(&self, other: &Self) -> bool {
+        let self_set: HashSet<_> = HashSet::from_iter(self.clips.iter());
+        let other_set = HashSet::from_iter(other.clips.iter());
+
+        debug_assert_eq!(
+            self_set.len(),
+            self.clips.len(),
+            "Duplicate clips in AudioClipStoreState: {:?}",
+            self.clips
+        );
+        debug_assert_eq!(
+            other_set.len(),
+            other.clips.len(),
+            "Duplicate clips in AudioClipStoreState: {:?}",
+            other.clips
+        );
+
+        self_set == other_set
+    }
+}
+impl Eq for AudioClipStoreState {}
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct ClipOverflowError;

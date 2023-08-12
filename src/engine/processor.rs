@@ -3,8 +3,9 @@ use std::iter::zip;
 use cpal::StreamConfig;
 
 use super::components::{
-    mixer::{mixer, Mixer, MixerProcessor},
-    timeline::{timeline, Timeline, TimelineProcessor},
+    audio_clip_store::ImportError,
+    mixer::{mixer, Mixer, MixerProcessor, MixerState},
+    timeline::{timeline, Timeline, TimelineProcessor, TimelineState},
 };
 use super::{info::Info, Sample, CHANNELS};
 #[cfg(feature = "record_output")]
@@ -14,14 +15,16 @@ use crate::wav_recorder::WavRecorder;
 ///
 /// The [`Processor`] should live on the audio thread, while the [`ProcessorInterface`] should not.
 pub fn processor(
+    state: &ProcessorState,
     stream_config: &StreamConfig,
     max_buffer_size: usize,
-) -> (ProcessorInterface, Processor) {
+) -> (ProcessorInterface, Processor, Vec<ImportError>) {
     let output_channels = stream_config.channels;
     let sample_rate = stream_config.sample_rate.0;
 
-    let (timeline, timeline_processor) = timeline(sample_rate, 120_00, max_buffer_size);
-    let (mixer, mixer_processor) = mixer(max_buffer_size);
+    let (timeline, timeline_processor, import_errors) =
+        timeline(&state.timeline, sample_rate, max_buffer_size);
+    let (mixer, mixer_processor) = mixer(&state.mixer, max_buffer_size);
 
     (
         ProcessorInterface { mixer, timeline },
@@ -42,6 +45,7 @@ pub fn processor(
                 sample_rate,
             ),
         },
+        import_errors,
     )
 }
 
@@ -50,6 +54,14 @@ pub fn processor(
 pub struct ProcessorInterface {
     pub mixer: Mixer,
     pub timeline: Timeline,
+}
+impl ProcessorInterface {
+    pub fn state(&self) -> ProcessorState {
+        ProcessorState {
+            mixer: self.mixer.state(),
+            timeline: self.timeline.state(),
+        }
+    }
 }
 
 /// Contatins all data that should persist from one buffer output to the next.
@@ -116,4 +128,10 @@ impl Processor {
             *sample = sample.clamp(-1.0, 1.0);
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Hash)]
+pub struct ProcessorState {
+    mixer: MixerState,
+    timeline: TimelineState,
 }
