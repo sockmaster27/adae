@@ -20,11 +20,11 @@ use self::components::mixer::{InvalidMixerTrackError, MixerTrackOverflowError};
 pub use self::components::stored_audio_clip::StoredAudioClip;
 pub use self::components::stored_audio_clip::StoredAudioClipKey;
 pub use self::components::timeline::Timestamp;
-use self::components::timeline::{
+pub use self::components::timeline::{
     AddClipError, InvalidTimelineTrackError, TimelineTrackKey, TimelineTrackOverflowError,
     TimelineTrackState,
 };
-use self::components::{MixerTrackKey, MixerTrackState};
+pub use self::components::{MixerTrackKey, MixerTrackState};
 use self::processor::{processor, Processor, ProcessorInterface, ProcessorState};
 pub use components::MixerTrack;
 
