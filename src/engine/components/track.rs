@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use std::hash::{Hash, Hasher};
 use std::iter::zip;
 
@@ -106,7 +107,7 @@ impl MixerTrack {
 
 /// Contains all info about the tracks state,
 /// that is relevant to reconstructing it
-#[derive(Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct MixerTrackState {
     pub panning: f32,
     pub volume: f32,

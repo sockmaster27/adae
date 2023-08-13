@@ -1,12 +1,12 @@
+use intrusive_collections::rbtree::CursorOwning;
+use intrusive_collections::{Bound, RBTree};
+use serde::{Deserialize, Serialize};
 use std::cell::RefMut;
 use std::cmp::min;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-
-use intrusive_collections::rbtree::CursorOwning;
-use intrusive_collections::{Bound, RBTree};
 
 use super::audio_clip::{AudioClip, AudioClipKey, AudioClipState};
 use super::AudioClipProcessor;
@@ -215,7 +215,7 @@ impl Debug for TimelineTrackProcessor {
     }
 }
 
-#[derive(Debug, Clone, Hash)]
+#[derive(Serialize, Deserialize, Debug, Clone, Hash)]
 pub struct TimelineTrackState {
     pub key: TimelineTrackKey,
     pub clips: Vec<AudioClipState>,

@@ -1,6 +1,6 @@
-use std::iter::zip;
-
 use cpal::StreamConfig;
+use serde::{Deserialize, Serialize};
+use std::iter::zip;
 
 use super::components::{
     audio_clip_store::ImportError,
@@ -130,7 +130,7 @@ impl Processor {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Hash)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default, Hash)]
 pub struct ProcessorState {
     mixer: MixerState,
     timeline: TimelineState,

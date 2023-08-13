@@ -1,9 +1,10 @@
+use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use std::ops::{Add, Mul, Sub};
 
 const UNITS_PER_BEAT: u32 = 1024;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Timestamp {
     /// 1 beat = 1024 beat units, making it highly divisible by powers of 2
     beat_units: u32,

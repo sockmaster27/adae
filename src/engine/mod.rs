@@ -1,6 +1,7 @@
 use core::sync::atomic::Ordering;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{BuildStreamError, Device, SampleFormat, SampleRate, Stream, StreamConfig};
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::error::Error;
 use std::fmt::Display;
@@ -547,7 +548,7 @@ impl Drop for Engine {
 ///
 /// This can be used to recreate this exact state at a later time,
 /// suitable for saving to a file.
-#[derive(Debug, Clone, Default, Hash)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, Hash)]
 pub struct EngineState {
     processor: ProcessorState,
 
@@ -577,7 +578,7 @@ impl PartialEq for EngineState {
 }
 impl Eq for EngineState {}
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AudioTrack {
     timeline_track_key: TimelineTrackKey,
     track_key: MixerTrackKey,

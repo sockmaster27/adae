@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     error::Error,
@@ -6,12 +7,11 @@ use std::{
     sync::Arc,
 };
 
-use crate::engine::utils::key_generator::{self, KeyGenerator};
-
 use super::{
     audio_clip_reader::AudioClipReader,
     stored_audio_clip::{self, StoredAudioClip, StoredAudioClipKey},
 };
+use crate::engine::utils::key_generator::{self, KeyGenerator};
 
 pub struct AudioClipStore {
     max_buffer_size: usize,
@@ -121,7 +121,7 @@ impl AudioClipStore {
     }
 }
 
-#[derive(Debug, Clone, Default, Hash)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, Hash)]
 pub struct AudioClipStoreState {
     pub clips: Vec<(PathBuf, StoredAudioClipKey)>,
 }

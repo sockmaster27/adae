@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use std::cmp::min;
 
 use crate::{
@@ -165,7 +166,7 @@ impl rbtree_node::Keyed for AudioClipProcessor {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AudioClipState {
     pub key: AudioClipKey,
     pub start_offset: usize,

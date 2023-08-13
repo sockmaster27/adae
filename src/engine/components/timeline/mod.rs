@@ -2,6 +2,7 @@ mod audio_clip;
 mod timestamp;
 mod track;
 
+use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     error::Error,
@@ -18,7 +19,6 @@ use self::{
     audio_clip::{AudioClip, AudioClipKey, AudioClipProcessor},
     track::TimelineTrack,
 };
-
 use super::{
     audio_clip_store::{AudioClipStore, AudioClipStoreState, ImportError, InvalidAudioClipError},
     stored_audio_clip::{StoredAudioClip, StoredAudioClipKey},
@@ -497,7 +497,7 @@ impl TimelineProcessor {
     }
 }
 
-#[derive(Debug, Clone, Hash)]
+#[derive(Serialize, Deserialize, Debug, Clone, Hash)]
 pub struct TimelineState {
     pub bpm_cents: u16,
     pub audio_clip_store: AudioClipStoreState,

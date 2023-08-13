@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::error::Error;
@@ -248,7 +249,7 @@ impl Debug for MixerProcessor {
     }
 }
 
-#[derive(Debug, Clone, Default, Hash)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, Hash)]
 pub struct MixerState {
     pub tracks: Vec<MixerTrackState>,
     pub master: MixerTrackState,
