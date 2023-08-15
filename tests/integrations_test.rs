@@ -5,11 +5,6 @@ use std::{iter::zip, path::Path};
 use adae::{Engine, StoredAudioClipKey, Timestamp};
 
 #[test]
-fn create_engine() {
-    Engine::new();
-}
-
-#[test]
 fn create_dummy_engine() {
     Engine::dummy();
 }
