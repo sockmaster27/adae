@@ -1,4 +1,4 @@
-name: Run Tests
+name: Build and Test
 
 on:
     push:
@@ -6,15 +6,21 @@ on:
     pull_request:
         branches: [master]
 
+env:
+    CARGO_TERM_COLOR: always
+    SDL_AUDIODRIVER: "disk"
+
 jobs:
     build_and_test:
         name: Build and Test
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v2
-            - uses: actions-rs/toolchain@v1
-              with:
-                  toolchain: stable
-            - uses: actions-rs/cargo@v1
-              with:
-                  command: test
+            - name: Install ALSA
+              run: |
+                sudo apt-get update -y
+                sudo apt-get install -y libasound2-dev
+            - name: Build
+              run: cargo build
+            - name: Run Tests
+              run: cargo test
