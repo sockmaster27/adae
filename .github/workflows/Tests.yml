@@ -8,7 +8,6 @@ on:
 
 env:
     CARGO_TERM_COLOR: always
-    SDL_AUDIODRIVER: "disk"
 
 jobs:
     build_and_test:
@@ -18,7 +17,7 @@ jobs:
             - uses: actions/checkout@v3
             - name: Install ALSA
               run: sudo apt-get install -y libasound2-dev
-            - name: Build
-              run: cargo build
+            - name: Check with Clippy
+              run: cargo clippy --all-targets --all-features -- -D warnings
             - name: Run Tests
               run: cargo test
