@@ -1,6 +1,5 @@
 use core::sync::atomic::Ordering;
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{BuildStreamError, Device, SampleFormat, SampleRate, Stream, StreamConfig};
+use cpal::traits::{DeviceTrait, StreamTrait};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::error::Error;
@@ -12,6 +11,7 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
 mod components;
+pub mod config;
 mod info;
 mod processor;
 mod utils;
@@ -26,6 +26,8 @@ pub use self::components::timeline::{
     TimelineTrackState,
 };
 pub use self::components::{MixerTrackKey, MixerTrackState};
+use self::config::{Config, SampleFormat};
+use self::config::{SampleFormatFloat, SampleFormatInt, SampleFormatIntUnsigned};
 use self::processor::{processor, Processor, ProcessorInterface, ProcessorState};
 pub use components::MixerTrack;
 
@@ -47,8 +49,8 @@ pub struct Engine {
     audio_tracks: HashSet<AudioTrack>,
 }
 impl Engine {
-    pub fn new() -> Self {
-        let (engine, import_errors) = Engine::from_state(&EngineState::default());
+    pub fn empty() -> Self {
+        let (engine, import_errors) = Engine::new(&Config::default(), &EngineState::default());
         debug_assert!(
             import_errors.is_empty(),
             "Empty engine should not have import errors"
@@ -57,8 +59,9 @@ impl Engine {
         engine
     }
 
-    pub fn from_state(state: &EngineState) -> (Self, Vec<ImportError>) {
-        let (stopped, join_handle, processor_interface, import_errors) = Self::start_stream(state);
+    pub fn new(config: &Config, state: &EngineState) -> (Self, Vec<ImportError>) {
+        let (stopped, join_handle, processor_interface, import_errors) =
+            Self::start_stream(config, state);
 
         let engine = Engine {
             stopped,
@@ -76,19 +79,13 @@ impl Engine {
     ///
     /// Useful for integration testing.
     pub fn dummy() -> Self {
-        let (stopped, join_handle, processor_interface, import_errors) =
-            Self::start_dummy_stream(&EngineState::default());
+        let (engine, import_errors) = Engine::dummy_from_state(&EngineState::default());
         debug_assert!(
             import_errors.is_empty(),
             "Empty engine should not have import errors"
         );
 
-        Engine {
-            stopped,
-            join_handle: Some(join_handle),
-            processor_interface,
-            audio_tracks: HashSet::new(),
-        }
+        engine
     }
 
     /// Like [`Engine::dummy()`], but uses the given state instead of the default state.
@@ -107,6 +104,7 @@ impl Engine {
     }
 
     fn start_stream(
+        config: &Config,
         state: &EngineState,
     ) -> (
         Arc<AtomicBool>,
@@ -114,40 +112,48 @@ impl Engine {
         ProcessorInterface,
         Vec<ImportError>,
     ) {
-        let host = cpal::default_host();
-        let device = host
-            .default_output_device()
-            .expect("No ouput device available.");
-        let supported_config = device.default_output_config().unwrap();
-        let sample_format = supported_config.sample_format();
-        let config = StreamConfig::from(supported_config);
+        let device = config.output_device.clone();
+        let output_config = config.output_config.clone();
+        let stream_config = cpal::StreamConfig {
+            channels: output_config.channels,
+            sample_rate: cpal::SampleRate(output_config.sample_rate),
+            buffer_size: match output_config.buffer_size {
+                Some(size) => cpal::BufferSize::Fixed(size),
+                None => cpal::BufferSize::Default,
+            },
+        };
 
         // Since buffer sizes can vary from output to output,
         // `max_buffer_size` denotes how much space each intermediate buffer should be initialized with (per channel).
-        let max_buffer_size = match config.buffer_size {
+        let max_buffer_size = match output_config.buffer_size {
             // If usize is smaller than our buffersize we have bigger problems
-            cpal::BufferSize::Fixed(size) => size.try_into().expect("Buffer size overflows usize"),
-            cpal::BufferSize::Default => MAX_BUFFER_SIZE_DEFAULT,
+            Some(size) => size.try_into().expect("Buffer size overflows usize"),
+            None => MAX_BUFFER_SIZE_DEFAULT,
         };
         let (processor_interface, processor, import_errors) =
-            processor(&state.processor, &config, max_buffer_size);
+            processor(&state.processor, &stream_config, max_buffer_size);
 
         use SampleFormat::*;
-        let create_stream = match sample_format {
-            I8 => Self::create_stream::<i8>,
-            I16 => Self::create_stream::<i16>,
-            I32 => Self::create_stream::<i32>,
-            I64 => Self::create_stream::<i64>,
-
-            U8 => Self::create_stream::<u8>,
-            U16 => Self::create_stream::<u16>,
-            U32 => Self::create_stream::<u32>,
-            U64 => Self::create_stream::<u64>,
-
-            F32 => Self::create_stream::<f32>,
-            F64 => Self::create_stream::<f64>,
-
-            _ => panic!("Unsupported sample format: {:?}", sample_format),
+        use SampleFormatFloat::*;
+        use SampleFormatInt::*;
+        use SampleFormatIntUnsigned::*;
+        let create_stream = match output_config.sample_format.clone() {
+            Int(s) => match s {
+                I8 => Self::create_stream::<i8>,
+                I16 => Self::create_stream::<i16>,
+                I32 => Self::create_stream::<i32>,
+                I64 => Self::create_stream::<i64>,
+            },
+            IntUnsigned(s) => match s {
+                U8 => Self::create_stream::<u8>,
+                U16 => Self::create_stream::<u16>,
+                U32 => Self::create_stream::<u32>,
+                U64 => Self::create_stream::<u64>,
+            },
+            Float(s) => match s {
+                F32 => Self::create_stream::<f32>,
+                F64 => Self::create_stream::<f64>,
+            },
         };
 
         let stopped1 = Arc::new(AtomicBool::new(false));
@@ -155,14 +161,14 @@ impl Engine {
         let join_handle = thread::spawn(move || {
             // Since cpal::Stream doesn't implement the Send trait, it has to live in this thread.
 
-            let stream = create_stream(&device, &config, processor).unwrap();
+            let stream = create_stream(device.inner(), &stream_config, processor).unwrap();
             stream.play().unwrap();
 
             println!(
-                "Host: {} \nDevice: {} \nSample size: {} bytes",
-                host.id().name(),
-                device.name().unwrap(),
-                sample_format.sample_size()
+                "Host: {} \nDevice: {} \nSample format: {}",
+                device.host().name(),
+                device.name(),
+                output_config.sample_format
             );
 
             while !stopped2.load(Ordering::Acquire) {
@@ -189,9 +195,9 @@ impl Engine {
     ) {
         let (processor_interface, mut processor, import_errors) = processor(
             &state.processor,
-            &StreamConfig {
+            &cpal::StreamConfig {
                 channels: 2,
-                sample_rate: SampleRate(48_000),
+                sample_rate: cpal::SampleRate(48_000),
                 buffer_size: cpal::BufferSize::Default,
             },
             1024,
@@ -230,10 +236,10 @@ impl Engine {
 
     /// Create a cpal stream with the given sample type.
     fn create_stream<T: 'static + cpal::SizedSample + cpal::FromSample<Sample>>(
-        device: &Device,
-        config: &StreamConfig,
+        device: &cpal::Device,
+        config: &cpal::StreamConfig,
         mut processor: Processor,
-    ) -> Result<Stream, BuildStreamError> {
+    ) -> Result<cpal::Stream, cpal::BuildStreamError> {
         let stream = device.build_output_stream(
             config,
             move |data: &mut [T], _info| {
