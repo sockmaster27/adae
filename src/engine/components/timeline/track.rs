@@ -5,6 +5,7 @@ use std::cell::RefMut;
 use std::cmp::min;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
+use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -132,7 +133,7 @@ impl TimelineTrackProcessor {
                     }
                 }
 
-                cursor.get().map(|clip_cell| {
+                if let Some(clip_cell) = cursor.get() {
                     let mut clip = clip_cell.borrow_mut();
 
                     let pos_samples = self.position.load(Ordering::Relaxed);
@@ -143,7 +144,7 @@ impl TimelineTrackProcessor {
                         clip.jump_to(position, self.sample_rate, self.bpm_cents)
                             .unwrap();
                     }
-                });
+                }
             });
     }
 
@@ -184,7 +185,7 @@ impl TimelineTrackProcessor {
                                 },
                             );
                             buffer[progress * CHANNELS..progress * CHANNELS + output.len()]
-                                .copy_from_slice(&output);
+                                .copy_from_slice(output);
                             progress += output.len() / CHANNELS;
 
                             // Determine if we should move on to next clip
@@ -215,7 +216,7 @@ impl Debug for TimelineTrackProcessor {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Hash)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct TimelineTrackState {
     pub key: TimelineTrackKey,
     pub clips: Vec<AudioClipState>,
@@ -224,7 +225,7 @@ pub struct TimelineTrackState {
 impl PartialEq for TimelineTrackState {
     fn eq(&self, other: &Self) -> bool {
         let self_set: HashSet<_> = HashSet::from_iter(self.clips.iter());
-        let other_set = HashSet::from_iter(other.clips.iter());
+        let other_set: HashSet<_> = HashSet::from_iter(other.clips.iter());
 
         debug_assert_eq!(
             self_set.len(),
@@ -239,10 +240,15 @@ impl PartialEq for TimelineTrackState {
             other.clips
         );
 
-        self.key == other.key && self_set == other_set && self.output_track == other.output_track
+        self.key == other.key
     }
 }
 impl Eq for TimelineTrackState {}
+impl Hash for TimelineTrackState {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.key.hash(state);
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -271,9 +277,9 @@ mod tests {
         AC.with(|ac| {
             Box::new(TreeNode::new(AudioClipProcessor::new(
                 Timestamp::from_beat_units(start_beat_units),
-                length_beat_units.map(|l| Timestamp::from_beat_units(l)),
+                length_beat_units.map(Timestamp::from_beat_units),
                 0,
-                AudioClipReader::new(Arc::clone(&ac), max_buffer_size, 48_000),
+                AudioClipReader::new(Arc::clone(ac), max_buffer_size, 48_000),
             )))
         })
     }

@@ -121,7 +121,7 @@ impl AudioClipStore {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default, Hash)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct AudioClipStoreState {
     pub clips: Vec<(PathBuf, StoredAudioClipKey)>,
 }

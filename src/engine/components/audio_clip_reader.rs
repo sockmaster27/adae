@@ -117,7 +117,7 @@ impl AudioClipReader {
             return Err(JumpOutOfBounds);
         }
 
-        self.inner_position = pos_original.into();
+        self.inner_position = pos_original;
 
         let delay = self
             .resampler
@@ -145,7 +145,7 @@ impl AudioClipReader {
             .into_resampled(sample_rate, self.inner.sample_rate)
     }
     fn len_original(&self) -> OriginalSamples {
-        OriginalSamples(self.inner.len())
+        OriginalSamples(self.inner.length())
     }
 
     /// Scales `range` of each channel in `input` to down to two channels and writes it to `output`.
@@ -202,8 +202,8 @@ impl AudioClipReader {
         let input_range: Range<usize> = input_range.start.into()..input_range.end.into();
 
         debug_assert_eq!(input.len(), CHANNELS);
-        debug_assert!(input_range.clone().len() * CHANNELS <= output.len());
-        debug_assert!(input_range.clone().end <= input[0].len());
+        debug_assert!(input_range.len() * CHANNELS <= output.len());
+        debug_assert!(input_range.end <= input[0].len());
         debug_assert_eq!(input[0].len(), input[1].len());
 
         let input_left = &input[0][input_range.clone()];
@@ -229,7 +229,7 @@ impl AudioClipReader {
             .expect("output_resampling was called on AudioClipReader without resampler");
 
         // self.len_original() cannot be used, since self is already borrowed by resampler
-        let len_original = OriginalSamples(self.inner.len());
+        let len_original = OriginalSamples(self.inner.length());
 
         let resampled_length = len_original.into_resampled(sample_rate, self.inner.sample_rate);
         let remaining = resampled_length - self.position;
@@ -490,9 +490,9 @@ mod tests {
             assert_eq!(output.len(), 50 * CHANNELS);
 
             let ls = output[0];
-            assert!(0.999 <= ls && ls <= 1.001, "Sample: {}", ls);
+            assert!((0.999..=1.001).contains(&ls), "Sample: {}", ls);
             let rs = output[1];
-            assert!(-1.001 <= rs && rs <= -0.999, "Sample: {}", rs);
+            assert!((-1.001..=-0.999).contains(&rs), "Sample: {}", rs);
 
             let output = acr.output(&Info {
                 sample_rate: 48_000,
@@ -502,9 +502,9 @@ mod tests {
             assert_eq!(output.len(), 50 * CHANNELS);
 
             let ls = output[0];
-            assert!(-1.001 <= ls && ls <= -0.999, "First left sample: {}", ls);
+            assert!((-1.001..=-0.999).contains(&ls), "First left sample: {}", ls);
             let rs = output[1];
-            assert!(0.999 <= rs && rs <= 1.001, "First right sample: {}", rs);
+            assert!((0.999..=1.001).contains(&rs), "First right sample: {}", rs);
         }
     }
 
@@ -541,14 +541,14 @@ mod tests {
             assert_eq!(output.len(), 2050 * CHANNELS);
 
             let ls = output[0];
-            assert!(0.999 <= ls && ls <= 1.001, "Sample: {}", ls);
+            assert!((0.999..=1.001).contains(&ls), "Sample: {}", ls);
             let rs = output[1];
-            assert!(-1.001 <= rs && rs <= -0.999, "Sample: {}", rs);
+            assert!((-1.001..=-0.999).contains(&rs), "Sample: {}", rs);
 
             let ls = output[2050 * CHANNELS - 2];
-            assert!(-1.001 <= ls && ls <= -0.999, "Sample: {}", ls);
+            assert!((-1.001..=-0.999).contains(&ls), "Sample: {}", ls);
             let rs = output[2050 * CHANNELS - 1];
-            assert!(0.999 <= rs && rs <= 1.001);
+            assert!((0.999..=1.001).contains(&rs));
 
             let output = acr.output(&Info {
                 sample_rate: 48_000,
@@ -558,14 +558,14 @@ mod tests {
             assert_eq!(output.len(), 2050 * CHANNELS);
 
             let ls = output[0];
-            assert!(-1.001 <= ls && ls <= -0.999, "Sample: {}", ls);
+            assert!((-1.001..=-0.999).contains(&ls), "Sample: {}", ls);
             let rs = output[1];
-            assert!(0.999 <= rs && rs <= 1.001, "Sample: {}", rs);
+            assert!((0.999..=1.001).contains(&rs), "Sample: {}", rs);
 
             let ls = output[2050 * CHANNELS - 2];
-            assert!(0.999 <= ls && ls <= 1.001, "Sample: {}", ls);
+            assert!((0.999..=1.001).contains(&ls), "Sample: {}", ls);
             let rs = output[2050 * CHANNELS - 1];
-            assert!(-1.001 <= rs && rs <= -0.999, "Sample: {}", rs);
+            assert!((-1.001..=-0.999).contains(&rs), "Sample: {}", rs);
         }
     }
 
@@ -637,9 +637,9 @@ mod tests {
         assert_eq!(output.len(), 50 * CHANNELS);
 
         let ls = output[0];
-        assert!(0.999 <= ls && ls <= 1.001, "Sample: {}", ls);
+        assert!((0.999..=1.001).contains(&ls), "Sample: {}", ls);
         let rs = output[1];
-        assert!(-1.001 <= rs && rs <= -0.999, "Sample: {}", rs);
+        assert!((-1.001..=-0.999).contains(&rs), "Sample: {}", rs);
 
         acr.jump(0, 48_000).unwrap();
 
@@ -651,9 +651,9 @@ mod tests {
         assert_eq!(output.len(), 50 * CHANNELS);
 
         let ls = output[0];
-        assert!(0.999 <= ls && ls <= 1.001, "Sample: {}", ls);
+        assert!((0.999..=1.001).contains(&ls), "Sample: {}", ls);
         let rs = output[1];
-        assert!(-1.001 <= rs && rs <= -0.999, "Sample: {}", rs);
+        assert!((-1.001..=-0.999).contains(&rs), "Sample: {}", rs);
     }
 
     #[test]

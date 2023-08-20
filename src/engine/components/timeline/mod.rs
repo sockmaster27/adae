@@ -53,7 +53,7 @@ pub fn timeline(
     let position = Arc::new(AtomicU64::new(0));
 
     let (clip_store, import_errors) =
-        AudioClipStore::new(&store_state, sample_rate, max_buffer_size);
+        AudioClipStore::new(store_state, sample_rate, max_buffer_size);
 
     let tracks = HashMap::from_iter(track_states.iter().map(|state| {
         (
@@ -130,7 +130,7 @@ pub fn timeline(
             bpm_cents: *bpm_cents,
 
             playing: playing2,
-            position: position,
+            position,
             tracks: tracks_pushed,
 
             event_receiver,
@@ -259,7 +259,7 @@ impl Timeline {
         self.track_processors.push((key, DBox::new(timeline_track)));
         Ok(key)
     }
-    pub fn add_tracks<'a>(
+    pub fn add_tracks(
         &mut self,
         outputs: Vec<MixerTrackKey>,
     ) -> Result<Vec<TimelineTrackKey>, TimelineTrackOverflowError> {
@@ -495,7 +495,7 @@ impl TimelineProcessor {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Hash)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct TimelineState {
     pub bpm_cents: u16,
     pub audio_clip_store: AudioClipStoreState,

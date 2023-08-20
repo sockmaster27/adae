@@ -1,4 +1,4 @@
-///! Ringbuffer based channel, reallocated by the sender
+//! Ringbuffer based channel, reallocated by the sender
 use ringbuf::{HeapConsumer, HeapProducer, HeapRb};
 
 use super::{dropper::DBox, smallest_pow2};

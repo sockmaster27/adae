@@ -259,8 +259,8 @@ mod tests {
     fn in_use() {
         let mut kg = KeyGenerator::<u32>::new();
 
-        assert_eq!(kg.in_use(0), false);
+        assert!(!kg.in_use(0));
         kg.reserve(0).unwrap();
-        assert_eq!(kg.in_use(0), true);
+        assert!(kg.in_use(0));
     }
 }

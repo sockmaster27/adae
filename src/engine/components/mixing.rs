@@ -136,7 +136,7 @@ mod tests {
             }
         }
 
-        let mut signals2 = signals1.clone();
+        let mut signals2 = signals1;
 
         // Negate all
         for signal in &mut signals2 {

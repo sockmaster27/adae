@@ -123,7 +123,7 @@ fn reconstruct_audio_tracks() {
 
     let mut ss = Vec::new();
     for at in &ats {
-        ss.push(e.audio_track_state(&at).unwrap());
+        ss.push(e.audio_track_state(at).unwrap());
         e.delete_audio_track(at.clone()).unwrap();
     }
 
@@ -156,7 +156,7 @@ fn audio_clip_length() {
 
     let ac = e.stored_audio_clip(ck).unwrap();
 
-    assert_eq!(ac.len(), 1_322_978);
+    assert_eq!(ac.length(), 1_322_978);
 }
 
 #[test]

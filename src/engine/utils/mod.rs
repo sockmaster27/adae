@@ -77,8 +77,7 @@ pub fn rms(buffer: &[Sample]) -> [f32; CHANNELS] {
         }
     }
 
-    let result = averages.map(|x| (x as f32).sqrt());
-    result
+    averages.map(|x| (x as f32).sqrt())
 }
 
 /// Calculates simple moving average with an internal history buffer.
@@ -148,7 +147,7 @@ impl<T: Clone> CircularArray<T> {
         self.buffer.len()
     }
 
-    pub fn iter<'a>(&'a self) -> impl Iterator<Item = &T> + 'a {
+    pub fn iter(&self) -> impl Iterator<Item = &T> + '_ {
         let first_part = &self.buffer[self.position..];
         let last_part = &self.buffer[..self.position];
         first_part.iter().chain(last_part)

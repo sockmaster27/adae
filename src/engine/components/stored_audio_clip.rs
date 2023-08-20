@@ -36,9 +36,8 @@ impl StoredAudioClip {
         // Currently the entire clip just gets loaded into memory immediately.
         // I guess that could be improved.
 
-        let file = Box::new(
-            File::open(path).or_else(|_| Err(ImportError::FileNotFound(path.to_path_buf())))?,
-        );
+        let file =
+            Box::new(File::open(path).map_err(|_| ImportError::FileNotFound(path.to_path_buf()))?);
         let mss = MediaSourceStream::new(file, Default::default());
 
         let mut hint = Hint::new();
@@ -107,7 +106,7 @@ impl StoredAudioClip {
             data,
         })
     }
-    fn extend_from_buffer(data: &mut Vec<Vec<Sample>>, buffer_ref: AudioBufferRef) {
+    fn extend_from_buffer(data: &mut [Vec<Sample>], buffer_ref: AudioBufferRef) {
         // Bruh
         use AudioBufferRef as A;
         match buffer_ref {
@@ -123,7 +122,7 @@ impl StoredAudioClip {
             A::F64(buffer) => extend(data, buffer),
         };
 
-        fn extend<S>(data: &mut Vec<Vec<Sample>>, buffer: Cow<AudioBuffer<S>>)
+        fn extend<S>(data: &mut [Vec<Sample>], buffer: Cow<AudioBuffer<S>>)
         where
             S: SymphoniaSample + IntoSample<Sample>,
         {
@@ -142,7 +141,7 @@ impl StoredAudioClip {
     }
 
     /// Number of frames (samples per channel) in total
-    pub fn len(&self) -> usize {
+    pub fn length(&self) -> usize {
         // All channels should have the same length
         debug_assert!(self
             .data
@@ -159,7 +158,7 @@ impl Debug for StoredAudioClip {
             "AudioClip {{ sample_rate: {}, ..., channels(): {}, len(): {} }}",
             self.sample_rate,
             self.channels(),
-            self.len(),
+            self.length(),
         )
     }
 }
@@ -203,21 +202,21 @@ mod tests {
         assert_eq!(ac.channels(), 2);
         assert_eq!(ac.sample_rate, sample_rate);
 
-        assert_eq!(ac.len(), 1_322_978);
+        assert_eq!(ac.length(), 1_322_978);
 
         // These should be 1.0 and -1.0 exactly, but sample conversion skews that a little bit
         let first_left_sample = ac.data[0][0];
-        assert!(0.999 <= first_left_sample && first_left_sample <= 1.001);
+        assert!((0.999..=1.001).contains(&first_left_sample));
         let first_right_sample = ac.data[1][0];
-        assert!(-1.001 <= first_right_sample && first_right_sample <= -0.999);
+        assert!((-1.001..=-0.999).contains(&first_right_sample));
     }
     fn test_lossy(ac: StoredAudioClip, sample_rate: u32) {
         assert_eq!(ac.channels(), 2);
         assert_eq!(ac.sample_rate, sample_rate);
 
         // Lossy encoding might introduce some extra samples in the beginning and end
-        assert!(ac.len() >= 1_322_978);
-        assert!(ac.len() < 1_330_000);
+        assert!(ac.length() >= 1_322_978);
+        assert!(ac.length() < 1_330_000);
     }
 
     #[test]

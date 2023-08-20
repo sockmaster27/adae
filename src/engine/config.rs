@@ -48,13 +48,8 @@ impl Host {
     }
 
     pub fn from_name(name: &str) -> Option<Self> {
-        let hosts = Host::available();
-        for host in hosts {
-            if host.name() == name {
-                return Some(host);
-            }
-        }
-        None
+        let mut hosts = Host::available();
+        hosts.find(|host| host.name() == name)
     }
 
     pub fn name(&self) -> String {

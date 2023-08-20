@@ -67,7 +67,7 @@ impl Engine {
             stopped,
             join_handle: Some(join_handle),
             processor_interface,
-            audio_tracks: HashSet::from_iter(state.audio_tracks.iter().map(|track| track.clone())),
+            audio_tracks: HashSet::from_iter(state.audio_tracks.iter().cloned()),
         };
 
         (engine, import_errors)
@@ -97,7 +97,7 @@ impl Engine {
             stopped,
             join_handle: Some(join_handle),
             processor_interface,
-            audio_tracks: HashSet::from_iter(state.audio_tracks.iter().map(|track| track.clone())),
+            audio_tracks: HashSet::from_iter(state.audio_tracks.iter().cloned()),
         };
 
         (engine, import_errors)
@@ -228,10 +228,10 @@ impl Engine {
     /// Stops the stream if it is running.
     fn stop_stream(&mut self) {
         self.stopped.store(true, Ordering::Release);
-        self.join_handle.take().map(|h| {
+        if let Some(h) = self.join_handle.take() {
             h.thread().unpark();
             h.join().unwrap();
-        });
+        }
     }
 
     /// Create a cpal stream with the given sample type.
@@ -386,7 +386,7 @@ impl Engine {
         let mut track_keys = Vec::with_capacity(tracks.len());
         let mut timeline_keys = Vec::with_capacity(tracks.len());
         for track in &tracks {
-            self.audio_track_exists(&track)?;
+            self.audio_track_exists(track)?;
         }
         for track in tracks {
             self.audio_tracks.remove(&track);
@@ -536,11 +536,7 @@ impl Engine {
         EngineState {
             processor: self.processor_interface.state(),
 
-            audio_tracks: self
-                .audio_tracks
-                .iter()
-                .map(|audio_track| audio_track.clone())
-                .collect(),
+            audio_tracks: self.audio_tracks.iter().cloned().collect(),
         }
     }
 }
@@ -554,7 +550,7 @@ impl Drop for Engine {
 ///
 /// This can be used to recreate this exact state at a later time,
 /// suitable for saving to a file.
-#[derive(Serialize, Deserialize, Debug, Clone, Default, Hash)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct EngineState {
     processor: ProcessorState,
 

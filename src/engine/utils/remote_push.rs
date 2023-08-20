@@ -109,8 +109,10 @@ where
     Push(E),
     Remove(K),
 
-    // Vecs are boxed for conversion to Box<dyn Send>
+    // Slices are boxed for conversion to Box<dyn Send>
+    #[allow(clippy::box_collection)]
     PushMultiple(Box<Vec<E>>),
+    #[allow(clippy::box_collection)]
     RemoveMultiple(Box<Vec<K>>),
 
     Reallocated(Box<C>),
@@ -129,7 +131,7 @@ where
 
     event_sender: ringbuffer::Sender<Event<E, K, C>>,
 }
-impl<'a, E, K, C> RemotePusher<E, K, C>
+impl<E, K, C> RemotePusher<E, K, C>
 where
     E: Send + 'static,
     K: Send + 'static,

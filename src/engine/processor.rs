@@ -130,7 +130,7 @@ impl Processor {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default, Hash)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
 pub struct ProcessorState {
     mixer: MixerState,
     timeline: TimelineState,

@@ -249,7 +249,7 @@ impl Debug for MixerProcessor {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default, Hash)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct MixerState {
     pub tracks: Vec<MixerTrackState>,
     pub master: MixerTrackState,

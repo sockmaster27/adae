@@ -185,7 +185,7 @@ impl MixerTrackProcessor {
             Self::pan(panning, frame);
         }
 
-        self.meter.report(&buffer, sample_rate as f32);
+        self.meter.report(buffer, sample_rate as f32);
     }
 }
 

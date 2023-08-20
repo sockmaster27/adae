@@ -1,3 +1,6 @@
+//
+#![allow(clippy::inconsistent_digit_grouping)]
+
 #[cfg(feature = "custom_debug_output")]
 #[macro_use]
 mod custom_output;
