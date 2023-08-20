@@ -16,20 +16,20 @@ mod info;
 mod processor;
 mod utils;
 
-use self::components::audio_clip_store::{ImportError, InvalidAudioClipError};
-use self::components::mixer::{InvalidMixerTrackError, MixerTrackOverflowError};
-pub use self::components::stored_audio_clip::StoredAudioClip;
-pub use self::components::stored_audio_clip::StoredAudioClipKey;
-pub use self::components::timeline::Timestamp;
-pub use self::components::timeline::{
+use components::audio_clip_store::{ImportError, InvalidAudioClipError};
+use components::mixer::{InvalidMixerTrackError, MixerTrackOverflowError};
+pub use components::stored_audio_clip::StoredAudioClip;
+pub use components::stored_audio_clip::StoredAudioClipKey;
+pub use components::timeline::Timestamp;
+pub use components::timeline::{
     AddClipError, InvalidTimelineTrackError, TimelineTrackKey, TimelineTrackOverflowError,
     TimelineTrackState,
 };
-pub use self::components::{MixerTrackKey, MixerTrackState};
-use self::config::{Config, SampleFormat};
-use self::config::{SampleFormatFloat, SampleFormatInt, SampleFormatIntUnsigned};
-use self::processor::{processor, Processor, ProcessorInterface, ProcessorState};
 pub use components::MixerTrack;
+pub use components::{MixerTrackKey, MixerTrackState};
+use config::{Config, SampleFormat};
+use config::{SampleFormatFloat, SampleFormatInt, SampleFormatIntUnsigned};
+use processor::{processor, Processor, ProcessorInterface, ProcessorState};
 
 /// Internally used sample format.
 type Sample = f32;

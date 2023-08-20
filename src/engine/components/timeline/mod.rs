@@ -15,10 +15,6 @@ use std::{
     },
 };
 
-use self::{
-    audio_clip::{AudioClip, AudioClipKey, AudioClipProcessor},
-    track::TimelineTrack,
-};
 use super::{
     audio_clip_store::{AudioClipStore, AudioClipStoreState, ImportError, InvalidAudioClipError},
     stored_audio_clip::{StoredAudioClip, StoredAudioClipKey},
@@ -35,7 +31,9 @@ use crate::engine::{
     },
     Sample, CHANNELS,
 };
+use audio_clip::{AudioClip, AudioClipKey, AudioClipProcessor};
 pub use timestamp::Timestamp;
+use track::TimelineTrack;
 pub use track::{TimelineTrackKey, TimelineTrackProcessor, TimelineTrackState};
 
 pub fn timeline(
