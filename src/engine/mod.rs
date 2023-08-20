@@ -161,7 +161,7 @@ impl Engine {
         let join_handle = thread::spawn(move || {
             // Since cpal::Stream doesn't implement the Send trait, it has to live in this thread.
 
-            let stream = create_stream(device.inner(), &stream_config, processor).unwrap();
+            let stream = create_stream(&device.raw().unwrap(), &stream_config, processor).unwrap();
             stream.play().unwrap();
 
             println!(

@@ -19,7 +19,9 @@ impl Default for Config {
         let output_device = host
             .default_output_device()
             .expect("No output device available");
-        let output_config_range = output_device.default_config_range();
+        let output_config_range = output_device
+            .default_config_range()
+            .expect("No supported output config range available for default output device");
         let output_config = output_config_range.default_config();
         Self {
             output_device,
@@ -39,93 +41,97 @@ pub struct OutputConfig {
     pub buffer_size: Option<u32>,
 }
 
-pub struct Host(cpal::Host);
+#[derive(Debug, Clone)]
+pub struct Host {
+    name: String,
+}
 impl Host {
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
     pub fn available() -> impl Iterator<Item = Host> {
-        cpal::available_hosts()
-            .into_iter()
-            .map(|id| Host(cpal::host_from_id(id).unwrap()))
-    }
-
-    pub fn from_name(name: &str) -> Option<Self> {
-        let mut hosts = Host::available();
-        hosts.find(|host| host.name() == name)
-    }
-
-    pub fn name(&self) -> String {
-        self.0.id().name().into()
-    }
-
-    pub fn output_devices(&self) -> impl Iterator<Item = OutputDevice> + '_ {
-        self.0.output_devices().unwrap().map(|device| OutputDevice {
-            host: self.clone(),
-            device,
+        cpal::available_hosts().into_iter().map(|id| Host {
+            name: id.name().into(),
         })
+    }
+
+    pub fn output_devices(&self) -> Option<impl Iterator<Item = OutputDevice> + '_> {
+        Some(
+            self.raw()?
+                .output_devices()
+                .unwrap()
+                .map(|device| OutputDevice {
+                    host: self.clone(),
+                    name: device.name().unwrap(),
+                }),
+        )
     }
 
     pub fn default_output_device(&self) -> Option<OutputDevice> {
-        self.0.default_output_device().map(|device| OutputDevice {
-            host: self.clone(),
-            device,
-        })
+        self.raw()?
+            .default_output_device()
+            .map(|device| OutputDevice {
+                host: self.clone(),
+                name: device.name().unwrap(),
+            })
+    }
+
+    pub(crate) fn raw(&self) -> Option<cpal::Host> {
+        let id = cpal::available_hosts()
+            .into_iter()
+            .find(|host| host.name() == self.name)?;
+
+        cpal::host_from_id(id).ok()
     }
 }
 impl Default for Host {
     fn default() -> Self {
-        Self(cpal::default_host())
-    }
-}
-impl Debug for Host {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Host").field("name", &self.name()).finish()
-    }
-}
-impl Clone for Host {
-    fn clone(&self) -> Self {
-        Self(cpal::host_from_id(self.0.id()).unwrap())
+        Self {
+            name: cpal::default_host().id().name().into(),
+        }
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct OutputDevice {
     host: Host,
-    device: cpal::Device,
+    name: String,
 }
 impl OutputDevice {
-    pub(crate) fn inner(&self) -> &cpal::Device {
-        &self.device
-    }
-
     pub fn host(&self) -> &Host {
         &self.host
     }
 
-    pub fn name(&self) -> String {
-        self.device.name().unwrap()
+    pub fn name(&self) -> &str {
+        &self.name
     }
 
-    pub fn supported_config_rangess(&self) -> impl Iterator<Item = OutputConfigRange> {
-        self.device
-            .supported_output_configs()
-            .unwrap()
-            .map(|config| {
-                let channels = config.channels();
-                let sample_format = config.sample_format().into();
-                let sample_rate = config.min_sample_rate().0..=config.max_sample_rate().0;
-                let buffer_size = match config.buffer_size() {
-                    cpal::SupportedBufferSize::Range { min, max } => Some((*min)..=(*max)),
-                    cpal::SupportedBufferSize::Unknown => None,
-                };
-                OutputConfigRange {
-                    channels,
-                    sample_format,
-                    sample_rate,
-                    buffer_size,
-                }
-            })
+    pub fn supported_config_ranges(&self) -> Option<impl Iterator<Item = OutputConfigRange>> {
+        Some(
+            self.raw()?
+                .supported_output_configs()
+                .unwrap()
+                .map(|config| {
+                    let channels = config.channels();
+                    let sample_format = config.sample_format().into();
+                    let sample_rate = config.min_sample_rate().0..=config.max_sample_rate().0;
+                    let buffer_size = match config.buffer_size() {
+                        cpal::SupportedBufferSize::Range { min, max } => Some((*min)..=(*max)),
+                        cpal::SupportedBufferSize::Unknown => None,
+                    };
+                    OutputConfigRange {
+                        channels,
+                        sample_format,
+                        sample_rate,
+                        buffer_size,
+                    }
+                }),
+        )
     }
 
-    pub fn default_config_range(&self) -> OutputConfigRange {
-        let config = self.device.default_output_config().unwrap();
+    pub fn default_config_range(&self) -> Option<OutputConfigRange> {
+        let config = self.raw()?.default_output_config().unwrap();
         let channels = config.channels();
         let sample_format = config.sample_format().into();
         let sample_rate = config.sample_rate().0..=config.sample_rate().0;
@@ -140,29 +146,20 @@ impl OutputDevice {
 
             cpal::SupportedBufferSize::Range { min, max } => Some((*min)..=(*max)),
         };
-        OutputConfigRange {
+        Some(OutputConfigRange {
             channels,
             sample_format,
             sample_rate,
             buffer_size,
-        }
+        })
     }
-}
-impl Debug for OutputDevice {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("OutputDevice")
-            .field("host", &self.host)
-            .field("name", &self.name())
-            .finish()
-    }
-}
-impl Clone for OutputDevice {
-    fn clone(&self) -> Self {
-        // Just look for it again
+
+    pub(crate) fn raw(&self) -> Option<cpal::Device> {
         self.host
+            .raw()?
             .output_devices()
-            .find(|device| device.name() == self.name())
             .unwrap()
+            .find(|device| device.name().map(|name| name == self.name).unwrap_or(false))
     }
 }
 
