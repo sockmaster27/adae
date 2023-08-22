@@ -4,7 +4,7 @@ version = "0.1.0"
 license = "MIT"
 authors = ["Holger Dal Mogensen"]
 edition = "2021"
-exclude = [".gitignore", "tests", "test_files"]
+include = ["resources", "src", "Cargo.toml", "LICENSE","README.md"]
 publish = false
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
