@@ -165,12 +165,25 @@ impl OutputDevice {
 
 #[derive(Debug, Clone)]
 pub struct OutputConfigRange {
-    pub channels: u16,
-    pub sample_format: SampleFormat,
-    pub sample_rate: RangeInclusive<u32>,
-    pub buffer_size: Option<RangeInclusive<u32>>,
+    channels: u16,
+    sample_format: SampleFormat,
+    sample_rate: RangeInclusive<u32>,
+    buffer_size: Option<RangeInclusive<u32>>,
 }
 impl OutputConfigRange {
+    pub fn channels(&self) -> u16 {
+        self.channels
+    }
+    pub fn sample_format(&self) -> &SampleFormat {
+        &self.sample_format
+    }
+    pub fn sample_rate(&self) -> &RangeInclusive<u32> {
+        &self.sample_rate
+    }
+    pub fn buffer_size(&self) -> Option<&RangeInclusive<u32>> {
+        self.buffer_size.as_ref()
+    }
+
     pub fn default_config(&self) -> OutputConfig {
         let sample_rate =
             PREFERRED_SAMPLE_RATE.clamp(*self.sample_rate.start(), *self.sample_rate.end());
