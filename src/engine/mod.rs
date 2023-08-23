@@ -74,6 +74,22 @@ impl Engine {
         (engine, import_errors)
     }
 
+    /// Restart the engine with the given config.
+    pub fn set_config(&mut self, config: &Config) {
+        let state = self.state();
+
+        self.stop_stream();
+
+        let (stopped, join_handle, processor_interface, import_errors) =
+            Self::start_stream(config, &state);
+
+        debug_assert!(import_errors.is_empty());
+
+        self.stopped = stopped;
+        self.join_handle = Some(join_handle);
+        self.processor_interface = processor_interface;
+    }
+
     /// Creates an engine that simulates outputting without outputting to any audio device.
     ///
     /// Spins poll and output callback as fast as possible with a varying buffersize.  
