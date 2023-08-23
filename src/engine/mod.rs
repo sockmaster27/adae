@@ -3,6 +3,7 @@ use cpal::traits::{DeviceTrait, StreamTrait};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::error::Error;
+use std::fmt::Debug;
 use std::fmt::Display;
 use std::iter::zip;
 use std::path::Path;
@@ -195,7 +196,7 @@ impl Engine {
 
             // Just to be explicit
             drop(stream);
-            println!("Stream terminated.");
+            println!("Stream terminated");
         });
 
         (stopped1, join_handle, processor_interface, import_errors)
@@ -247,7 +248,14 @@ impl Engine {
         self.stopped.store(true, Ordering::Release);
         if let Some(h) = self.join_handle.take() {
             h.thread().unpark();
-            h.join().unwrap();
+            let r = h.join();
+            if let Err(e) = r {
+                if let Ok(d) = e.downcast::<String>() {
+                    panic!("Failed to terminate stream: {d:?}");
+                } else {
+                    panic!("Failed to terminate stream");
+                }
+            }
         }
     }
 
@@ -638,8 +646,8 @@ pub enum AudioTrackOverflowError {
 impl Display for AudioTrackOverflowError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Tracks(e) => e.fmt(f),
-            Self::TimelineTracks(e) => e.fmt(f),
+            Self::Tracks(e) => Display::fmt(&e, f),
+            Self::TimelineTracks(e) => Display::fmt(&e, f),
         }
     }
 }
@@ -653,8 +661,8 @@ pub enum InvalidAudioTrackError {
 impl Display for InvalidAudioTrackError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Tracks(e) => e.fmt(f),
-            Self::TimelineTracks(e) => e.fmt(f),
+            Self::Tracks(e) => Display::fmt(&e, f),
+            Self::TimelineTracks(e) => Display::fmt(&e, f),
         }
     }
 }
