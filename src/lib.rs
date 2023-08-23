@@ -27,6 +27,7 @@ mod wav_recorder;
 
 mod engine;
 pub use engine::{
-    config, inverse_meter_scale, meter_scale, AudioTrack, AudioTrackState, Engine, EngineState,
-    MixerTrack, MixerTrackKey, StoredAudioClip, StoredAudioClipKey, TimelineTrackKey, Timestamp,
+    config, error, inverse_meter_scale, meter_scale, AudioTrack, AudioTrackState, Engine,
+    EngineState, MixerTrack, MixerTrackKey, StoredAudioClip, StoredAudioClipKey, TimelineTrackKey,
+    Timestamp,
 };

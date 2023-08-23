@@ -12,12 +12,13 @@ use std::thread::{self, JoinHandle};
 
 mod components;
 pub mod config;
+pub mod error;
 mod info;
 mod processor;
 mod utils;
 
-use components::audio_clip_store::{ImportError, InvalidAudioClipError};
-use components::mixer::{InvalidMixerTrackError, MixerTrackOverflowError};
+pub use components::audio_clip_store::{ImportError, InvalidAudioClipError};
+pub use components::mixer::{InvalidMixerTrackError, MixerTrackOverflowError};
 pub use components::stored_audio_clip::StoredAudioClip;
 pub use components::stored_audio_clip::StoredAudioClipKey;
 pub use components::timeline::Timestamp;
