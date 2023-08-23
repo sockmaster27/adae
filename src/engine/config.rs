@@ -1,3 +1,4 @@
+use std::error::Error;
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::ops::RangeInclusive;
@@ -18,6 +19,7 @@ impl Default for Config {
         let host = Host::default();
         let output_device = host
             .default_output_device()
+            .unwrap()
             .expect("No output device available");
         let output_config_range = output_device
             .default_config_range()
@@ -56,33 +58,43 @@ impl Host {
         })
     }
 
-    pub fn output_devices(&self) -> Option<impl Iterator<Item = OutputDevice> + '_> {
-        Some(
-            self.raw()?
-                .output_devices()
-                .unwrap()
-                .map(|device| OutputDevice {
-                    host: self.clone(),
-                    name: device.name().unwrap(),
-                }),
-        )
+    pub fn output_devices(
+        &self,
+    ) -> Result<impl Iterator<Item = OutputDevice> + '_, HostUnavailableError> {
+        Ok(self
+            .raw()?
+            .output_devices()
+            .unwrap()
+            .map(|device| OutputDevice {
+                host: self.clone(),
+                name: device.name().unwrap(),
+            }))
     }
 
-    pub fn default_output_device(&self) -> Option<OutputDevice> {
-        self.raw()?
+    pub fn default_output_device(&self) -> Result<Option<OutputDevice>, HostUnavailableError> {
+        Ok(self
+            .raw()?
             .default_output_device()
             .map(|device| OutputDevice {
                 host: self.clone(),
                 name: device.name().unwrap(),
-            })
+            }))
     }
 
-    pub(crate) fn raw(&self) -> Option<cpal::Host> {
+    pub(crate) fn raw(&self) -> Result<cpal::Host, HostUnavailableError> {
         let id = cpal::available_hosts()
             .into_iter()
-            .find(|host| host.name() == self.name)?;
+            .find(|host| host.name() == self.name)
+            .ok_or_else(|| HostUnavailableError {
+                name: self.name.clone(),
+            })?;
 
-        cpal::host_from_id(id).ok()
+        match cpal::host_from_id(id) {
+            Ok(host) => Ok(host),
+            Err(cpal::HostUnavailable) => Err(HostUnavailableError {
+                name: self.name.clone(),
+            }),
+        }
     }
 }
 impl Default for Host {
@@ -107,30 +119,31 @@ impl OutputDevice {
         &self.name
     }
 
-    pub fn supported_config_ranges(&self) -> Option<impl Iterator<Item = OutputConfigRange>> {
-        Some(
-            self.raw()?
-                .supported_output_configs()
-                .unwrap()
-                .map(|config| {
-                    let channels = config.channels();
-                    let sample_format = config.sample_format().into();
-                    let sample_rate = config.min_sample_rate().0..=config.max_sample_rate().0;
-                    let buffer_size = match config.buffer_size() {
-                        cpal::SupportedBufferSize::Range { min, max } => Some((*min)..=(*max)),
-                        cpal::SupportedBufferSize::Unknown => None,
-                    };
-                    OutputConfigRange {
-                        channels,
-                        sample_format,
-                        sample_rate,
-                        buffer_size,
-                    }
-                }),
-        )
+    pub fn supported_config_ranges(
+        &self,
+    ) -> Result<impl Iterator<Item = OutputConfigRange>, DeviceUnavailableError> {
+        Ok(self
+            .raw()?
+            .supported_output_configs()
+            .unwrap()
+            .map(|config| {
+                let channels = config.channels();
+                let sample_format = config.sample_format().into();
+                let sample_rate = config.min_sample_rate().0..=config.max_sample_rate().0;
+                let buffer_size = match config.buffer_size() {
+                    cpal::SupportedBufferSize::Range { min, max } => Some((*min)..=(*max)),
+                    cpal::SupportedBufferSize::Unknown => None,
+                };
+                OutputConfigRange {
+                    channels,
+                    sample_format,
+                    sample_rate,
+                    buffer_size,
+                }
+            }))
     }
 
-    pub fn default_config_range(&self) -> Option<OutputConfigRange> {
+    pub fn default_config_range(&self) -> Result<OutputConfigRange, DeviceUnavailableError> {
         let config = self.raw()?.default_output_config().unwrap();
         let channels = config.channels();
         let sample_format = config.sample_format().into();
@@ -146,7 +159,7 @@ impl OutputDevice {
 
             cpal::SupportedBufferSize::Range { min, max } => Some((*min)..=(*max)),
         };
-        Some(OutputConfigRange {
+        Ok(OutputConfigRange {
             channels,
             sample_format,
             sample_rate,
@@ -154,12 +167,16 @@ impl OutputDevice {
         })
     }
 
-    pub(crate) fn raw(&self) -> Option<cpal::Device> {
-        self.host
-            .raw()?
-            .output_devices()
+    pub(crate) fn raw(&self) -> Result<cpal::Device, DeviceUnavailableError> {
+        let host = self
+            .host
+            .raw()
+            .map_err(|e| DeviceUnavailableError::HostUnavailable(e.name))?;
+
+        host.output_devices()
             .unwrap()
             .find(|device| device.name().map(|name| name == self.name).unwrap_or(false))
+            .ok_or_else(|| DeviceUnavailableError::DeviceUnavailable(self.name.clone()))
     }
 }
 
@@ -266,3 +283,33 @@ impl From<cpal::SampleFormat> for SampleFormat {
         }
     }
 }
+
+#[derive(Debug, Clone)]
+pub struct HostUnavailableError {
+    name: String,
+}
+impl Display for HostUnavailableError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Host '{}' is not available", self.name)
+    }
+}
+impl Error for HostUnavailableError {}
+
+#[derive(Debug, Clone)]
+pub enum DeviceUnavailableError {
+    HostUnavailable(String),
+    DeviceUnavailable(String),
+}
+impl Display for DeviceUnavailableError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DeviceUnavailableError::HostUnavailable(name) => {
+                write!(f, "Host '{}' is not available", name)
+            }
+            DeviceUnavailableError::DeviceUnavailable(name) => {
+                write!(f, "Device '{}' is not available", name)
+            }
+        }
+    }
+}
+impl Error for DeviceUnavailableError {}
