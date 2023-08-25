@@ -194,7 +194,6 @@ impl AudioMeterProcessor {
             if peak >= long_peak || *since_last_peak > HOLD {
                 *since_last_peak = 0.0;
                 a_long_peak.store(peak, Ordering::Relaxed);
-            } else {
             }
         }
     }

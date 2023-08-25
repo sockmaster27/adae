@@ -25,8 +25,12 @@ macro_rules! no_heap {
     {$body:block} => {{
         let _g = crate::test_alloc::HeapGuard::new(false);
         let _r = $body;
-        drop(_g);
-        _r
+
+        #[allow(unreachable_code)]
+        {
+            drop(_g);
+            _r
+        }
     }}
 }
 
@@ -34,8 +38,12 @@ macro_rules! allow_heap {
     {$body:block} => {{
         let _g = crate::test_alloc::HeapGuard::new(true);
         let _r = $body;
-        drop(_g);
-        _r
+
+        #[allow(unreachable_code)]
+        {
+            drop(_g);
+            _r
+        }
     }}
 }
 
@@ -194,7 +202,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn no_double_panic() {
-        #[allow(unreachable_code)]
+        #[allow(clippy::diverging_sub_expression)]
         {
             no_heap! {{
                 panic!("123")
