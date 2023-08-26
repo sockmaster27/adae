@@ -8,8 +8,10 @@ use std::fmt::Display;
 use std::iter::zip;
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
+use std::sync::mpsc::sync_channel;
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
+use std::time::Duration;
 
 mod components;
 pub mod config;
@@ -42,6 +44,13 @@ const MAX_BUFFER_SIZE_DEFAULT: usize = 1056;
 
 // CHANNELS and MAX_BUFFER_SIZE_DEFAULT are both usize, because they are mostly used for initializing and indexing Vec's.
 
+struct StartedStream {
+    stopped_flag: Arc<AtomicBool>,
+    join_handle: JoinHandle<()>,
+    processor_interface: ProcessorInterface,
+    import_errors: Vec<ImportError>,
+}
+
 pub struct Engine {
     /// Signal whether the stream should stop.
     stopped: Arc<AtomicBool>,
@@ -52,7 +61,8 @@ pub struct Engine {
 }
 impl Engine {
     pub fn empty() -> Self {
-        let (engine, import_errors) = Engine::new(&Config::default(), &EngineState::default());
+        let (engine, import_errors) = Engine::new(&Config::default(), &EngineState::default())
+            .expect("Failed to create empty engine");
         debug_assert!(
             import_errors.is_empty(),
             "Empty engine should not have import errors"
@@ -61,34 +71,47 @@ impl Engine {
         engine
     }
 
-    pub fn new(config: &Config, state: &EngineState) -> (Self, Vec<ImportError>) {
-        let (stopped, join_handle, processor_interface, import_errors) =
-            Self::start_stream(config, state);
+    pub fn new(
+        config: &Config,
+        state: &EngineState,
+    ) -> Result<(Self, Vec<ImportError>), InvalidConfigError> {
+        let StartedStream {
+            stopped_flag,
+            join_handle,
+            processor_interface,
+            import_errors,
+        } = Self::start_stream(config, state)?;
 
         let engine = Engine {
-            stopped,
+            stopped: stopped_flag,
             join_handle: Some(join_handle),
             processor_interface,
             audio_tracks: HashSet::from_iter(state.audio_tracks.iter().cloned()),
         };
 
-        (engine, import_errors)
+        Ok((engine, import_errors))
     }
 
     /// Restart the engine with the given config.
-    pub fn set_config(&mut self, config: &Config) {
+    pub fn set_config(&mut self, config: &Config) -> Result<(), InvalidConfigError> {
         let state = self.state();
 
         self.stop_stream();
 
-        let (stopped, join_handle, processor_interface, import_errors) =
-            Self::start_stream(config, &state);
+        let StartedStream {
+            stopped_flag,
+            join_handle,
+            processor_interface,
+            import_errors,
+        } = Self::start_stream(config, &state)?;
 
         debug_assert!(import_errors.is_empty());
 
-        self.stopped = stopped;
+        self.stopped = stopped_flag;
         self.join_handle = Some(join_handle);
         self.processor_interface = processor_interface;
+
+        Ok(())
     }
 
     /// Creates an engine that simulates outputting without outputting to any audio device.
@@ -121,15 +144,13 @@ impl Engine {
         (engine, import_errors)
     }
 
+    /// Starts a stream with the given config and state.
+    ///
+    /// Returns a the stop flag, the join handle, the processor interface and a list of import errors.
     fn start_stream(
         config: &Config,
         state: &EngineState,
-    ) -> (
-        Arc<AtomicBool>,
-        JoinHandle<()>,
-        ProcessorInterface,
-        Vec<ImportError>,
-    ) {
+    ) -> Result<StartedStream, InvalidConfigError> {
         let device = config.output_device.clone();
         let output_config = config.output_config.clone();
         let stream_config = cpal::StreamConfig {
@@ -174,19 +195,37 @@ impl Engine {
             },
         };
 
+        let (tx, rx) = sync_channel(1);
+
         let stopped1 = Arc::new(AtomicBool::new(false));
         let stopped2 = Arc::clone(&stopped1);
         let join_handle = thread::spawn(move || {
             // Since cpal::Stream doesn't implement the Send trait, it has to live in this thread.
 
-            let stream = create_stream(&device.raw().unwrap(), &stream_config, processor).unwrap();
+            let res = create_stream(&device.raw().unwrap(), &stream_config, processor);
+
+            let stream = match res {
+                Ok(stream) => {
+                    tx.send(None).unwrap();
+                    stream
+                }
+                Err(e) => {
+                    tx.send(Some(e)).unwrap();
+                    return;
+                }
+            };
+
             stream.play().unwrap();
 
             println!(
-                "Host: {} \nDevice: {} \nSample format: {}",
+                "Host: {}\nDevice: {}\nChannels: {}\nSample format: {}\nSample rate: {}\nBuffer size: {}",
                 device.host().name(),
                 device.name(),
-                output_config.sample_format
+                output_config.channels,
+                output_config.sample_format,
+                output_config.sample_rate,
+                output_config.buffer_size.map(|s| s.to_string()).unwrap_or("Default".into()),
+
             );
 
             while !stopped2.load(Ordering::Acquire) {
@@ -199,7 +238,19 @@ impl Engine {
             println!("Stream terminated");
         });
 
-        (stopped1, join_handle, processor_interface, import_errors)
+        let res = rx
+            .recv_timeout(Duration::from_secs(30))
+            .expect("Attempt to start stream timed out");
+
+        match res {
+            Some(e) => Err(e),
+            None => Ok(StartedStream {
+                stopped_flag: stopped1,
+                join_handle,
+                processor_interface,
+                import_errors,
+            }),
+        }
     }
 
     /// Starts a stream that simulates outputting without outputting to any audio device.
@@ -264,20 +315,28 @@ impl Engine {
         device: &cpal::Device,
         config: &cpal::StreamConfig,
         mut processor: Processor,
-    ) -> Result<cpal::Stream, cpal::BuildStreamError> {
-        let stream = device.build_output_stream(
-            config,
-            move |data: &mut [T], _info| {
-                no_heap! {{
-                    processor.poll();
-                    processor.output(data);
-                }}
-            },
-            |err| panic!("{}", err),
-            None,
-        )?;
+    ) -> Result<cpal::Stream, InvalidConfigError> {
+        device
+            .build_output_stream(
+                config,
+                move |data: &mut [T], _info| {
+                    no_heap! {{
+                        processor.poll();
+                        processor.output(data);
+                    }}
+                },
+                |err| panic!("{}", err),
+                None,
+            )
+            .map_err(|e| match e {
+                cpal::BuildStreamError::DeviceNotAvailable => {
+                    InvalidConfigError::DeviceNotAvailable
+                }
+                cpal::BuildStreamError::StreamConfigNotSupported => InvalidConfigError::Other,
+                cpal::BuildStreamError::InvalidArgument => InvalidConfigError::Other,
 
-        Ok(stream)
+                e => panic!("Stream could not be created: {e}"),
+            })
     }
 
     pub fn play(&mut self) {
@@ -636,6 +695,23 @@ pub fn meter_scale(sample: Sample) -> Sample {
 /// `2 ⋅ value³`
 pub fn inverse_meter_scale(value: Sample) -> Sample {
     value.powi(3) * 2.0
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum InvalidConfigError {
+    DeviceNotAvailable,
+    Other,
+}
+impl Display for InvalidConfigError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            InvalidConfigError::DeviceNotAvailable => write!(
+                f,
+                "Engine received unsupported conifguration: Device is not available"
+            ),
+            InvalidConfigError::Other => write!(f, "Engine received unsupported conifguration"),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
