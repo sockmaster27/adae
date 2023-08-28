@@ -27,13 +27,15 @@ mod wav_recorder;
 
 mod engine;
 pub use engine::{
-    error, inverse_meter_scale, meter_scale, AudioTrack, AudioTrackState, Engine, EngineState,
-    MixerTrack, MixerTrackKey, StoredAudioClip, StoredAudioClipKey, TimelineTrackKey, Timestamp,
+    error, inverse_meter_scale, meter_scale, AudioClipKey, AudioTrack, AudioTrackState, Engine,
+    EngineState, MixerTrack, MixerTrackKey, StoredAudioClip, StoredAudioClipKey, TimelineTrackKey,
+    Timestamp,
 };
 
 pub mod config {
     use super::engine::config;
 
+    // Expose everything except the error types, which are instead placed in the error module.
     pub use config::{
         Config, Host, OutputConfig, OutputConfigRange, OutputDevice, SampleFormat,
         SampleFormatFloat, SampleFormatInt, SampleFormatIntUnsigned,

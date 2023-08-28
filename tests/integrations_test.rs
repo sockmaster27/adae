@@ -165,7 +165,7 @@ fn add_audio_clip() {
     let at = e.add_audio_track().unwrap();
 
     let ck = import_ac(&mut e);
-    let r = e.add_clip(at.timeline_track_key(), ck, Timestamp::from_beats(0), None);
+    let r = e.add_audio_clip(at.timeline_track_key(), ck, Timestamp::from_beats(0), None);
 
     assert!(r.is_ok());
 }

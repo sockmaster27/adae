@@ -26,7 +26,7 @@ fn play_around() {
         )))
         .unwrap();
     engine
-        .add_clip(
+        .add_audio_clip(
             track_keys[0].timeline_track_key(),
             clip_key,
             Timestamp::from_beats(2),
@@ -34,7 +34,7 @@ fn play_around() {
         )
         .unwrap();
     engine
-        .add_clip(
+        .add_audio_clip(
             track_keys[1].timeline_track_key(),
             clip_key,
             Timestamp::from_beats(1),
@@ -49,7 +49,7 @@ fn play_around() {
 
     // Insert clip before playhead while playing
     engine
-        .add_clip(
+        .add_audio_clip(
             track_keys[2].timeline_track_key(),
             clip_key,
             Timestamp::from_beats(0),

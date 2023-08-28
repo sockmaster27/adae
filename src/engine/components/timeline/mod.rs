@@ -31,7 +31,8 @@ use crate::engine::{
     },
     Sample, CHANNELS,
 };
-use audio_clip::{AudioClip, AudioClipKey, AudioClipProcessor};
+pub use audio_clip::AudioClipKey;
+use audio_clip::{AudioClip, AudioClipProcessor};
 pub use timestamp::Timestamp;
 use track::TimelineTrack;
 pub use track::{TimelineTrackKey, TimelineTrackProcessor, TimelineTrackState};
@@ -191,13 +192,13 @@ impl Timeline {
         self.clip_store.get(key)
     }
 
-    pub fn add_clip(
+    pub fn add_audio_clip(
         &mut self,
         track_key: TimelineTrackKey,
         stored_clip_key: StoredAudioClipKey,
         start: Timestamp,
         length: Option<Timestamp>,
-    ) -> Result<(), AddClipError> {
+    ) -> Result<AudioClipKey, AddClipError> {
         if !self.key_in_use(track_key) {
             return Err(AddClipError::InvalidTimelineTrack(track_key));
         }
@@ -239,7 +240,7 @@ impl Timeline {
             clip: Box::new(TreeNode::new(audio_clip2)),
         });
 
-        Ok(())
+        Ok(clip_key)
     }
 
     pub fn add_track(
@@ -612,7 +613,7 @@ mod tests {
             .import_audio_clip(&test_file_path("44100 16-bit.wav"))
             .unwrap();
         let tk = tl.add_track(0).unwrap();
-        tl.add_clip(tk, ck, Timestamp::from_beat_units(0), None)
+        tl.add_audio_clip(tk, ck, Timestamp::from_beat_units(0), None)
             .unwrap();
 
         no_heap! {{
@@ -630,16 +631,16 @@ mod tests {
             .unwrap();
         let tk = tl.add_track(0).unwrap();
 
-        tl.add_clip(
+        tl.add_audio_clip(
             tk,
             ck,
             Timestamp::from_beat_units(42),
             Some(Timestamp::from_beat_units(8)),
         )
         .unwrap();
-        tl.add_clip(tk, ck, Timestamp::from_beat_units(50), None)
+        tl.add_audio_clip(tk, ck, Timestamp::from_beat_units(50), None)
             .unwrap();
-        let res = tl.add_clip(
+        let res = tl.add_audio_clip(
             tk,
             ck,
             Timestamp::from_beat_units(0),
