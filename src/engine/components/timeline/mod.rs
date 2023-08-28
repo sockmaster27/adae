@@ -69,7 +69,7 @@ pub fn timeline(
                             start: state.start,
                             length: state.length,
                             start_offset: state.start_offset,
-                            inner: clip_store
+                            reader: clip_store
                                 .reader(state.inner)
                                 .expect("An invalid audio clip was referenced"),
                         },
@@ -215,7 +215,7 @@ impl Timeline {
             start,
             length,
             start_offset,
-            inner: reader1,
+            reader: reader1,
         };
 
         let reader2 = self

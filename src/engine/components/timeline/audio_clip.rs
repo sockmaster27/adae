@@ -27,7 +27,7 @@ pub struct AudioClip {
     /// Relevant if the start has been trimmed off.
     pub start_offset: usize,
 
-    pub inner: AudioClipReader,
+    pub reader: AudioClipReader,
 }
 impl AudioClip {
     pub fn end(&self, sample_rate: u32, bpm_cents: u16) -> Timestamp {
@@ -36,7 +36,7 @@ impl AudioClip {
         } else {
             self.start
                 + Timestamp::from_samples_ceil(
-                    self.inner.len(sample_rate) as u64,
+                    self.reader.len(sample_rate) as u64,
                     sample_rate,
                     bpm_cents,
                 )
@@ -59,7 +59,7 @@ impl AudioClip {
             start_offset: self.start_offset,
             start: self.start,
             length: self.length,
-            inner: self.inner.key(),
+            inner: self.reader.key(),
         }
     }
 }
@@ -75,7 +75,7 @@ pub struct AudioClipProcessor {
     /// Relevant if the start has been trimmed off.
     pub start_offset: usize,
 
-    inner: AudioClipReader,
+    reader: AudioClipReader,
 }
 impl AudioClipProcessor {
     pub fn new(
@@ -88,7 +88,7 @@ impl AudioClipProcessor {
             start,
             length,
             start_offset,
-            inner: reader,
+            reader,
         }
     }
 
@@ -98,7 +98,7 @@ impl AudioClipProcessor {
         } else {
             self.start
                 + Timestamp::from_samples_ceil(
-                    self.inner.len(sample_rate) as u64,
+                    self.reader.len(sample_rate) as u64,
                     sample_rate,
                     bpm_cents,
                 )
@@ -107,7 +107,7 @@ impl AudioClipProcessor {
 
     /// Resets the position to the start of the clip.
     pub fn reset(&mut self, sample_rate: u32) {
-        self.inner.jump(self.start_offset, sample_rate).unwrap();
+        self.reader.jump(self.start_offset, sample_rate).unwrap();
     }
 
     /// Jumps to the given position relative to the start of the timeline.
@@ -124,7 +124,7 @@ impl AudioClipProcessor {
             return Err(JumpOutOfBounds);
         }
 
-        self.inner.jump(
+        self.reader.jump(
             pos_samples - (start_samples + self.start_offset),
             sample_rate,
         )?;
@@ -134,7 +134,7 @@ impl AudioClipProcessor {
 
     fn length_samples(&self, sample_rate: u32, bpm_cents: u16) -> usize {
         match self.length {
-            None => self.inner.len(sample_rate),
+            None => self.reader.len(sample_rate),
             Some(length) => length.samples(sample_rate, bpm_cents) as usize,
         }
     }
@@ -148,11 +148,11 @@ impl AudioClipProcessor {
         } = *info;
 
         let length = self.length_samples(sample_rate, bpm_cents);
-        let pos = self.inner.position();
+        let pos = self.reader.position();
         let remaining = length - min(pos + self.start_offset, length);
         let capped_buffer_size = min(buffer_size, remaining);
 
-        self.inner.output(&Info {
+        self.reader.output(&Info {
             sample_rate,
             buffer_size: capped_buffer_size,
         })
