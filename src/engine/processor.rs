@@ -50,7 +50,7 @@ pub fn processor(
 }
 
 /// The interface to the processor, living outside of the audio thread.
-/// Should somehwat mirror the [`Processor`].
+/// Should somewhat mirror the [`Processor`].
 pub struct ProcessorInterface {
     pub mixer: Mixer,
     pub timeline: Timeline,
