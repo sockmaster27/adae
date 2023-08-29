@@ -31,8 +31,8 @@ use crate::engine::{
     },
     Sample, CHANNELS,
 };
-pub use audio_clip::AudioClipKey;
-use audio_clip::{AudioClip, AudioClipProcessor};
+use audio_clip::AudioClipProcessor;
+pub use audio_clip::{AudioClip, AudioClipKey};
 pub use timestamp::Timestamp;
 use track::TimelineTrack;
 pub use track::{TimelineTrackKey, TimelineTrackProcessor, TimelineTrackState};
@@ -241,6 +241,18 @@ impl Timeline {
         });
 
         Ok(clip_key)
+    }
+
+    pub fn audio_clip(
+        &self,
+        track_key: TimelineTrackKey,
+        clip_key: AudioClipKey,
+    ) -> Result<&AudioClip, InvalidAudioClipError> {
+        let track = self.tracks.get(&track_key).unwrap();
+        track
+            .clips
+            .get(&clip_key)
+            .ok_or(InvalidAudioClipError { key: clip_key })
     }
 
     pub fn add_track(

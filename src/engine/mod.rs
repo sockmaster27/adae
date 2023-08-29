@@ -20,11 +20,12 @@ mod info;
 mod processor;
 mod utils;
 
-pub use self::components::timeline::AudioClipKey;
 pub use components::audio_clip_store::{ImportError, InvalidAudioClipError};
 pub use components::mixer::{InvalidMixerTrackError, MixerTrackOverflowError};
 pub use components::stored_audio_clip::StoredAudioClip;
 pub use components::stored_audio_clip::StoredAudioClipKey;
+pub use components::timeline::AudioClip;
+pub use components::timeline::AudioClipKey;
 pub use components::timeline::Timestamp;
 pub use components::timeline::{
     AddClipError, InvalidTimelineTrackError, TimelineTrackKey, TimelineTrackOverflowError,
@@ -375,6 +376,16 @@ impl Engine {
             start,
             length,
         )
+    }
+
+    pub fn audio_clip(
+        &self,
+        timeline_track_key: TimelineTrackKey,
+        audio_clip_key: AudioClipKey,
+    ) -> Result<&AudioClip, InvalidAudioClipError> {
+        self.processor_interface
+            .timeline
+            .audio_clip(timeline_track_key, audio_clip_key)
     }
 
     pub fn master(&self) -> &MixerTrack {
