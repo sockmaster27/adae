@@ -53,6 +53,10 @@ impl AudioClip {
         start1 <= start2 && start2 < end1 || start2 <= start1 && start1 < end2
     }
 
+    pub fn stored_clip(&self) -> StoredAudioClipKey {
+        self.reader.key()
+    }
+
     pub fn state(&self) -> AudioClipState {
         AudioClipState {
             key: self.key,
