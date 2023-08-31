@@ -146,6 +146,10 @@ enum Event {
         track_key: MixerTrackKey,
         clip: Box<TreeNode<AudioClipProcessor>>,
     },
+    DeleteClip {
+        track_key: MixerTrackKey,
+        clip_start: Timestamp,
+    },
 }
 
 pub struct Timeline {
@@ -253,6 +257,29 @@ impl Timeline {
             .clips
             .get(&clip_key)
             .ok_or(InvalidAudioClipError { key: clip_key })
+    }
+
+    pub fn delete_audio_clip(
+        &mut self,
+        track_key: TimelineTrackKey,
+        clip_key: AudioClipKey,
+    ) -> Result<(), InvalidAudioClipError> {
+        let track = self.tracks.get_mut(&track_key).unwrap();
+        let clip = track
+            .clips
+            .remove(&clip_key)
+            .ok_or(InvalidAudioClipError { key: clip_key })?;
+
+        self.clip_key_generator
+            .free(clip_key)
+            .expect("Clip key already freed");
+
+        self.event_sender.send(Event::DeleteClip {
+            track_key,
+            clip_start: clip.start,
+        });
+
+        Ok(())
     }
 
     pub fn add_track(
@@ -446,6 +473,10 @@ impl TimelineProcessor {
                 Some(event) => match event {
                     Event::JumpTo(pos) => self.jump_to(pos),
                     Event::AddClip { track_key, clip } => self.add_clip(track_key, clip),
+                    Event::DeleteClip {
+                        track_key,
+                        clip_start,
+                    } => self.delete_clip(track_key, clip_start),
                 },
             }
         }
@@ -470,6 +501,15 @@ impl TimelineProcessor {
             .expect("Track doesn't exist");
 
         track.insert_clip(timeline_clip);
+    }
+
+    fn delete_clip(&mut self, track_key: TimelineTrackKey, clip_start: Timestamp) {
+        let track = self
+            .tracks
+            .get_mut(&track_key)
+            .expect("Track doesn't exist");
+
+        track.delete_clip(clip_start);
     }
 
     pub fn output(

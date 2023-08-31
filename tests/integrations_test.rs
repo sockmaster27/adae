@@ -150,7 +150,7 @@ fn import_audio_clip() {
 }
 
 #[test]
-fn audio_clip_length() {
+fn stored_audio_clip_length() {
     let mut e = Engine::dummy();
     let ck = import_ac(&mut e);
 
@@ -166,6 +166,21 @@ fn add_audio_clip() {
 
     let ck = import_ac(&mut e);
     let r = e.add_audio_clip(at.timeline_track_key(), ck, Timestamp::from_beats(0), None);
+
+    assert!(r.is_ok());
+}
+
+#[test]
+fn delete_audio_clip() {
+    let mut e = Engine::dummy();
+    let at = e.add_audio_track().unwrap();
+
+    let ck = import_ac(&mut e);
+    let ac = e
+        .add_audio_clip(at.timeline_track_key(), ck, Timestamp::from_beats(0), None)
+        .unwrap();
+
+    let r = e.delete_audio_clip(at.timeline_track_key(), ac);
 
     assert!(r.is_ok());
 }

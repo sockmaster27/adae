@@ -13,6 +13,7 @@ use super::audio_clip::{AudioClip, AudioClipKey, AudioClipState};
 use super::AudioClipProcessor;
 use crate::engine::components::track::MixerTrackKey;
 use crate::engine::info::Info;
+use crate::engine::utils::dropper;
 use crate::engine::utils::rbtree_node::{TreeNode, TreeNodeAdapter};
 use crate::engine::{Sample, CHANNELS};
 use crate::Timestamp;
@@ -100,6 +101,20 @@ impl TimelineTrackProcessor {
                     cursor.move_prev();
                 }
             })
+    }
+
+    pub fn delete_clip(&mut self, clip_start: Timestamp) {
+        let mut tree = self.relevant_clip.take().unwrap().into_inner();
+
+        let el = tree
+            .find_mut(&clip_start)
+            .remove()
+            .expect("Attempted to delete non-existing clip");
+        dropper::send(el);
+
+        let pos_samples = self.position.load(Ordering::Relaxed);
+        let position = Timestamp::from_samples(pos_samples, self.sample_rate, self.bpm_cents);
+        self.relevant_clip = Some(tree.upper_bound_owning(Bound::Included(&position)));
     }
 
     /// Jump to a timestamp on the timeline track.

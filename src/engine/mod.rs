@@ -388,6 +388,16 @@ impl Engine {
             .audio_clip(timeline_track_key, audio_clip_key)
     }
 
+    pub fn delete_audio_clip(
+        &mut self,
+        timeline_track_key: TimelineTrackKey,
+        audio_clip_key: AudioClipKey,
+    ) -> Result<(), InvalidAudioClipError> {
+        self.processor_interface
+            .timeline
+            .delete_audio_clip(timeline_track_key, audio_clip_key)
+    }
+
     pub fn master(&self) -> &MixerTrack {
         self.processor_interface.mixer.master()
     }
