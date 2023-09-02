@@ -34,153 +34,161 @@ fn get_playhead_position() {
     assert_eq!(p, Timestamp::from_beats(0));
 }
 
-#[test]
-fn get_track_from_key() {
-    let mut e = Engine::dummy();
-    let at = e.add_audio_track().unwrap();
-    let k = at.track_key();
-    let t = e.mixer_track(k).unwrap();
-    assert_eq!(t.key(), k);
-}
+mod audio_tracks {
+    use super::*;
 
-#[test]
-fn add_audio_track() {
-    let mut e = Engine::dummy();
-    assert_eq!(e.audio_tracks().count(), 0);
+    #[test]
+    fn get_track_from_key() {
+        let mut e = Engine::dummy();
+        let at = e.add_audio_track().unwrap();
+        let k = at.track_key();
+        let t = e.mixer_track(k).unwrap();
+        assert_eq!(t.key(), k);
+    }
 
-    let at = e.add_audio_track().unwrap();
+    #[test]
+    fn add_audio_track() {
+        let mut e = Engine::dummy();
+        assert_eq!(e.audio_tracks().count(), 0);
 
-    assert_eq!(e.audio_tracks().count(), 1);
-    assert_eq!(e.audio_tracks().next(), Some(&at));
-}
+        let at = e.add_audio_track().unwrap();
 
-#[test]
-fn add_audio_tracks() {
-    let mut e = Engine::dummy();
-    assert_eq!(e.audio_tracks().count(), 0);
+        assert_eq!(e.audio_tracks().count(), 1);
+        assert_eq!(e.audio_tracks().next(), Some(&at));
+    }
 
-    let mut ats: Vec<_> = e.add_audio_tracks(42).unwrap().collect();
+    #[test]
+    fn add_audio_tracks() {
+        let mut e = Engine::dummy();
+        assert_eq!(e.audio_tracks().count(), 0);
 
-    assert_eq!(ats.len(), 42);
-    assert_eq!(e.audio_tracks().count(), 42);
-    for at1 in e.audio_tracks() {
-        let pos = ats.iter().position(|at2| at1 == at2).expect(
+        let mut ats: Vec<_> = e.add_audio_tracks(42).unwrap().collect();
+
+        assert_eq!(ats.len(), 42);
+        assert_eq!(e.audio_tracks().count(), 42);
+        for at1 in e.audio_tracks() {
+            let pos = ats.iter().position(|at2| at1 == at2).expect(
             "add_audio_tracks() returned different tracks than the ones added to audio_tracks()",
         );
-        ats.swap_remove(pos);
+            ats.swap_remove(pos);
+        }
+        assert_eq!(ats.len(), 0);
     }
-    assert_eq!(ats.len(), 0);
-}
 
-#[test]
-fn delete_audio_track() {
-    let mut e = Engine::dummy();
-    let at = e.add_audio_track().unwrap();
+    #[test]
+    fn delete_audio_track() {
+        let mut e = Engine::dummy();
+        let at = e.add_audio_track().unwrap();
 
-    let r = e.delete_audio_track(at);
+        let r = e.delete_audio_track(at);
 
-    assert!(r.is_ok());
-    assert_eq!(e.audio_tracks().count(), 0);
-}
+        assert!(r.is_ok());
+        assert_eq!(e.audio_tracks().count(), 0);
+    }
 
-#[test]
-fn delete_audio_tracks() {
-    let mut e = Engine::dummy();
-    let ats = e.add_audio_tracks(42).unwrap();
+    #[test]
+    fn delete_audio_tracks() {
+        let mut e = Engine::dummy();
+        let ats = e.add_audio_tracks(42).unwrap();
 
-    let r = e.delete_audio_tracks(ats.collect());
+        let r = e.delete_audio_tracks(ats.collect());
 
-    assert!(r.is_ok());
-    assert_eq!(e.audio_tracks().count(), 0);
-}
+        assert!(r.is_ok());
+        assert_eq!(e.audio_tracks().count(), 0);
+    }
 
-#[test]
-fn reconstruct_audio_track() {
-    let mut e = Engine::dummy();
-    let at = e.add_audio_track().unwrap();
+    #[test]
+    fn reconstruct_audio_track() {
+        let mut e = Engine::dummy();
+        let at = e.add_audio_track().unwrap();
 
-    e.mixer_track(at.track_key()).unwrap().set_panning(0.42);
-
-    let s = e.audio_track_state(&at).unwrap();
-    e.delete_audio_track(at.clone()).unwrap();
-
-    let at_new = e.reconstruct_audio_track(s).unwrap();
-
-    assert_eq!(e.audio_tracks().count(), 1);
-    assert_eq!(e.audio_tracks().next(), Some(&at_new));
-    assert_eq!(at_new, at);
-    assert_eq!(e.mixer_track(at.track_key()).unwrap().panning(), 0.42);
-}
-
-#[test]
-fn reconstruct_audio_tracks() {
-    let mut e = Engine::dummy();
-    let ats: Vec<_> = e.add_audio_tracks(42).unwrap().collect();
-
-    for at in &ats {
         e.mixer_track(at.track_key()).unwrap().set_panning(0.42);
-    }
 
-    let mut ss = Vec::new();
-    for at in &ats {
-        ss.push(e.audio_track_state(at).unwrap());
+        let s = e.audio_track_state(&at).unwrap();
         e.delete_audio_track(at.clone()).unwrap();
-    }
 
-    for (at, s) in zip(ats, ss) {
         let at_new = e.reconstruct_audio_track(s).unwrap();
+
+        assert_eq!(e.audio_tracks().count(), 1);
+        assert_eq!(e.audio_tracks().next(), Some(&at_new));
         assert_eq!(at_new, at);
         assert_eq!(e.mixer_track(at.track_key()).unwrap().panning(), 0.42);
     }
 
-    assert_eq!(e.audio_tracks().count(), 42);
+    #[test]
+    fn reconstruct_audio_tracks() {
+        let mut e = Engine::dummy();
+        let ats: Vec<_> = e.add_audio_tracks(42).unwrap().collect();
+
+        for at in &ats {
+            e.mixer_track(at.track_key()).unwrap().set_panning(0.42);
+        }
+
+        let mut ss = Vec::new();
+        for at in &ats {
+            ss.push(e.audio_track_state(at).unwrap());
+            e.delete_audio_track(at.clone()).unwrap();
+        }
+
+        for (at, s) in zip(ats, ss) {
+            let at_new = e.reconstruct_audio_track(s).unwrap();
+            assert_eq!(at_new, at);
+            assert_eq!(e.mixer_track(at.track_key()).unwrap().panning(), 0.42);
+        }
+
+        assert_eq!(e.audio_tracks().count(), 42);
+    }
 }
 
-fn import_ac(e: &mut Engine) -> StoredAudioClipKey {
-    e.import_audio_clip(Path::new(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/test_files/44100 16-bit.wav"
-    )))
-    .unwrap()
-}
+mod audio_clips {
+    use super::*;
 
-#[test]
-fn import_audio_clip() {
-    import_ac(&mut Engine::dummy());
-}
+    fn import_ac(e: &mut Engine) -> StoredAudioClipKey {
+        e.import_audio_clip(Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/test_files/44100 16-bit.wav"
+        )))
+        .unwrap()
+    }
 
-#[test]
-fn stored_audio_clip_length() {
-    let mut e = Engine::dummy();
-    let ck = import_ac(&mut e);
+    #[test]
+    fn import_audio_clip() {
+        import_ac(&mut Engine::dummy());
+    }
 
-    let ac = e.stored_audio_clip(ck).unwrap();
+    #[test]
+    fn stored_audio_clip_length() {
+        let mut e = Engine::dummy();
+        let ck = import_ac(&mut e);
 
-    assert_eq!(ac.length(), 1_322_978);
-}
+        let ac = e.stored_audio_clip(ck).unwrap();
 
-#[test]
-fn add_audio_clip() {
-    let mut e = Engine::dummy();
-    let at = e.add_audio_track().unwrap();
+        assert_eq!(ac.length(), 1_322_978);
+    }
 
-    let ck = import_ac(&mut e);
-    let r = e.add_audio_clip(at.timeline_track_key(), ck, Timestamp::from_beats(0), None);
+    #[test]
+    fn add_audio_clip() {
+        let mut e = Engine::dummy();
+        let at = e.add_audio_track().unwrap();
 
-    assert!(r.is_ok());
-}
+        let ck = import_ac(&mut e);
+        let r = e.add_audio_clip(at.timeline_track_key(), ck, Timestamp::from_beats(0), None);
 
-#[test]
-fn delete_audio_clip() {
-    let mut e = Engine::dummy();
-    let at = e.add_audio_track().unwrap();
+        assert!(r.is_ok());
+    }
 
-    let ck = import_ac(&mut e);
-    let ac = e
-        .add_audio_clip(at.timeline_track_key(), ck, Timestamp::from_beats(0), None)
-        .unwrap();
+    #[test]
+    fn delete_audio_clip() {
+        let mut e = Engine::dummy();
+        let at = e.add_audio_track().unwrap();
 
-    let r = e.delete_audio_clip(at.timeline_track_key(), ac);
+        let ck = import_ac(&mut e);
+        let ac = e
+            .add_audio_clip(at.timeline_track_key(), ck, Timestamp::from_beats(0), None)
+            .unwrap();
 
-    assert!(r.is_ok());
+        let r = e.delete_audio_clip(at.timeline_track_key(), ac);
+
+        assert!(r.is_ok());
+    }
 }
