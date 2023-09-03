@@ -92,16 +92,16 @@ impl AudioClipStore {
     pub fn get(
         &self,
         key: StoredAudioClipKey,
-    ) -> Result<Arc<StoredAudioClip>, InvalidAudioClipError> {
+    ) -> Result<Arc<StoredAudioClip>, InvalidStoredAudioClipError> {
         match self.clips.get(&key) {
-            None => Err(InvalidAudioClipError { key }),
+            None => Err(InvalidStoredAudioClipError { key }),
             Some(clip) => Ok(Arc::clone(clip)),
         }
     }
     pub fn reader(
         &self,
         key: StoredAudioClipKey,
-    ) -> Result<AudioClipReader, InvalidAudioClipError> {
+    ) -> Result<AudioClipReader, InvalidStoredAudioClipError> {
         let clip = self.get(key)?;
         Ok(AudioClipReader::new(
             clip,
@@ -158,10 +158,10 @@ impl Display for ClipOverflowError {
 impl Error for ClipOverflowError {}
 
 #[derive(Debug, PartialEq, Eq)]
-pub struct InvalidAudioClipError {
+pub struct InvalidStoredAudioClipError {
     pub key: StoredAudioClipKey,
 }
-impl Display for InvalidAudioClipError {
+impl Display for InvalidStoredAudioClipError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -170,7 +170,7 @@ impl Display for InvalidAudioClipError {
         )
     }
 }
-impl Error for InvalidAudioClipError {}
+impl Error for InvalidStoredAudioClipError {}
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum ImportError {

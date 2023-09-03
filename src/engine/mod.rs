@@ -20,7 +20,8 @@ mod info;
 mod processor;
 mod utils;
 
-pub use components::audio_clip_store::{ImportError, InvalidAudioClipError};
+pub use self::components::timeline::InvalidAudioClipError;
+pub use components::audio_clip_store::{ImportError, InvalidStoredAudioClipError};
 pub use components::mixer::{InvalidMixerTrackError, MixerTrackOverflowError};
 pub use components::stored_audio_clip::StoredAudioClip;
 pub use components::stored_audio_clip::StoredAudioClipKey;
@@ -360,7 +361,7 @@ impl Engine {
     pub fn stored_audio_clip(
         &self,
         key: StoredAudioClipKey,
-    ) -> Result<Arc<StoredAudioClip>, InvalidAudioClipError> {
+    ) -> Result<Arc<StoredAudioClip>, InvalidStoredAudioClipError> {
         self.processor_interface.timeline.stored_audio_clip(key)
     }
     pub fn add_audio_clip(
@@ -382,7 +383,7 @@ impl Engine {
         &self,
         timeline_track_key: TimelineTrackKey,
         audio_clip_key: AudioClipKey,
-    ) -> Result<&AudioClip, InvalidAudioClipError> {
+    ) -> Result<&AudioClip, InvalidStoredAudioClipError> {
         self.processor_interface
             .timeline
             .audio_clip(timeline_track_key, audio_clip_key)
@@ -396,6 +397,15 @@ impl Engine {
         self.processor_interface
             .timeline
             .delete_audio_clip(timeline_track_key, audio_clip_key)
+    }
+    pub fn delete_audio_clips(
+        &mut self,
+        timeline_track_key: TimelineTrackKey,
+        audio_clip_keys: Vec<AudioClipKey>,
+    ) -> Result<(), InvalidAudioClipError> {
+        self.processor_interface
+            .timeline
+            .delete_audio_clips(timeline_track_key, audio_clip_keys)
     }
 
     pub fn master(&self) -> &MixerTrack {

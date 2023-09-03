@@ -191,4 +191,28 @@ mod audio_clips {
 
         assert!(r.is_ok());
     }
+
+    #[test]
+    fn delete_audio_clips() {
+        let mut e = Engine::dummy();
+        let at = e.add_audio_track().unwrap();
+        let ck = import_ac(&mut e);
+
+        let mut acs = Vec::new();
+        for i in 0..42 {
+            acs.push(
+                e.add_audio_clip(
+                    at.timeline_track_key(),
+                    ck,
+                    Timestamp::from_beats(i),
+                    Some(Timestamp::from_beats(1)),
+                )
+                .unwrap(),
+            );
+        }
+
+        let r = e.delete_audio_clips(at.timeline_track_key(), acs);
+
+        assert!(r.is_ok());
+    }
 }

@@ -16,7 +16,9 @@ use std::{
 };
 
 use super::{
-    audio_clip_store::{AudioClipStore, AudioClipStoreState, ImportError, InvalidAudioClipError},
+    audio_clip_store::{
+        AudioClipStore, AudioClipStoreState, ImportError, InvalidStoredAudioClipError,
+    },
     stored_audio_clip::{StoredAudioClip, StoredAudioClipKey},
     track::MixerTrackKey,
 };
@@ -150,6 +152,10 @@ enum Event {
         track_key: MixerTrackKey,
         clip_start: Timestamp,
     },
+    DeleteClips {
+        track_key: MixerTrackKey,
+        clip_starts: DBox<Vec<Timestamp>>,
+    },
 }
 
 pub struct Timeline {
@@ -192,7 +198,7 @@ impl Timeline {
     pub fn stored_audio_clip(
         &self,
         key: StoredAudioClipKey,
-    ) -> Result<Arc<StoredAudioClip>, InvalidAudioClipError> {
+    ) -> Result<Arc<StoredAudioClip>, InvalidStoredAudioClipError> {
         self.clip_store.get(key)
     }
 
@@ -251,12 +257,12 @@ impl Timeline {
         &self,
         track_key: TimelineTrackKey,
         clip_key: AudioClipKey,
-    ) -> Result<&AudioClip, InvalidAudioClipError> {
+    ) -> Result<&AudioClip, InvalidStoredAudioClipError> {
         let track = self.tracks.get(&track_key).unwrap();
         track
             .clips
             .get(&clip_key)
-            .ok_or(InvalidAudioClipError { key: clip_key })
+            .ok_or(InvalidStoredAudioClipError { key: clip_key })
     }
 
     pub fn delete_audio_clip(
@@ -264,11 +270,14 @@ impl Timeline {
         track_key: TimelineTrackKey,
         clip_key: AudioClipKey,
     ) -> Result<(), InvalidAudioClipError> {
-        let track = self.tracks.get_mut(&track_key).unwrap();
+        let track = self
+            .tracks
+            .get_mut(&track_key)
+            .ok_or(InvalidAudioClipError::InvalidTrack(track_key))?;
         let clip = track
             .clips
             .remove(&clip_key)
-            .ok_or(InvalidAudioClipError { key: clip_key })?;
+            .ok_or(InvalidAudioClipError::InvalidClip(clip_key))?;
 
         self.clip_key_generator
             .free(clip_key)
@@ -277,6 +286,40 @@ impl Timeline {
         self.event_sender.send(Event::DeleteClip {
             track_key,
             clip_start: clip.start,
+        });
+
+        Ok(())
+    }
+    pub fn delete_audio_clips(
+        &mut self,
+        track_key: TimelineTrackKey,
+        clip_keys: Vec<AudioClipKey>,
+    ) -> Result<(), InvalidAudioClipError> {
+        let track = self
+            .tracks
+            .get_mut(&track_key)
+            .ok_or(InvalidAudioClipError::InvalidTrack(track_key))?;
+
+        let clips = clip_keys
+            .iter()
+            .map(|&clip_key| {
+                track
+                    .clips
+                    .remove(&clip_key)
+                    .ok_or(InvalidAudioClipError::InvalidClip(clip_key))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        for &clip_key in &clip_keys {
+            track.clips.remove(&clip_key);
+            self.clip_key_generator
+                .free(clip_key)
+                .expect("Clip key already freed");
+        }
+
+        self.event_sender.send(Event::DeleteClips {
+            track_key,
+            clip_starts: DBox::new(clips.iter().map(|clip| clip.start).collect()),
         });
 
         Ok(())
@@ -477,6 +520,10 @@ impl TimelineProcessor {
                         track_key,
                         clip_start,
                     } => self.delete_clip(track_key, clip_start),
+                    Event::DeleteClips {
+                        track_key,
+                        clip_starts,
+                    } => self.delete_clips(track_key, clip_starts),
                 },
             }
         }
@@ -510,6 +557,14 @@ impl TimelineProcessor {
             .expect("Track doesn't exist");
 
         track.delete_clip(clip_start);
+    }
+    fn delete_clips(&mut self, track_key: TimelineTrackKey, clip_starts: DBox<Vec<Timestamp>>) {
+        let track = self
+            .tracks
+            .get_mut(&track_key)
+            .expect("Track doesn't exist");
+
+        track.delete_clips(clip_starts);
     }
 
     pub fn output(
@@ -624,14 +679,31 @@ impl Display for AddClipError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InvalidTimelineTrack(key) => {
-                write!(f, "No timeline track with key, {}, on timeline", key)
+                write!(f, "No timeline track with key, {key}, on timeline")
             }
-            Self::InvalidClip(key) => write!(f, "No audio clip with key, {}", key),
+            Self::InvalidClip(key) => write!(f, "No stored audio clip with key, {key}"),
             Self::Overlapping => write!(f, "Clip overlaps with another clip"),
         }
     }
 }
 impl Error for AddClipError {}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum InvalidAudioClipError {
+    InvalidTrack(TimelineTrackKey),
+    InvalidClip(AudioClipKey),
+}
+impl Display for InvalidAudioClipError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            InvalidAudioClipError::InvalidTrack(key) => {
+                write!(f, "Attempted to access an audio clip on a non-existing timeline track with key, {key}")
+            }
+            InvalidAudioClipError::InvalidClip(key) => write!(f, "No clip with key, {key}"),
+        }
+    }
+}
+impl Error for InvalidAudioClipError {}
 
 #[cfg(test)]
 mod tests {
