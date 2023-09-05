@@ -448,7 +448,7 @@ impl Engine {
 
         let audio_track = AudioTrack {
             timeline_track_key: timeline_key,
-            track_key,
+            mixer_track_key: track_key,
         };
         self.audio_tracks.insert(audio_track.clone());
         Ok(audio_track)
@@ -476,7 +476,7 @@ impl Engine {
         let audio_tracks =
             zip(track_keys, timeline_keys).map(|(track_key, timeline_key)| AudioTrack {
                 timeline_track_key: timeline_key,
-                track_key,
+                mixer_track_key: track_key,
             });
         for audio_track in audio_tracks.clone() {
             self.audio_tracks.insert(audio_track.clone());
@@ -490,7 +490,7 @@ impl Engine {
         self.audio_tracks.remove(&track);
         self.processor_interface
             .mixer
-            .delete_track(track.track_key)
+            .delete_track(track.mixer_track_key)
             .unwrap();
         self.processor_interface
             .timeline
@@ -509,7 +509,7 @@ impl Engine {
         }
         for track in tracks {
             self.audio_tracks.remove(&track);
-            track_keys.push(track.track_key);
+            track_keys.push(track.mixer_track_key);
             timeline_keys.push(track.timeline_track_key);
         }
 
@@ -535,7 +535,10 @@ impl Engine {
             .timeline
             .track_state(audio_track.timeline_track_key())
             .unwrap();
-        let track_state = self.mixer_track(audio_track.track_key()).unwrap().state();
+        let track_state = self
+            .mixer_track(audio_track.mixer_track_key())
+            .unwrap()
+            .state();
 
         Ok(AudioTrackState {
             timeline_track_state,
@@ -558,10 +561,10 @@ impl Engine {
         if !self
             .processor_interface
             .mixer
-            .key_in_use(audio_track.track_key)
+            .key_in_use(audio_track.mixer_track_key)
         {
             return Err(InvalidAudioTrackError::Tracks(InvalidMixerTrackError {
-                key: audio_track.track_key,
+                key: audio_track.mixer_track_key,
             }));
         }
         Ok(())
@@ -596,7 +599,7 @@ impl Engine {
 
         let audio_track = AudioTrack {
             timeline_track_key,
-            track_key,
+            mixer_track_key: track_key,
         };
 
         self.audio_tracks.insert(audio_track.clone());
@@ -632,7 +635,7 @@ impl Engine {
 
             let audio_track = AudioTrack {
                 timeline_track_key,
-                track_key,
+                mixer_track_key: track_key,
             };
 
             self.audio_tracks.insert(audio_track.clone());
@@ -702,14 +705,14 @@ impl Eq for EngineState {}
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AudioTrack {
     timeline_track_key: TimelineTrackKey,
-    track_key: MixerTrackKey,
+    mixer_track_key: MixerTrackKey,
 }
 impl AudioTrack {
     pub fn timeline_track_key(&self) -> TimelineTrackKey {
         self.timeline_track_key
     }
-    pub fn track_key(&self) -> MixerTrackKey {
-        self.track_key
+    pub fn mixer_track_key(&self) -> MixerTrackKey {
+        self.mixer_track_key
     }
 }
 

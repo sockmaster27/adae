@@ -41,7 +41,7 @@ mod audio_tracks {
     fn get_track_from_key() {
         let mut e = Engine::dummy();
         let at = e.add_audio_track().unwrap();
-        let k = at.track_key();
+        let k = at.mixer_track_key();
         let t = e.mixer_track(k).unwrap();
         assert_eq!(t.key(), k);
     }
@@ -102,7 +102,9 @@ mod audio_tracks {
         let mut e = Engine::dummy();
         let at = e.add_audio_track().unwrap();
 
-        e.mixer_track(at.track_key()).unwrap().set_panning(0.42);
+        e.mixer_track(at.mixer_track_key())
+            .unwrap()
+            .set_panning(0.42);
 
         let s = e.audio_track_state(&at).unwrap();
         e.delete_audio_track(at.clone()).unwrap();
@@ -112,7 +114,7 @@ mod audio_tracks {
         assert_eq!(e.audio_tracks().count(), 1);
         assert_eq!(e.audio_tracks().next(), Some(&at_new));
         assert_eq!(at_new, at);
-        assert_eq!(e.mixer_track(at.track_key()).unwrap().panning(), 0.42);
+        assert_eq!(e.mixer_track(at.mixer_track_key()).unwrap().panning(), 0.42);
     }
 
     #[test]
@@ -121,7 +123,9 @@ mod audio_tracks {
         let ats: Vec<_> = e.add_audio_tracks(42).unwrap().collect();
 
         for at in &ats {
-            e.mixer_track(at.track_key()).unwrap().set_panning(0.42);
+            e.mixer_track(at.mixer_track_key())
+                .unwrap()
+                .set_panning(0.42);
         }
 
         let mut ss = Vec::new();
@@ -133,7 +137,7 @@ mod audio_tracks {
         for (at, s) in zip(ats, ss) {
             let at_new = e.reconstruct_audio_track(s).unwrap();
             assert_eq!(at_new, at);
-            assert_eq!(e.mixer_track(at.track_key()).unwrap().panning(), 0.42);
+            assert_eq!(e.mixer_track(at.mixer_track_key()).unwrap().panning(), 0.42);
         }
 
         assert_eq!(e.audio_tracks().count(), 42);
