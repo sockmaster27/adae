@@ -35,7 +35,7 @@ impl AudioClipReader {
         let resampler_chunk_size = 1024;
 
         let clip_sample_rate: usize = clip
-            .sample_rate
+            .sample_rate()
             .try_into()
             .expect("Clip sample rate too high");
 
@@ -75,7 +75,7 @@ impl AudioClipReader {
     }
 
     pub fn key(&self) -> u32 {
-        self.inner.key
+        self.inner.key()
     }
 
     /// Throws out the given delay from the start of the clip.
@@ -111,7 +111,7 @@ impl AudioClipReader {
     /// - `position` is converted from `sample_rate` into the clips original sample rate.
     pub fn jump(&mut self, position: usize, sample_rate: u32) -> Result<(), JumpOutOfBounds> {
         let pos_resampled = ResampledSamples(position);
-        let pos_original = pos_resampled.into_original(sample_rate, self.inner.sample_rate);
+        let pos_original = pos_resampled.into_original(sample_rate, self.inner.sample_rate());
 
         if self.len_original() <= pos_original {
             return Err(JumpOutOfBounds);
@@ -142,7 +142,7 @@ impl AudioClipReader {
     }
     fn len_resampled(&self, sample_rate: u32) -> ResampledSamples {
         self.len_original()
-            .into_resampled(sample_rate, self.inner.sample_rate)
+            .into_resampled(sample_rate, self.inner.sample_rate())
     }
     fn len_original(&self) -> OriginalSamples {
         OriginalSamples(self.inner.length())
@@ -156,7 +156,7 @@ impl AudioClipReader {
     ///
     /// If the `output` buffers are longer than the range, they will be padded with zeroes.
     fn scale_channels(
-        input: &Vec<Vec<Sample>>,
+        input: &[Vec<Sample>],
         input_range: Range<OriginalSamples>,
         output: &mut [&mut [Sample]; CHANNELS],
     ) {
@@ -231,7 +231,7 @@ impl AudioClipReader {
         // self.len_original() cannot be used, since self is already borrowed by resampler
         let len_original = OriginalSamples(self.inner.length());
 
-        let resampled_length = len_original.into_resampled(sample_rate, self.inner.sample_rate);
+        let resampled_length = len_original.into_resampled(sample_rate, self.inner.sample_rate());
         let remaining = resampled_length - self.position;
 
         let output_size = min(buffer_size, remaining);
@@ -253,7 +253,7 @@ impl AudioClipReader {
                     &mut c.next().unwrap()[..resampler.input_frames_next()],
                     &mut c.next().unwrap()[..resampler.input_frames_next()],
                 ];
-                Self::scale_channels(&self.inner.data, range, &mut channel_scale_buffer);
+                Self::scale_channels(self.inner.data(), range, &mut channel_scale_buffer);
 
                 let result = resampler.process_into_buffer(
                     &channel_scale_buffer,
@@ -306,7 +306,7 @@ impl AudioClipReader {
             &mut c.next().unwrap()[..output_size.into()],
             &mut c.next().unwrap()[..output_size.into()],
         ];
-        Self::scale_channels(&self.inner.data, range, &mut channel_scale_buffer);
+        Self::scale_channels(self.inner.data(), range, &mut channel_scale_buffer);
         Self::interleave(
             &self.channel_scale_buffer,
             ResampledSamples(0)..ResampledSamples(output_size.into()),

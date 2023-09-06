@@ -25,11 +25,11 @@ pub type StoredAudioClipKey = u32;
 /// An audio clip that has been imported.
 #[derive(PartialEq)]
 pub struct StoredAudioClip {
-    pub key: StoredAudioClipKey,
+    key: StoredAudioClipKey,
 
-    pub sample_rate: u32,
+    sample_rate: u32,
     /// List of channel buffers
-    pub data: Vec<Vec<Sample>>,
+    data: Vec<Vec<Sample>>,
 }
 impl StoredAudioClip {
     pub fn import(key: StoredAudioClipKey, path: &Path) -> Result<Self, ImportError> {
@@ -135,7 +135,19 @@ impl StoredAudioClip {
         }
     }
 
-    // Number of channels
+    pub fn key(&self) -> StoredAudioClipKey {
+        self.key
+    }
+
+    pub fn sample_rate(&self) -> u32 {
+        self.sample_rate
+    }
+
+    pub fn data(&self) -> &[Vec<Sample>] {
+        &self.data
+    }
+
+    /// Number of channels
     pub fn channels(&self) -> usize {
         self.data.len()
     }
