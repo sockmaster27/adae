@@ -98,6 +98,10 @@ impl AudioClipStore {
             Some(clip) => Ok(Arc::clone(clip)),
         }
     }
+    pub fn iter(&self) -> impl Iterator<Item = Arc<StoredAudioClip>> + '_ {
+        self.clips.values().cloned()
+    }
+
     pub fn reader(
         &self,
         key: StoredAudioClipKey,

@@ -195,11 +195,16 @@ impl Timeline {
     pub fn import_audio_clip(&mut self, path: &Path) -> Result<StoredAudioClipKey, ImportError> {
         self.clip_store.import(path)
     }
+
     pub fn stored_audio_clip(
         &self,
         key: StoredAudioClipKey,
     ) -> Result<Arc<StoredAudioClip>, InvalidStoredAudioClipError> {
         self.clip_store.get(key)
+    }
+
+    pub fn stored_audio_clips(&self) -> impl Iterator<Item = Arc<StoredAudioClip>> + '_ {
+        self.clip_store.iter()
     }
 
     pub fn add_audio_clip(

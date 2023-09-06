@@ -358,12 +358,18 @@ impl Engine {
     pub fn import_audio_clip(&mut self, path: &Path) -> Result<StoredAudioClipKey, ImportError> {
         self.processor_interface.timeline.import_audio_clip(path)
     }
+
     pub fn stored_audio_clip(
         &self,
         key: StoredAudioClipKey,
     ) -> Result<Arc<StoredAudioClip>, InvalidStoredAudioClipError> {
         self.processor_interface.timeline.stored_audio_clip(key)
     }
+
+    pub fn stored_audio_clips(&self) -> impl Iterator<Item = Arc<StoredAudioClip>> + '_ {
+        self.processor_interface.timeline.stored_audio_clips()
+    }
+
     pub fn add_audio_clip(
         &mut self,
         timeline_track_key: TimelineTrackKey,

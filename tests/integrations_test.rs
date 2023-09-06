@@ -160,7 +160,10 @@ mod audio_clips {
 
         #[test]
         fn import_audio_clip() {
-            import_ac(&mut Engine::dummy());
+            let mut e = Engine::dummy();
+            assert_eq!(e.stored_audio_clips().count(), 0);
+            import_ac(&mut e);
+            assert_eq!(e.stored_audio_clips().count(), 1);
         }
 
         #[test]
