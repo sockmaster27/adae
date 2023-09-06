@@ -38,7 +38,7 @@ mod audio_tracks {
     use super::*;
 
     #[test]
-    fn get_track_from_key() {
+    fn get_from_key() {
         let mut e = Engine::dummy();
         let at = e.add_audio_track().unwrap();
         let k = at.mixer_track_key();
@@ -155,19 +155,33 @@ mod audio_clips {
         .unwrap()
     }
 
-    #[test]
-    fn import_audio_clip() {
-        import_ac(&mut Engine::dummy());
-    }
+    mod stored {
+        use super::*;
 
-    #[test]
-    fn stored_audio_clip_length() {
-        let mut e = Engine::dummy();
-        let ck = import_ac(&mut e);
+        #[test]
+        fn import_audio_clip() {
+            import_ac(&mut Engine::dummy());
+        }
 
-        let ac = e.stored_audio_clip(ck).unwrap();
+        #[test]
+        fn get_from_key() {
+            let mut e = Engine::dummy();
+            let ck = import_ac(&mut e);
 
-        assert_eq!(ac.length(), 1_322_978);
+            let ac = e.stored_audio_clip(ck).unwrap();
+
+            assert_eq!(ac.key(), ck);
+        }
+
+        #[test]
+        fn length() {
+            let mut e = Engine::dummy();
+            let ck = import_ac(&mut e);
+
+            let ac = e.stored_audio_clip(ck).unwrap();
+
+            assert_eq!(ac.length(), 1_322_978);
+        }
     }
 
     #[test]
