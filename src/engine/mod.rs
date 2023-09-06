@@ -395,6 +395,15 @@ impl Engine {
             .audio_clip(timeline_track_key, audio_clip_key)
     }
 
+    pub fn audio_clips(
+        &self,
+        timeline_track_key: TimelineTrackKey,
+    ) -> impl Iterator<Item = &AudioClip> {
+        self.processor_interface
+            .timeline
+            .audio_clips(timeline_track_key)
+    }
+
     pub fn delete_audio_clip(
         &mut self,
         timeline_track_key: TimelineTrackKey,

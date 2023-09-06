@@ -270,6 +270,14 @@ impl Timeline {
             .ok_or(InvalidStoredAudioClipError { key: clip_key })
     }
 
+    pub fn audio_clips(
+        &self,
+        track_key: TimelineTrackKey,
+    ) -> impl Iterator<Item = &AudioClip> + '_ {
+        let track = self.tracks.get(&track_key).unwrap();
+        track.clips.values()
+    }
+
     pub fn delete_audio_clip(
         &mut self,
         track_key: TimelineTrackKey,
