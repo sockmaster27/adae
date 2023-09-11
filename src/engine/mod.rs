@@ -20,13 +20,14 @@ mod info;
 mod processor;
 mod utils;
 
-pub use self::components::timeline::InvalidAudioClipError;
 pub use components::audio_clip_store::{ImportError, InvalidStoredAudioClipError};
 pub use components::mixer::{InvalidMixerTrackError, MixerTrackOverflowError};
 pub use components::stored_audio_clip::StoredAudioClip;
 pub use components::stored_audio_clip::StoredAudioClipKey;
 pub use components::timeline::AudioClip;
 pub use components::timeline::AudioClipKey;
+pub use components::timeline::AudioClipState;
+pub use components::timeline::InvalidAudioClipError;
 pub use components::timeline::Timestamp;
 pub use components::timeline::{
     AddClipError, InvalidTimelineTrackError, TimelineTrackKey, TimelineTrackOverflowError,

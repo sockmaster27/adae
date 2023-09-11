@@ -34,7 +34,7 @@ use crate::engine::{
     Sample, CHANNELS,
 };
 use audio_clip::AudioClipProcessor;
-pub use audio_clip::{AudioClip, AudioClipKey};
+pub use audio_clip::{AudioClip, AudioClipKey, AudioClipState};
 pub use timestamp::Timestamp;
 use track::TimelineTrack;
 pub use track::{TimelineTrackKey, TimelineTrackProcessor, TimelineTrackState};
