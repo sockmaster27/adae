@@ -434,6 +434,15 @@ impl Engine {
             .timeline
             .reconstruct_audio_clip(timneline_track_key, audio_clip_state)
     }
+    pub fn reconstruct_audio_clips(
+        &mut self,
+        timneline_track_key: TimelineTrackKey,
+        audio_clip_states: Vec<AudioClipState>,
+    ) -> Result<Vec<AudioClipKey>, AudioClipReconstructionError> {
+        self.processor_interface
+            .timeline
+            .reconstruct_audio_clips(timneline_track_key, audio_clip_states)
+    }
 
     pub fn master(&self) -> &MixerTrack {
         self.processor_interface.mixer.master()

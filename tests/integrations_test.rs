@@ -267,4 +267,37 @@ mod audio_clips {
         assert_eq!(e.audio_clips(at.timeline_track_key()).count(), 1);
         assert_eq!(ac, ac_new);
     }
+
+    #[test]
+    fn reconstruct_audio_clips() {
+        let mut e = Engine::dummy();
+        let at = e.add_audio_track().unwrap();
+
+        let ck = import_ac(&mut e);
+
+        let mut acs = Vec::new();
+        let mut ss = Vec::new();
+        for i in 0..42 {
+            let ac = e
+                .add_audio_clip(
+                    at.timeline_track_key(),
+                    ck,
+                    Timestamp::from_beats(i),
+                    Some(Timestamp::from_beats(1)),
+                )
+                .unwrap();
+            acs.push(ac);
+            ss.push(e.audio_clip(at.timeline_track_key(), ac).unwrap().state())
+        }
+
+        e.delete_audio_clips(at.timeline_track_key(), acs.clone())
+            .unwrap();
+
+        let acs_new = e
+            .reconstruct_audio_clips(at.timeline_track_key(), ss)
+            .unwrap();
+
+        assert_eq!(e.audio_clips(at.timeline_track_key()).count(), 42);
+        assert_eq!(acs, acs_new);
+    }
 }

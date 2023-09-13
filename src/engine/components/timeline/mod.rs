@@ -148,6 +148,10 @@ enum Event {
         track_key: MixerTrackKey,
         clip: Box<TreeNode<AudioClipProcessor>>,
     },
+    AddClips {
+        track_key: MixerTrackKey,
+        clips: DBox<Vec<Box<TreeNode<AudioClipProcessor>>>>,
+    },
     DeleteClip {
         track_key: MixerTrackKey,
         clip_start: Timestamp,
@@ -251,6 +255,62 @@ impl Timeline {
         self.event_sender.send(Event::AddClip {
             track_key,
             clip: Box::new(TreeNode::new(audio_clip_processor)),
+        });
+
+        Ok(())
+    }
+
+    fn add_audio_clips_inner(
+        &mut self,
+        track_key: TimelineTrackKey,
+        clip_states: &[AudioClipState],
+    ) -> Result<(), AddClipError> {
+        if !self.key_in_use(track_key) {
+            return Err(AddClipError::InvalidTimelineTrack(track_key));
+        }
+
+        let clip_processors = clip_states
+            .iter()
+            .map(|clip_state| {
+                let AudioClipState {
+                    key: clip_key,
+                    start_offset,
+                    start,
+                    length,
+                    inner: stored_clip_key,
+                } = *clip_state;
+
+                let reader1 = self
+                    .clip_store
+                    .reader(stored_clip_key)
+                    .or(Err(AddClipError::InvalidClip(stored_clip_key)))?;
+                let audio_clip = AudioClip {
+                    key: clip_key,
+                    start,
+                    length,
+                    start_offset,
+                    reader: reader1,
+                };
+
+                let reader2 = self.clip_store.reader(stored_clip_key).unwrap();
+                let audio_clip_processor = AudioClipProcessor::new(start, length, 0, reader2);
+
+                let track = self.tracks.get_mut(&track_key).unwrap();
+                for clip in track.clips.values() {
+                    if clip.overlaps(&audio_clip, self.sample_rate, self.bpm_cents) {
+                        return Err(AddClipError::Overlapping);
+                    }
+                }
+
+                track.clips.insert(clip_key, audio_clip);
+
+                Ok(Box::new(TreeNode::new(audio_clip_processor)))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        self.event_sender.send(Event::AddClips {
+            track_key,
+            clips: DBox::new(clip_processors),
         });
 
         Ok(())
@@ -364,9 +424,29 @@ impl Timeline {
         clip_state: AudioClipState,
     ) -> Result<AudioClipKey, AudioClipReconstructionError> {
         let key = clip_state.key;
+        if self.clip_key_generator.in_use(key) {
+            return Err(AudioClipReconstructionError::KeyInUse(key));
+        }
         self.add_audio_clip_inner(track_key, clip_state)?;
         self.clip_key_generator.reserve(key).unwrap();
         Ok(key)
+    }
+    pub fn reconstruct_audio_clips(
+        &mut self,
+        track_key: TimelineTrackKey,
+        clip_states: Vec<AudioClipState>,
+    ) -> Result<Vec<AudioClipKey>, AudioClipReconstructionError> {
+        let keys = clip_states.iter().map(|c| c.key).collect();
+        for &key in &keys {
+            if self.clip_key_generator.in_use(key) {
+                return Err(AudioClipReconstructionError::KeyInUse(key));
+            }
+        }
+        self.add_audio_clips_inner(track_key, &clip_states)?;
+        for &key in &keys {
+            self.clip_key_generator.reserve(key).unwrap();
+        }
+        Ok(keys)
     }
 
     pub fn add_track(
@@ -560,6 +640,7 @@ impl TimelineProcessor {
                 Some(event) => match event {
                     Event::JumpTo(pos) => self.jump_to(pos),
                     Event::AddClip { track_key, clip } => self.add_clip(track_key, clip),
+                    Event::AddClips { track_key, clips } => self.add_clips(track_key, clips),
                     Event::DeleteClip {
                         track_key,
                         clip_start,
@@ -592,6 +673,20 @@ impl TimelineProcessor {
             .expect("Track doesn't exist");
 
         track.insert_clip(timeline_clip);
+    }
+    fn add_clips(
+        &mut self,
+        track_key: TimelineTrackKey,
+        mut timeline_clips: DBox<Vec<Box<TreeNode<AudioClipProcessor>>>>,
+    ) {
+        let track = self
+            .tracks
+            .get_mut(&track_key)
+            .expect("Track doesn't exist");
+
+        for clips in timeline_clips.drain(..) {
+            track.insert_clip(clips);
+        }
     }
 
     fn delete_clip(&mut self, track_key: TimelineTrackKey, clip_start: Timestamp) {
