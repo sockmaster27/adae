@@ -20,6 +20,7 @@ mod info;
 mod processor;
 mod utils;
 
+pub use self::components::timeline::AudioClipReconstructionError;
 pub use components::audio_clip_store::{ImportError, InvalidStoredAudioClipError};
 pub use components::mixer::{InvalidMixerTrackError, MixerTrackOverflowError};
 pub use components::stored_audio_clip::StoredAudioClip;
@@ -422,6 +423,16 @@ impl Engine {
         self.processor_interface
             .timeline
             .delete_audio_clips(timeline_track_key, audio_clip_keys)
+    }
+
+    pub fn reconstruct_audio_clip(
+        &mut self,
+        timneline_track_key: TimelineTrackKey,
+        audio_clip_state: AudioClipState,
+    ) -> Result<AudioClipKey, AudioClipReconstructionError> {
+        self.processor_interface
+            .timeline
+            .reconstruct_audio_clip(timneline_track_key, audio_clip_state)
     }
 
     pub fn master(&self) -> &MixerTrack {

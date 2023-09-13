@@ -207,25 +207,28 @@ impl Timeline {
         self.clip_store.iter()
     }
 
-    pub fn add_audio_clip(
+    fn add_audio_clip_inner(
         &mut self,
         track_key: TimelineTrackKey,
-        stored_clip_key: StoredAudioClipKey,
-        start: Timestamp,
-        length: Option<Timestamp>,
-    ) -> Result<AudioClipKey, AddClipError> {
+        clip_state: AudioClipState,
+    ) -> Result<(), AddClipError> {
         if !self.key_in_use(track_key) {
             return Err(AddClipError::InvalidTimelineTrack(track_key));
         }
 
-        let clip_key = self.clip_key_generator.peek_next().unwrap();
-        let start_offset = 0;
+        let AudioClipState {
+            key: clip_key,
+            start_offset,
+            start,
+            length,
+            inner: stored_clip_key,
+        } = clip_state;
 
         let reader1 = self
             .clip_store
             .reader(stored_clip_key)
             .or(Err(AddClipError::InvalidClip(stored_clip_key)))?;
-        let audio_clip1 = AudioClip {
+        let audio_clip = AudioClip {
             key: clip_key,
             start,
             length,
@@ -233,29 +236,46 @@ impl Timeline {
             reader: reader1,
         };
 
-        let reader2 = self
-            .clip_store
-            .reader(stored_clip_key)
-            .or(Err(AddClipError::InvalidClip(stored_clip_key)))?;
-        let audio_clip2 = AudioClipProcessor::new(start, length, 0, reader2);
+        let reader2 = self.clip_store.reader(stored_clip_key).unwrap();
+        let audio_clip_processor = AudioClipProcessor::new(start, length, 0, reader2);
 
         let track = self.tracks.get_mut(&track_key).unwrap();
         for clip in track.clips.values() {
-            if clip.overlaps(&audio_clip1, self.sample_rate, self.bpm_cents) {
+            if clip.overlaps(&audio_clip, self.sample_rate, self.bpm_cents) {
                 return Err(AddClipError::Overlapping);
             }
         }
 
-        self.clip_key_generator.reserve(clip_key).unwrap();
-
-        track.clips.insert(clip_key, audio_clip1);
+        track.clips.insert(clip_key, audio_clip);
 
         self.event_sender.send(Event::AddClip {
             track_key,
-            clip: Box::new(TreeNode::new(audio_clip2)),
+            clip: Box::new(TreeNode::new(audio_clip_processor)),
         });
 
-        Ok(clip_key)
+        Ok(())
+    }
+
+    pub fn add_audio_clip(
+        &mut self,
+        track_key: TimelineTrackKey,
+        stored_clip_key: StoredAudioClipKey,
+        start: Timestamp,
+        length: Option<Timestamp>,
+    ) -> Result<AudioClipKey, AddClipError> {
+        let key = self.clip_key_generator.peek_next().unwrap();
+        self.add_audio_clip_inner(
+            track_key,
+            AudioClipState {
+                key,
+                start_offset: 0,
+                start,
+                length,
+                inner: stored_clip_key,
+            },
+        )?;
+        self.clip_key_generator.reserve(key).unwrap();
+        Ok(key)
     }
 
     pub fn audio_clip(
@@ -336,6 +356,17 @@ impl Timeline {
         });
 
         Ok(())
+    }
+
+    pub fn reconstruct_audio_clip(
+        &mut self,
+        track_key: TimelineTrackKey,
+        clip_state: AudioClipState,
+    ) -> Result<AudioClipKey, AudioClipReconstructionError> {
+        let key = clip_state.key;
+        self.add_audio_clip_inner(track_key, clip_state)?;
+        self.clip_key_generator.reserve(key).unwrap();
+        Ok(key)
     }
 
     pub fn add_track(
@@ -717,6 +748,42 @@ impl Display for InvalidAudioClipError {
     }
 }
 impl Error for InvalidAudioClipError {}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum AudioClipReconstructionError {
+    InvalidTrack(TimelineTrackKey),
+    InvalidStoredClip(StoredAudioClipKey),
+    KeyInUse(AudioClipKey),
+    Overlapping,
+}
+impl From<AddClipError> for AudioClipReconstructionError {
+    fn from(err: AddClipError) -> Self {
+        match err {
+            AddClipError::InvalidTimelineTrack(key) => Self::InvalidTrack(key),
+            AddClipError::InvalidClip(key) => Self::InvalidStoredClip(key),
+            AddClipError::Overlapping => Self::Overlapping,
+        }
+    }
+}
+impl Display for AudioClipReconstructionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AudioClipReconstructionError::InvalidTrack(key) => {
+                write!(f, "No timeline track with key, {key}, on timeline")
+            }
+            AudioClipReconstructionError::InvalidStoredClip(key) => {
+                write!(f, "No stored audio clip with key, {key}")
+            }
+            AudioClipReconstructionError::KeyInUse(key) => {
+                write!(f, "Clip key, {key}, already in use")
+            }
+            AudioClipReconstructionError::Overlapping => {
+                write!(f, "Clip overlaps with another clip")
+            }
+        }
+    }
+}
+impl Error for AudioClipReconstructionError {}
 
 #[cfg(test)]
 mod tests {

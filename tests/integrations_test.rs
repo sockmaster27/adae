@@ -245,4 +245,26 @@ mod audio_clips {
         assert!(r.is_ok());
         assert_eq!(e.audio_clips(at.timeline_track_key()).count(), 0);
     }
+
+    #[test]
+    fn reconstruct_audio_clip() {
+        let mut e = Engine::dummy();
+        let at = e.add_audio_track().unwrap();
+
+        let ck = import_ac(&mut e);
+        let ac = e
+            .add_audio_clip(at.timeline_track_key(), ck, Timestamp::from_beats(0), None)
+            .unwrap();
+
+        let s = e.audio_clip(at.timeline_track_key(), ac).unwrap().state();
+
+        e.delete_audio_clip(at.timeline_track_key(), ac).unwrap();
+
+        let ac_new = e
+            .reconstruct_audio_clip(at.timeline_track_key(), s)
+            .unwrap();
+
+        assert_eq!(e.audio_clips(at.timeline_track_key()).count(), 1);
+        assert_eq!(ac, ac_new);
+    }
 }
