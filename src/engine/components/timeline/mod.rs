@@ -150,6 +150,7 @@ enum Event {
     },
     AddClips {
         track_key: MixerTrackKey,
+        #[allow(clippy::vec_box)]
         clips: DBox<Vec<Box<TreeNode<AudioClipProcessor>>>>,
     },
     DeleteClip {
@@ -674,6 +675,7 @@ impl TimelineProcessor {
 
         track.insert_clip(timeline_clip);
     }
+    #[allow(clippy::vec_box)]
     fn add_clips(
         &mut self,
         track_key: TimelineTrackKey,
