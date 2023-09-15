@@ -77,6 +77,11 @@ impl Timestamp {
 impl Add for Timestamp {
     type Output = Self;
     fn add(self, rhs: Self) -> Self::Output {
+        #[cfg(debug_assertions)]
+        self.beat_units
+            .checked_add(rhs.beat_units)
+            .unwrap_or_else(|| panic!("Timestamp addition with overflow: {self:?} + {rhs:?}"));
+
         Self {
             beat_units: self.beat_units + rhs.beat_units,
         }
