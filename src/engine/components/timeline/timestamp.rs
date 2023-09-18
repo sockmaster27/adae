@@ -4,7 +4,7 @@ use std::ops::{Add, Mul, Sub};
 
 const UNITS_PER_BEAT: u32 = 1024;
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Timestamp {
     /// 1 beat = 1024 beat units, making it highly divisible by powers of 2
     beat_units: u32,
@@ -72,6 +72,17 @@ impl Timestamp {
     pub const fn samples(&self, sample_rate: u32, bpm_cents: u16) -> u64 {
         (self.beat_units as u64 * sample_rate as u64 * 60 * 100)
             / (bpm_cents as u64 * UNITS_PER_BEAT as u64)
+    }
+}
+impl Debug for Timestamp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.beat_units == u32::MAX {
+            return f.write_str("Timestamp::infinity()");
+        }
+
+        f.debug_struct("Timestamp")
+            .field("beat_units", &self.beat_units)
+            .finish()
     }
 }
 impl Add for Timestamp {
