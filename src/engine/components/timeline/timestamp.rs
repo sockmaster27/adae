@@ -73,6 +73,17 @@ impl Timestamp {
         (self.beat_units as u64 * sample_rate as u64 * 60 * 100)
             / (bpm_cents as u64 * UNITS_PER_BEAT as u64)
     }
+
+    pub fn checked_add(&self, rhs: Self) -> Option<Self> {
+        self.beat_units
+            .checked_add(rhs.beat_units)
+            .map(Self::from_beat_units)
+    }
+    pub fn checked_sub(&self, rhs: Self) -> Option<Self> {
+        self.beat_units
+            .checked_sub(rhs.beat_units)
+            .map(Self::from_beat_units)
+    }
 }
 impl Debug for Timestamp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -89,8 +100,7 @@ impl Add for Timestamp {
     type Output = Self;
     fn add(self, rhs: Self) -> Self::Output {
         #[cfg(debug_assertions)]
-        self.beat_units
-            .checked_add(rhs.beat_units)
+        self.checked_add(rhs)
             .unwrap_or_else(|| panic!("Timestamp addition with overflow: {self:?} + {rhs:?}"));
 
         Self {
@@ -101,6 +111,10 @@ impl Add for Timestamp {
 impl Sub for Timestamp {
     type Output = Self;
     fn sub(self, rhs: Self) -> Self::Output {
+        #[cfg(debug_assertions)]
+        self.checked_sub(rhs)
+            .unwrap_or_else(|| panic!("Timestamp subtraction with overflow: {self:?} - {rhs:?}"));
+
         Self {
             beat_units: self.beat_units - rhs.beat_units,
         }
