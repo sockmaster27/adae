@@ -6,6 +6,7 @@ use std::error::Error;
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::iter::zip;
+use std::panic;
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::sync_channel;
@@ -19,6 +20,8 @@ pub mod error;
 mod info;
 mod processor;
 mod utils;
+
+use crate::engine::utils::panic_msg;
 
 pub use self::components::timeline::AudioClipReconstructionError;
 pub use components::audio_clip_store::{ImportError, InvalidStoredAudioClipError};
@@ -306,11 +309,8 @@ impl Engine {
             h.thread().unpark();
             let r = h.join();
             if let Err(e) = r {
-                if let Ok(d) = e.downcast::<String>() {
-                    panic!("Failed to terminate stream: {d:?}");
-                } else {
-                    panic!("Failed to terminate stream");
-                }
+                let s = panic_msg(e);
+                panic!("Failed to terminate stream: {s}");
             }
         }
     }
@@ -330,7 +330,7 @@ impl Engine {
                         processor.output(data);
                     }}
                 },
-                |err| panic!("{}", err),
+                |err| panic!("{err}"),
                 None,
             )
             .map_err(|e| match e {

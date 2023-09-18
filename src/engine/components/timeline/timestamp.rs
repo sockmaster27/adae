@@ -100,8 +100,9 @@ impl Add for Timestamp {
     type Output = Self;
     fn add(self, rhs: Self) -> Self::Output {
         #[cfg(debug_assertions)]
-        self.checked_add(rhs)
-            .unwrap_or_else(|| panic!("Timestamp addition with overflow: {self:?} + {rhs:?}"));
+        if self.checked_add(rhs).is_none() {
+            panic!("Timestamp addition with overflow: {self:?} + {rhs:?}");
+        }
 
         Self {
             beat_units: self.beat_units + rhs.beat_units,
@@ -112,8 +113,9 @@ impl Sub for Timestamp {
     type Output = Self;
     fn sub(self, rhs: Self) -> Self::Output {
         #[cfg(debug_assertions)]
-        self.checked_sub(rhs)
-            .unwrap_or_else(|| panic!("Timestamp subtraction with overflow: {self:?} - {rhs:?}"));
+        if self.checked_sub(rhs).is_none() {
+            panic!("Timestamp subtraction with overflow: {self:?} - {rhs:?}");
+        }
 
         Self {
             beat_units: self.beat_units - rhs.beat_units,

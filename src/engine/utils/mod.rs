@@ -4,6 +4,7 @@ pub mod rbtree_node;
 pub mod remote_push;
 pub mod ringbuffer;
 
+use std::any::Any;
 use std::fmt::Debug;
 use std::iter::zip;
 use std::path::PathBuf;
@@ -182,6 +183,19 @@ pub fn format_truncate_list<T: Debug>(max_length: usize, list: &[T]) -> String {
     };
 
     format!("[{}]", truncated_iter)
+}
+
+/// Get the the message from a `panic` cause.
+pub fn panic_msg(e: Box<dyn Any + Send>) -> String {
+    let msg = if let Some(s) = e.downcast_ref::<&str>() {
+        s.to_string()
+    } else if let Some(s) = e.downcast_ref::<String>() {
+        s.to_string()
+    } else {
+        "Unknown error".to_string()
+    };
+
+    msg
 }
 
 #[cfg(test)]
