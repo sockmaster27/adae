@@ -64,12 +64,14 @@ pub struct Engine {
     stopped: Arc<AtomicBool>,
     join_handle: Option<JoinHandle<()>>,
 
+    /// The config is `None` in the dummy engine.
+    config: Option<Config>,
     processor_interface: ProcessorInterface,
     audio_tracks: HashSet<AudioTrack>,
 }
 impl Engine {
     pub fn empty() -> Self {
-        let (engine, import_errors) = Engine::new(&Config::default(), &EngineState::default())
+        let (engine, import_errors) = Engine::new(Config::default(), &EngineState::default())
             .expect("Failed to create empty engine");
         debug_assert!(
             import_errors.is_empty(),
@@ -80,7 +82,7 @@ impl Engine {
     }
 
     pub fn new(
-        config: &Config,
+        config: Config,
         state: &EngineState,
     ) -> Result<(Self, Vec<ImportError>), InvalidConfigError> {
         let StartedStream {
@@ -88,11 +90,12 @@ impl Engine {
             join_handle,
             processor_interface,
             import_errors,
-        } = Self::start_stream(config, state)?;
+        } = Self::start_stream(&config, state)?;
 
         let engine = Engine {
             stopped: stopped_flag,
             join_handle: Some(join_handle),
+            config: Some(config),
             processor_interface,
             audio_tracks: HashSet::from_iter(state.audio_tracks.iter().cloned()),
         };
@@ -100,8 +103,14 @@ impl Engine {
         Ok((engine, import_errors))
     }
 
+    /// Get the config that is currently in use.
+    pub fn get_config(&self) -> &Config {
+        self.config
+            .as_ref()
+            .expect("Config is not available on dummy engine")
+    }
     /// Restart the engine with the given config.
-    pub fn set_config(&mut self, config: &Config) -> Result<(), InvalidConfigError> {
+    pub fn set_config(&mut self, config: Config) -> Result<(), InvalidConfigError> {
         let state = self.state();
 
         self.stop_stream();
@@ -111,13 +120,15 @@ impl Engine {
             join_handle,
             processor_interface,
             import_errors,
-        } = Self::start_stream(config, &state)?;
+        } = Self::start_stream(&config, &state)?;
 
         debug_assert!(import_errors.is_empty());
 
         self.stopped = stopped_flag;
         self.join_handle = Some(join_handle);
         self.processor_interface = processor_interface;
+
+        self.config = Some(config);
 
         Ok(())
     }
@@ -145,6 +156,7 @@ impl Engine {
         let engine = Engine {
             stopped,
             join_handle: Some(join_handle),
+            config: None,
             processor_interface,
             audio_tracks: HashSet::from_iter(state.audio_tracks.iter().cloned()),
         };
