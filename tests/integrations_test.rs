@@ -192,13 +192,13 @@ mod audio_clips {
         let mut e = Engine::dummy();
         let at = e.add_audio_track().unwrap();
 
-        assert_eq!(e.audio_clips(at.timeline_track_key()).count(), 0);
+        assert_eq!(e.audio_clips(at.timeline_track_key()).unwrap().count(), 0);
 
         let ck = import_ac(&mut e);
         let r = e.add_audio_clip(at.timeline_track_key(), ck, Timestamp::from_beats(0), None);
 
         assert!(r.is_ok());
-        assert_eq!(e.audio_clips(at.timeline_track_key()).count(), 1);
+        assert_eq!(e.audio_clips(at.timeline_track_key()).unwrap().count(), 1);
     }
 
     #[test]
@@ -211,12 +211,12 @@ mod audio_clips {
             .add_audio_clip(at.timeline_track_key(), ck, Timestamp::from_beats(0), None)
             .unwrap();
 
-        assert_eq!(e.audio_clips(at.timeline_track_key()).count(), 1);
+        assert_eq!(e.audio_clips(at.timeline_track_key()).unwrap().count(), 1);
 
         let r = e.delete_audio_clip(at.timeline_track_key(), ac);
 
         assert!(r.is_ok());
-        assert_eq!(e.audio_clips(at.timeline_track_key()).count(), 0);
+        assert_eq!(e.audio_clips(at.timeline_track_key()).unwrap().count(), 0);
     }
 
     #[test]
@@ -238,12 +238,12 @@ mod audio_clips {
             );
         }
 
-        assert_eq!(e.audio_clips(at.timeline_track_key()).count(), 42);
+        assert_eq!(e.audio_clips(at.timeline_track_key()).unwrap().count(), 42);
 
         let r = e.delete_audio_clips(at.timeline_track_key(), acs);
 
         assert!(r.is_ok());
-        assert_eq!(e.audio_clips(at.timeline_track_key()).count(), 0);
+        assert_eq!(e.audio_clips(at.timeline_track_key()).unwrap().count(), 0);
     }
 
     #[test]
@@ -264,7 +264,7 @@ mod audio_clips {
             .reconstruct_audio_clip(at.timeline_track_key(), s)
             .unwrap();
 
-        assert_eq!(e.audio_clips(at.timeline_track_key()).count(), 1);
+        assert_eq!(e.audio_clips(at.timeline_track_key()).unwrap().count(), 1);
         assert_eq!(ac, ac_new);
     }
 
@@ -297,7 +297,7 @@ mod audio_clips {
             .reconstruct_audio_clips(at.timeline_track_key(), ss)
             .unwrap();
 
-        assert_eq!(e.audio_clips(at.timeline_track_key()).count(), 42);
+        assert_eq!(e.audio_clips(at.timeline_track_key()).unwrap().count(), 42);
         assert_eq!(acs, acs_new);
     }
 }

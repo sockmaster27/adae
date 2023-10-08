@@ -403,7 +403,7 @@ impl Engine {
         &self,
         timeline_track_key: TimelineTrackKey,
         audio_clip_key: AudioClipKey,
-    ) -> Result<&AudioClip, InvalidStoredAudioClipError> {
+    ) -> Result<&AudioClip, InvalidAudioClipError> {
         self.processor_interface
             .timeline
             .audio_clip(timeline_track_key, audio_clip_key)
@@ -412,7 +412,7 @@ impl Engine {
     pub fn audio_clips(
         &self,
         timeline_track_key: TimelineTrackKey,
-    ) -> impl Iterator<Item = &AudioClip> {
+    ) -> Result<impl Iterator<Item = &AudioClip>, InvalidTimelineTrackError> {
         self.processor_interface
             .timeline
             .audio_clips(timeline_track_key)
