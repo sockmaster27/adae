@@ -978,4 +978,48 @@ mod tests {
 
         assert_eq!(res, Err(AddClipError::Overlapping));
     }
+
+    #[test]
+    fn delete_clip_immediately() {
+        let (mut tl, mut tlp, ie) = timeline(&TimelineState::default(), 40_000, 10);
+        assert!(ie.is_empty());
+
+        let ck = tl
+            .import_audio_clip(&test_file_path("44100 16-bit.wav"))
+            .unwrap();
+        let tk = tl.add_track(0).unwrap();
+        let ak = tl
+            .add_audio_clip(tk, ck, Timestamp::from_beat_units(0), None)
+            .unwrap();
+
+        tl.delete_audio_clip(tk, ak).unwrap();
+
+        no_heap! {{
+            tlp.poll();
+        }}
+    }
+
+    #[test]
+    fn delete_clip_delayed() {
+        let (mut tl, mut tlp, ie) = timeline(&TimelineState::default(), 40_000, 10);
+        assert!(ie.is_empty());
+
+        let ck = tl
+            .import_audio_clip(&test_file_path("44100 16-bit.wav"))
+            .unwrap();
+        let tk = tl.add_track(0).unwrap();
+        let ak = tl
+            .add_audio_clip(tk, ck, Timestamp::from_beat_units(0), None)
+            .unwrap();
+
+        no_heap! {{
+            tlp.poll();
+        }}
+
+        tl.delete_audio_clip(tk, ak).unwrap();
+
+        no_heap! {{
+            tlp.poll();
+        }}
+    }
 }
