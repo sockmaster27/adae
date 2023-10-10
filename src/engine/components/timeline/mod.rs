@@ -347,11 +347,14 @@ impl Timeline {
         let track = self
             .tracks
             .get(&track_key)
-            .ok_or(InvalidAudioClipError::InvalidTrack(track_key))?;
+            .ok_or(InvalidAudioClipError::InvalidTrack { track_key })?;
         track
             .clips
             .get(&clip_key)
-            .ok_or(InvalidAudioClipError::InvalidClip(clip_key))
+            .ok_or(InvalidAudioClipError::InvalidClip {
+                track_key,
+                clip_key,
+            })
     }
 
     pub fn audio_clips(
@@ -373,11 +376,14 @@ impl Timeline {
         let track = self
             .tracks
             .get_mut(&track_key)
-            .ok_or(InvalidAudioClipError::InvalidTrack(track_key))?;
+            .ok_or(InvalidAudioClipError::InvalidTrack { track_key })?;
         let clip = track
             .clips
             .remove(&clip_key)
-            .ok_or(InvalidAudioClipError::InvalidClip(clip_key))?;
+            .ok_or(InvalidAudioClipError::InvalidClip {
+                track_key,
+                clip_key,
+            })?;
 
         self.clip_key_generator
             .free(clip_key)
@@ -398,7 +404,7 @@ impl Timeline {
         let track = self
             .tracks
             .get_mut(&track_key)
-            .ok_or(InvalidAudioClipError::InvalidTrack(track_key))?;
+            .ok_or(InvalidAudioClipError::InvalidTrack { track_key })?;
 
         let clips = clip_keys
             .iter()
@@ -406,7 +412,10 @@ impl Timeline {
                 track
                     .clips
                     .remove(&clip_key)
-                    .ok_or(InvalidAudioClipError::InvalidClip(clip_key))
+                    .ok_or(InvalidAudioClipError::InvalidClip {
+                        track_key,
+                        clip_key,
+                    })
             })
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -837,16 +846,29 @@ impl Error for AddClipError {}
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum InvalidAudioClipError {
-    InvalidTrack(TimelineTrackKey),
-    InvalidClip(AudioClipKey),
+    InvalidTrack {
+        track_key: TimelineTrackKey,
+    },
+    InvalidClip {
+        track_key: TimelineTrackKey,
+        clip_key: AudioClipKey,
+    },
 }
 impl Display for InvalidAudioClipError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            InvalidAudioClipError::InvalidTrack(key) => {
-                write!(f, "Attempted to access an audio clip on a non-existing timeline track with key, {key}")
+            InvalidAudioClipError::InvalidTrack { track_key } => {
+                write!(f, "Attempted to access an audio clip on a non-existing timeline track with key, {track_key}")
             }
-            InvalidAudioClipError::InvalidClip(key) => write!(f, "No clip with key, {key}"),
+            InvalidAudioClipError::InvalidClip {
+                track_key,
+                clip_key,
+            } => {
+                write!(
+                    f,
+                    "No clip with key, {clip_key}, on track with key, {track_key}"
+                )
+            }
         }
     }
 }

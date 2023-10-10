@@ -15,6 +15,7 @@ pub type AudioClipKey = u32;
 
 /// A mirror of `AudioClipProcessor`'s state.
 /// Does no synchronization.
+#[derive(Debug)]
 pub struct AudioClip {
     pub key: AudioClipKey,
 
