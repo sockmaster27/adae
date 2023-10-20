@@ -4,6 +4,14 @@ use std::{iter::zip, path::Path};
 
 use adae::{Engine, StoredAudioClipKey, Timestamp};
 
+fn import_audio_clip(e: &mut Engine) -> StoredAudioClipKey {
+    e.import_audio_clip(Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/test_files/44100 16-bit.wav"
+    )))
+    .unwrap()
+}
+
 #[test]
 fn create_dummy_engine() {
     Engine::dummy();
@@ -142,34 +150,45 @@ mod audio_tracks {
 
         assert_eq!(e.audio_tracks().count(), 42);
     }
+
+    #[test]
+    fn reconstruct_audio_track_with_clip() {
+        let mut e = Engine::dummy();
+        let at = e.add_audio_track().unwrap();
+
+        let ck = import_audio_clip(&mut e);
+
+        e.add_audio_clip(at.timeline_track_key(), ck, Timestamp::zero(), None)
+            .unwrap();
+
+        let s = e.audio_track_state(&at).unwrap();
+        e.delete_audio_track(at.clone()).unwrap();
+
+        let at_new = e.reconstruct_audio_track(s).unwrap();
+        let acs_new = e.audio_clips(at_new.timeline_track_key()).unwrap();
+
+        assert_eq!(acs_new.count(), 1);
+    }
 }
 
 mod audio_clips {
     use super::*;
 
-    fn import_ac(e: &mut Engine) -> StoredAudioClipKey {
-        e.import_audio_clip(Path::new(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/test_files/44100 16-bit.wav"
-        )))
-        .unwrap()
-    }
-
     mod stored {
         use super::*;
 
         #[test]
-        fn import_audio_clip() {
+        fn import_new_audio_clip() {
             let mut e = Engine::dummy();
             assert_eq!(e.stored_audio_clips().count(), 0);
-            import_ac(&mut e);
+            import_audio_clip(&mut e);
             assert_eq!(e.stored_audio_clips().count(), 1);
         }
 
         #[test]
         fn get_from_key() {
             let mut e = Engine::dummy();
-            let ck = import_ac(&mut e);
+            let ck = import_audio_clip(&mut e);
 
             let ac = e.stored_audio_clip(ck).unwrap();
 
@@ -179,7 +198,7 @@ mod audio_clips {
         #[test]
         fn length() {
             let mut e = Engine::dummy();
-            let ck = import_ac(&mut e);
+            let ck = import_audio_clip(&mut e);
 
             let ac = e.stored_audio_clip(ck).unwrap();
 
@@ -194,7 +213,7 @@ mod audio_clips {
 
         assert_eq!(e.audio_clips(at.timeline_track_key()).unwrap().count(), 0);
 
-        let ck = import_ac(&mut e);
+        let ck = import_audio_clip(&mut e);
         let r = e.add_audio_clip(at.timeline_track_key(), ck, Timestamp::from_beats(0), None);
 
         assert!(r.is_ok());
@@ -206,7 +225,7 @@ mod audio_clips {
         let mut e = Engine::dummy();
         let at = e.add_audio_track().unwrap();
 
-        let ck = import_ac(&mut e);
+        let ck = import_audio_clip(&mut e);
         let ac = e
             .add_audio_clip(at.timeline_track_key(), ck, Timestamp::from_beats(0), None)
             .unwrap();
@@ -223,7 +242,7 @@ mod audio_clips {
     fn delete_audio_clips() {
         let mut e = Engine::dummy();
         let at = e.add_audio_track().unwrap();
-        let ck = import_ac(&mut e);
+        let ck = import_audio_clip(&mut e);
 
         let mut acs = Vec::new();
         for i in 0..42 {
@@ -251,7 +270,7 @@ mod audio_clips {
         let mut e = Engine::dummy();
         let at = e.add_audio_track().unwrap();
 
-        let ck = import_ac(&mut e);
+        let ck = import_audio_clip(&mut e);
         let ac = e
             .add_audio_clip(at.timeline_track_key(), ck, Timestamp::from_beats(0), None)
             .unwrap();
@@ -273,7 +292,7 @@ mod audio_clips {
         let mut e = Engine::dummy();
         let at = e.add_audio_track().unwrap();
 
-        let ck = import_ac(&mut e);
+        let ck = import_audio_clip(&mut e);
 
         let mut acs = Vec::new();
         let mut ss = Vec::new();

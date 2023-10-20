@@ -28,7 +28,9 @@ use crate::engine::{
         dropper::DBox,
         key_generator::{self, KeyGenerator},
         rbtree_node::TreeNode,
-        remote_push::{RemotePushable, RemotePushedHashMap, RemotePusherHashMap},
+        remote_push::{
+            RemotePushHashMapEvent, RemotePushable, RemotePushedHashMap, RemotePusherHashMap,
+        },
         ringbuffer::{self, ringbuffer},
     },
     Sample, CHANNELS,
@@ -58,21 +60,21 @@ pub fn timeline(
     let (clip_store, import_errors) =
         AudioClipStore::new(store_state, sample_rate, max_buffer_size);
 
-    let tracks = HashMap::from_iter(track_states.iter().map(|state| {
+    let tracks = HashMap::from_iter(track_states.iter().map(|track_state| {
         (
-            state.key,
+            track_state.key,
             TimelineTrack {
-                output_track: state.output_track,
-                clips: HashMap::from_iter(state.clips.iter().map(|state| {
+                output_track: track_state.output_track,
+                clips: HashMap::from_iter(track_state.clips.iter().map(|clip_state| {
                     (
-                        state.key,
+                        clip_state.key,
                         AudioClip {
-                            key: state.key,
-                            start: state.start,
-                            length: state.length,
-                            start_offset: state.start_offset,
+                            key: clip_state.key,
+                            start: clip_state.start,
+                            length: clip_state.length,
+                            start_offset: clip_state.start_offset,
                             reader: clip_store
-                                .reader(state.inner)
+                                .reader(clip_state.inner)
                                 .expect("An invalid audio clip was referenced"),
                         },
                     )
@@ -89,13 +91,13 @@ pub fn timeline(
             *bpm_cents,
         );
 
-        for state in state.clips.iter() {
+        for clip_state in state.clips.iter() {
             track.insert_clip(Box::new(TreeNode::new(AudioClipProcessor::new(
-                state.start,
-                state.length,
-                state.start_offset,
+                clip_state.start,
+                clip_state.length,
+                clip_state.start_offset,
                 clip_store
-                    .reader(state.inner)
+                    .reader(clip_state.inner)
                     .expect("An invalid audio clip was referenced"),
             ))));
         }
@@ -144,6 +146,7 @@ pub fn timeline(
 
 enum Event {
     JumpTo(Timestamp),
+    Track(RemotePushHashMapEvent<TimelineTrackKey, DBox<TimelineTrackProcessor>>),
     AddClip {
         track_key: MixerTrackKey,
         clip: Box<TreeNode<AudioClipProcessor>>,
@@ -479,7 +482,12 @@ impl Timeline {
             self.sample_rate,
             self.bpm_cents,
         );
-        self.track_processors.push((key, DBox::new(timeline_track)));
+
+        let event = self
+            .track_processors
+            .push_event((key, DBox::new(timeline_track)));
+        self.event_sender.send(Event::Track(event));
+
         Ok(key)
     }
     pub fn add_tracks(
@@ -519,7 +527,10 @@ impl Timeline {
                 )
             })
             .collect();
-        self.track_processors.push_multiple(track_processors);
+
+        let event = self.track_processors.push_multiple_event(track_processors);
+        self.event_sender.send(Event::Track(event));
+
         Ok(keys)
     }
 
@@ -528,7 +539,12 @@ impl Timeline {
         if result.is_err() {
             return Err(InvalidTimelineTrackError { key });
         }
-        self.track_processors.remove(key);
+
+        self.tracks.remove(&key);
+
+        let event = self.track_processors.remove_event(key);
+        self.event_sender.send(Event::Track(event));
+
         Ok(())
     }
     pub fn delete_tracks(
@@ -546,51 +562,91 @@ impl Timeline {
                 .expect("key_in_use() returned true, even though free() returned error");
             self.tracks.remove(&key);
         }
-        self.track_processors.remove_multiple(keys);
+
+        let event = self.track_processors.remove_multiple_event(keys);
+        self.event_sender.send(Event::Track(event));
+
         Ok(())
     }
 
-    pub fn reconstruct_track(&mut self, state: &TimelineTrackState, output: MixerTrackKey) {
+    pub fn reconstruct_track(&mut self, state: &TimelineTrackState) {
         let key = state.key;
         self.track_key_generator
             .reserve(key)
             .expect("Timeline track key already in use");
 
-        self.tracks.insert(key, TimelineTrack::new(output));
+        self.tracks.insert(
+            key,
+            TimelineTrack {
+                output_track: state.output_track,
+                clips: HashMap::from_iter(state.clips.iter().map(|clip_state| {
+                    (
+                        clip_state.key,
+                        AudioClip {
+                            key: clip_state.key,
+                            start: clip_state.start,
+                            length: clip_state.length,
+                            start_offset: clip_state.start_offset,
+                            reader: self
+                                .clip_store
+                                .reader(clip_state.inner)
+                                .expect("An invalid audio clip was referenced"),
+                        },
+                    )
+                })),
+            },
+        );
 
-        let timeline_track = TimelineTrackProcessor::new(
-            output,
+        let mut timeline_track = TimelineTrackProcessor::new(
+            state.output_track,
             Arc::clone(&self.position),
             self.sample_rate,
             self.bpm_cents,
         );
-        self.track_processors.push((key, DBox::new(timeline_track)));
+        for clip_state in state.clips.iter() {
+            timeline_track.insert_clip(Box::new(TreeNode::new(AudioClipProcessor::new(
+                clip_state.start,
+                clip_state.length,
+                clip_state.start_offset,
+                self.clip_store
+                    .reader(clip_state.inner)
+                    .expect("An invalid audio clip was referenced"),
+            ))));
+        }
+
+        let event = self
+            .track_processors
+            .push_event((key, DBox::new(timeline_track)));
+        self.event_sender.send(Event::Track(event));
     }
 
-    pub fn reconstruct_tracks<'a>(
-        &mut self,
-        states: impl Iterator<Item = (&'a TimelineTrackState, MixerTrackKey)>,
-    ) {
-        let track_processors = states.map(|(state, output)| {
-            let key = state.key;
+    pub fn reconstruct_tracks<'a>(&mut self, states: impl Iterator<Item = &'a TimelineTrackState>) {
+        let states: Vec<_> = states.collect();
+
+        let keys = states.iter().map(|state| state.key);
+
+        for key in keys.clone() {
             self.track_key_generator
                 .reserve(key)
                 .expect("Timeline track key already in use");
+        }
 
-            self.tracks.insert(key, TimelineTrack::new(output));
+        let tracks = states.iter().map(|state| {
+            self.tracks
+                .insert(state.key, TimelineTrack::new(state.output_track));
 
-            (
-                key,
-                DBox::new(TimelineTrackProcessor::new(
-                    output,
-                    Arc::clone(&self.position),
-                    self.sample_rate,
-                    self.bpm_cents,
-                )),
-            )
+            DBox::new(TimelineTrackProcessor::new(
+                state.output_track,
+                Arc::clone(&self.position),
+                self.sample_rate,
+                self.bpm_cents,
+            ))
         });
-        self.track_processors
-            .push_multiple(track_processors.collect());
+
+        let event = self
+            .track_processors
+            .push_multiple_event(zip(keys, tracks).collect());
+        self.event_sender.send(Event::Track(event));
     }
 
     pub fn key_in_use(&self, key: TimelineTrackKey) -> bool {
@@ -646,8 +702,6 @@ pub struct TimelineProcessor {
 }
 impl TimelineProcessor {
     pub fn poll(&mut self) {
-        self.tracks.poll();
-
         for _ in 0..256 {
             let event_option = self.event_receiver.recv();
             match event_option {
@@ -655,6 +709,7 @@ impl TimelineProcessor {
 
                 Some(event) => match event {
                     Event::JumpTo(pos) => self.jump_to(pos),
+                    Event::Track(event) => self.tracks.process_event(event),
                     Event::AddClip { track_key, clip } => self.add_clip(track_key, clip),
                     Event::AddClips { track_key, clips } => self.add_clips(track_key, clips),
                     Event::DeleteClip {

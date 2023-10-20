@@ -25,7 +25,7 @@ pub trait RemotePushable<E: Send, K: Send>: Send + Debug + Sized {
     fn remote_push_with_capacity(
         initial_capacity: usize,
     ) -> (RemotePusher<E, K, Self>, RemotePushed<E, K, Self>) {
-        let (event_sender, event_receiver) = ringbuffer_with_capacity(initial_capacity);
+        let (event_sender, event_receiver) = ringbuffer_with_capacity(16);
 
         (
             RemotePusher {
@@ -64,6 +64,7 @@ pub trait RemotePushable<E: Send, K: Send>: Send + Debug + Sized {
     }
 }
 
+pub type RemotePushHashMapEvent<K, V> = RemotePushEvent<(K, V), K, HashMap<K, V>>;
 pub type RemotePusherHashMap<K, V> = RemotePusher<(K, V), K, HashMap<K, V>>;
 pub type RemotePushedHashMap<K, V> = RemotePushed<(K, V), K, HashMap<K, V>>;
 impl<K, V> RemotePushable<(K, V), K> for HashMap<K, V>
@@ -99,6 +100,7 @@ where
     }
 }
 
+#[derive(Debug)]
 pub enum RemotePushEvent<E, K, C>
 where
     E: Send + 'static,

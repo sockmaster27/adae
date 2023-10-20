@@ -594,6 +594,9 @@ impl Engine {
         })
     }
 
+    /// Checks if the given audio track exists. Useful for returning early.
+    ///
+    /// Returns `Ok(())` if it exists, otherwise returns an error with more information.
     fn audio_track_exists(&self, audio_track: &AudioTrack) -> Result<(), InvalidAudioTrackError> {
         if !self
             .processor_interface
@@ -640,7 +643,7 @@ impl Engine {
 
         self.processor_interface
             .timeline
-            .reconstruct_track(&state.timeline_track_state, track_key);
+            .reconstruct_track(&state.timeline_track_state);
         self.processor_interface
             .mixer
             .reconstruct_track(&state.track_state);
@@ -690,11 +693,9 @@ impl Engine {
             audio_tracks.push(audio_track);
         }
 
-        self.processor_interface.timeline.reconstruct_tracks(
-            states
-                .iter()
-                .map(|state| (&state.timeline_track_state, state.track_state.key)),
-        );
+        self.processor_interface
+            .timeline
+            .reconstruct_tracks(states.iter().map(|state| &state.timeline_track_state));
         self.processor_interface
             .mixer
             .reconstruct_tracks(states.iter().map(|state| &state.track_state));
