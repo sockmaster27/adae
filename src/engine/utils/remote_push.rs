@@ -9,7 +9,6 @@ use std::{
 use crate::engine::utils::dropper::DBox;
 
 use super::{
-    dropper,
     ringbuffer::{self, ringbuffer_with_capacity},
     smallest_pow2,
 };
@@ -100,22 +99,30 @@ where
     }
 }
 
-enum Event<E, K, C>
+pub enum RemotePushEvent<E, K, C>
 where
     E: Send + 'static,
     K: Send + 'static,
     C: RemotePushable<E, K> + 'static,
 {
-    Push(E),
-    Remove(K),
+    Push {
+        element: E,
+        realloc: Option<DBox<C>>,
+    },
+    Remove {
+        key: K,
+    },
 
     // Slices are boxed for conversion to Box<dyn Send>
     #[allow(clippy::box_collection)]
-    PushMultiple(Box<Vec<E>>),
+    PushMultiple {
+        elements: DBox<Vec<E>>,
+        realloc: Option<DBox<C>>,
+    },
     #[allow(clippy::box_collection)]
-    RemoveMultiple(Box<Vec<K>>),
-
-    Reallocated(Box<C>),
+    RemoveMultiple {
+        keys: DBox<Vec<K>>,
+    },
 }
 
 pub struct RemotePusher<E, K, C>
@@ -129,7 +136,7 @@ where
     /// Number of elements there are room for in the latest allocation of the collection
     capacity: usize,
 
-    event_sender: ringbuffer::Sender<Event<E, K, C>>,
+    event_sender: ringbuffer::Sender<RemotePushEvent<E, K, C>>,
 }
 impl<E, K, C> RemotePusher<E, K, C>
 where
@@ -138,45 +145,76 @@ where
     C: RemotePushable<E, K> + 'static,
 {
     pub fn push(&mut self, element: E) {
+        let event = self.push_event(element);
+        self.event_sender.send(event);
+    }
+    /// Returns the raw event that should be sent to the receiver.
+    ///
+    /// Using this, it is the responsibility of the caller to ensure that the event reaches
+    /// the receiver in the right order in relation to all other generated events.
+    pub fn push_event(&mut self, element: E) -> RemotePushEvent<E, K, C> {
         self.length += 1;
-        self.ensure_capacity(self.length);
-        self.event_sender.send(Event::Push(element));
+        let realloc = self.ensure_capacity(self.length);
+        RemotePushEvent::Push { element, realloc }
     }
+
     pub fn push_multiple(&mut self, elements: Vec<E>) {
+        let event = self.push_multiple_event(elements);
+        self.event_sender.send(event);
+    }
+    /// Returns the raw event that should be sent to the receiver.
+    ///
+    /// Using this, it is the responsibility of the caller to ensure that the event reaches
+    /// the receiver in the right order in relation to all other generated events.
+    pub fn push_multiple_event(&mut self, elements: Vec<E>) -> RemotePushEvent<E, K, C> {
         self.length += elements.len();
-        self.ensure_capacity(self.length);
-
-        self.event_sender
-            .send(Event::PushMultiple(Box::new(elements)));
+        let realloc = self.ensure_capacity(self.length);
+        RemotePushEvent::PushMultiple {
+            elements: DBox::new(elements),
+            realloc,
+        }
     }
 
-    fn ensure_capacity(&mut self, needed_capacity: usize) {
-        if self.capacity < needed_capacity {
-            let new_capacity = smallest_pow2(needed_capacity as f64);
-
-            let new_inner = C::with_capacity(new_capacity);
-            self.event_sender
-                .send(Event::Reallocated(Box::new(new_inner)));
-
-            self.capacity = new_capacity;
+    /// Returns a reallocated collection if the capacity is too small, otherwise `None`.
+    fn ensure_capacity(&mut self, needed_capacity: usize) -> Option<DBox<C>> {
+        if self.capacity >= needed_capacity {
+            return None;
         }
+
+        self.capacity = smallest_pow2(needed_capacity as f64);
+        let new_inner = C::with_capacity(self.capacity);
+
+        Some(DBox::new(new_inner))
     }
 
     pub fn remove(&mut self, key: K) {
+        let event = self.remove_event(key);
+        self.event_sender.send(event);
+    }
+    /// Returns the raw event that should be sent to the receiver.
+    ///
+    /// Using this, it is the responsibility of the caller to ensure that the event reaches
+    /// the receiver in the right order in relation to all other generated events.
+    pub fn remove_event(&mut self, key: K) -> RemotePushEvent<E, K, C> {
         if self.length == 0 {
             panic!("Attempted to remove element from empty collection");
         }
-
-        self.event_sender.send(Event::Remove(key));
         self.length -= 1;
+        RemotePushEvent::Remove { key }
     }
+
     pub fn remove_multiple(&mut self, keys: Vec<K>) {
+        let event = self.remove_multiple_event(keys);
+        self.event_sender.send(event);
+    }
+    pub fn remove_multiple_event(&mut self, keys: Vec<K>) -> RemotePushEvent<E, K, C> {
         if self.length < keys.len() {
             panic!("Number of keys to be removed exceeds length of collection");
         }
         self.length -= keys.len();
-        self.event_sender
-            .send(Event::RemoveMultiple(Box::new(keys)));
+        RemotePushEvent::RemoveMultiple {
+            keys: DBox::new(keys),
+        }
     }
 }
 
@@ -187,7 +225,7 @@ where
     C: RemotePushable<E, K> + 'static,
 {
     inner: DBox<C>,
-    event_receiver: ringbuffer::Receiver<Event<E, K, C>>,
+    event_receiver: ringbuffer::Receiver<RemotePushEvent<E, K, C>>,
 }
 impl<E: Send, K: Send, C: RemotePushable<E, K>> RemotePushed<E, K, C> {
     pub fn push(&mut self, e: E) {
@@ -202,39 +240,45 @@ impl<E: Send, K: Send, C: RemotePushable<E, K>> RemotePushed<E, K, C> {
         }
     }
 
+    fn realloc(&mut self, new: Option<DBox<C>>) {
+        if let Some(mut new) = new {
+            self.inner.transplant(&mut *new);
+            mem::swap(&mut new, &mut self.inner);
+        }
+    }
+
     pub fn poll(&mut self) {
         for _ in 0..256 {
             let event_option = self.event_receiver.recv();
             match event_option {
+                Some(event) => self.process_event(event),
                 None => return,
+            }
+        }
+    }
+    pub fn process_event(&mut self, event: RemotePushEvent<E, K, C>) {
+        match event {
+            RemotePushEvent::Push { element, realloc } => {
+                self.realloc(realloc);
+                self.push(element);
+            }
+            RemotePushEvent::Remove { key } => {
+                self.remove(key);
+            }
 
-                Some(event) => match event {
-                    Event::Push(e) => {
-                        self.push(e);
-                    }
-                    Event::Remove(k) => {
-                        self.remove(k);
-                    }
-
-                    Event::PushMultiple(mut es) => {
-                        for e in es.drain(..) {
-                            self.push(e);
-                        }
-                        dropper::send(es);
-                    }
-                    Event::RemoveMultiple(mut ks) => {
-                        for k in ks.drain(..) {
-                            self.remove(k);
-                        }
-                        dropper::send(ks);
-                    }
-
-                    Event::Reallocated(new) => {
-                        let mut new = DBox::from(new);
-                        self.inner.transplant(&mut *new);
-                        mem::swap(&mut new, &mut self.inner);
-                    }
-                },
+            RemotePushEvent::PushMultiple {
+                mut elements,
+                realloc,
+            } => {
+                self.realloc(realloc);
+                for e in elements.drain(..) {
+                    self.push(e);
+                }
+            }
+            RemotePushEvent::RemoveMultiple { mut keys } => {
+                for k in keys.drain(..) {
+                    self.remove(k);
+                }
             }
         }
     }
@@ -264,7 +308,7 @@ mod tests {
     use super::*;
 
     mod hash_map {
-        use std::iter::zip;
+        use std::{iter::zip, vec};
 
         use super::*;
 
@@ -410,6 +454,64 @@ mod tests {
             no_heap! {{
                 rped.poll();
             }}
+        }
+
+        #[test]
+        fn push_manually() {
+            let (mut rper, mut rped) = HashMap::remote_push();
+
+            let event = rper.push_event(("mop", 5));
+
+            no_heap! {{
+                rped.process_event(event);
+            }}
+
+            let mut result: Vec<(&str, i32)> = rped.drain().collect();
+            result.sort();
+            assert_eq!(result, vec![("mop", 5)]);
+        }
+
+        #[test]
+        fn remove_manually() {
+            let (mut rper, mut rped) = HashMap::remote_push();
+
+            let event1 = rper.push_event(("mop", 5));
+            let event2 = rper.remove_event("mop");
+            no_heap! {{
+                rped.process_event(event1);
+                rped.process_event(event2);
+            }}
+
+            assert_eq!(rped.len(), 0);
+        }
+
+        #[test]
+        fn push_mulptiple_manually() {
+            let (mut rper, mut rped) = HashMap::remote_push();
+
+            let event = rper.push_multiple_event(vec![("mop", 2), ("stop", 5), ("flop", 1)]);
+
+            no_heap! {{
+                rped.process_event(event);
+            }}
+
+            let mut result: Vec<(&str, i32)> = rped.drain().collect();
+            result.sort();
+            assert_eq!(result, vec![("flop", 1), ("mop", 2), ("stop", 5)]);
+        }
+
+        #[test]
+        fn remove_multiple_manually() {
+            let (mut rper, mut rped) = HashMap::remote_push();
+
+            let event1 = rper.push_multiple_event(vec![("mop", 2), ("stop", 5), ("flop", 1)]);
+            let event2 = rper.remove_multiple_event(vec!["mop", "stop", "flop"]);
+            no_heap! {{
+                rped.process_event(event1);
+                rped.process_event(event2);
+            }}
+
+            assert_eq!(rped.len(), 0);
         }
     }
 }
