@@ -4,7 +4,7 @@ use std::ops::{Add, Mul, Sub};
 
 const UNITS_PER_BEAT: u32 = 1024;
 
-#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Timestamp {
     /// 1 beat = 1024 beat units, making it highly divisible by powers of 2
     beat_units: u32,
@@ -136,16 +136,6 @@ impl Mul<Timestamp> for u32 {
         Timestamp {
             beat_units: self * rhs.beat_units,
         }
-    }
-}
-impl PartialOrd for Timestamp {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.beat_units.partial_cmp(&other.beat_units)
-    }
-}
-impl Ord for Timestamp {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.beat_units.cmp(&other.beat_units)
     }
 }
 
