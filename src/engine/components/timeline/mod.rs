@@ -164,6 +164,11 @@ enum Event {
         track_key: MixerTrackKey,
         clip_starts: DBox<Vec<Timestamp>>,
     },
+    CropAudioClipEnd {
+        track_key: MixerTrackKey,
+        clip_start: Timestamp,
+        new_length: Timestamp,
+    },
 }
 
 pub struct Timeline {
@@ -468,6 +473,48 @@ impl Timeline {
         Ok(keys)
     }
 
+    pub fn audio_clip_crop_end(
+        &mut self,
+        track_key: TimelineTrackKey,
+        clip_key: AudioClipKey,
+        new_length: Timestamp,
+    ) -> Result<(), MoveAudioClipError> {
+        let track = self
+            .tracks
+            .get_mut(&track_key)
+            .ok_or(MoveAudioClipError::InvalidTrack { track_key })?;
+
+        let clip = track
+            .clips
+            .get(&clip_key)
+            .ok_or(MoveAudioClipError::InvalidClip {
+                track_key,
+                clip_key,
+            })?;
+
+        // Check for overlaps
+        let clip_start = clip.start;
+        let new_clip_end = clip_start + new_length;
+        for other_clip in track.clips.values() {
+            let same = other_clip.key == clip.key;
+            let overlapping = clip_start < other_clip.start && other_clip.start < new_clip_end;
+            if !same && overlapping {
+                return Err(MoveAudioClipError::Overlapping);
+            }
+        }
+
+        let clip_mut = track.clips.get_mut(&clip_key).unwrap();
+        clip_mut.length = Some(new_length);
+
+        self.event_sender.send(Event::CropAudioClipEnd {
+            track_key,
+            clip_start,
+            new_length,
+        });
+
+        Ok(())
+    }
+
     pub fn add_track(
         &mut self,
         output: MixerTrackKey,
@@ -720,6 +767,11 @@ impl TimelineProcessor {
                         track_key,
                         clip_starts,
                     } => self.delete_clips(track_key, clip_starts),
+                    Event::CropAudioClipEnd {
+                        track_key,
+                        clip_start,
+                        new_length,
+                    } => self.crop_audio_clip_end(track_key, clip_start, new_length),
                 },
             }
         }
@@ -729,7 +781,7 @@ impl TimelineProcessor {
         let pos_samples = pos.samples(self.sample_rate, self.bpm_cents);
         self.position.store(pos_samples, Ordering::Relaxed);
         for track in self.tracks.values_mut() {
-            track.jump_to(pos);
+            track.jump();
         }
     }
 
@@ -776,6 +828,20 @@ impl TimelineProcessor {
             .expect("Track doesn't exist");
 
         track.delete_clips(clip_starts);
+    }
+
+    pub fn crop_audio_clip_end(
+        &mut self,
+        track_key: TimelineTrackKey,
+        clip_start: Timestamp,
+        new_length: Timestamp,
+    ) {
+        let track = self
+            .tracks
+            .get_mut(&track_key)
+            .expect("Track doesn't exist");
+
+        track.crop_clip_end(clip_start, new_length);
     }
 
     pub fn output(
@@ -964,6 +1030,40 @@ impl Display for AudioClipReconstructionError {
     }
 }
 impl Error for AudioClipReconstructionError {}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum MoveAudioClipError {
+    InvalidTrack {
+        track_key: TimelineTrackKey,
+    },
+    InvalidClip {
+        track_key: TimelineTrackKey,
+        clip_key: AudioClipKey,
+    },
+    Overlapping,
+}
+impl Display for MoveAudioClipError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MoveAudioClipError::InvalidTrack { track_key } => {
+                write!(f, "Attempted to access an audio clip on a non-existing timeline track with key, {track_key}")
+            }
+            MoveAudioClipError::InvalidClip {
+                track_key,
+                clip_key,
+            } => {
+                write!(
+                    f,
+                    "No clip with key, {clip_key}, on track with key, {track_key}"
+                )
+            }
+            MoveAudioClipError::Overlapping => {
+                write!(f, "Clip overlaps with another clip")
+            }
+        }
+    }
+}
+impl Error for MoveAudioClipError {}
 
 #[cfg(test)]
 mod tests {

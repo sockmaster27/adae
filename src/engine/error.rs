@@ -3,5 +3,6 @@ pub use super::{
     AddClipError, AudioClipReconstructionError, AudioTrackOverflowError,
     AudioTrackReconstructionError, ImportError, InvalidAudioClipError, InvalidAudioTrackError,
     InvalidConfigError, InvalidMixerTrackError, InvalidStoredAudioClipError,
-    InvalidTimelineTrackError, MixerTrackOverflowError, TimelineTrackOverflowError,
+    InvalidTimelineTrackError, MixerTrackOverflowError, MoveAudioClipError,
+    TimelineTrackOverflowError,
 };

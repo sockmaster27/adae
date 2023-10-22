@@ -132,50 +132,36 @@ impl TimelineTrackProcessor {
         self.relevant_clip = Some(tree.upper_bound_owning(Bound::Included(&position)));
     }
 
-    /// Jump to a timestamp on the timeline track.
-    /// The global `position` must be set before calling this function.
-    pub fn jump_to(&mut self, pos: Timestamp) {
-        self.relevant_clip
-            .as_mut()
-            .unwrap()
-            .with_cursor_mut(|cursor| {
-                cursor.get().map(|clip_cell| {
-                    let mut clip = clip_cell.borrow_mut();
-                    clip.reset(self.sample_rate);
-                })
-            });
+    pub fn crop_clip_end(&mut self, clip_start: Timestamp, new_length: Timestamp) {
+        self.with_clip(clip_start, |clip| {
+            clip.length = Some(new_length);
+        });
+    }
 
-        let tree = self.relevant_clip.take().unwrap().into_inner();
-        self.relevant_clip = Some(tree.upper_bound_owning(Bound::Included(&pos)));
+    /// Jump to the global position.
+    /// Should be called when the global position changes.
+    pub fn jump(&mut self) {
+        let sample_rate = self.sample_rate;
+        let bpm_cents = self.bpm_cents;
 
-        self.relevant_clip
-            .as_mut()
-            .unwrap()
-            .with_cursor_mut(|cursor| {
-                let clip = cursor.get();
-                match clip {
-                    None => cursor.move_next(),
-                    Some(clip) => {
-                        let clip_end = clip.borrow().end(self.sample_rate, self.bpm_cents);
-                        if clip_end <= pos {
-                            cursor.move_next();
-                        }
-                    }
+        let pos_samples = self.position.load(Ordering::Relaxed);
+        let position = Timestamp::from_samples(pos_samples, sample_rate, self.bpm_cents);
+
+        self.with_relevant_clip(|old_clip_opt| {
+            if let Some(old_clip) = old_clip_opt {
+                old_clip.reset(sample_rate);
+            }
+        });
+
+        self.update_relevant_clip();
+
+        self.with_relevant_clip(|new_clip_opt| {
+            if let Some(new_clip) = new_clip_opt {
+                if new_clip.start <= position {
+                    new_clip.jump_to(position, sample_rate, bpm_cents).unwrap();
                 }
-
-                if let Some(clip_cell) = cursor.get() {
-                    let mut clip = clip_cell.borrow_mut();
-
-                    let pos_samples = self.position.load(Ordering::Relaxed);
-                    let position =
-                        Timestamp::from_samples(pos_samples, self.sample_rate, self.bpm_cents);
-
-                    if clip.start <= position {
-                        clip.jump_to(position, self.sample_rate, self.bpm_cents)
-                            .unwrap();
-                    }
-                }
-            });
+            }
+        });
     }
 
     pub fn output(&mut self, info: &Info, buffer: &mut [Sample]) {
@@ -193,12 +179,12 @@ impl TimelineTrackProcessor {
                 while progress < buffer_size {
                     let should_move;
                     match cursor.get() {
-                        Some(clip) => {
+                        Some(clip_cell) => {
                             let position = self.position.load(Ordering::Relaxed);
-                            let mut clip_ref = clip.borrow_mut();
+                            let mut clip = clip_cell.borrow_mut();
 
                             // Pad start with zero
-                            let clip_start = clip_ref.start.samples(sample_rate, self.bpm_cents);
+                            let clip_start = clip.start.samples(sample_rate, self.bpm_cents);
                             if position + (progress as u64) < clip_start {
                                 let end_zeroes = min((clip_start - position) as usize, buffer_size);
                                 buffer[progress * CHANNELS..end_zeroes * CHANNELS].fill(0.0);
@@ -207,7 +193,7 @@ impl TimelineTrackProcessor {
 
                             // Fill with content
                             let requested_buffer = buffer_size - progress;
-                            let output = clip_ref.output(
+                            let output = clip.output(
                                 self.bpm_cents,
                                 &Info {
                                     sample_rate,
@@ -221,7 +207,7 @@ impl TimelineTrackProcessor {
                             // Determine if we should move on to next clip
                             should_move = output.len() < requested_buffer;
                             if should_move {
-                                clip_ref.reset(sample_rate);
+                                clip.reset(sample_rate);
                             }
                         }
 
@@ -235,6 +221,69 @@ impl TimelineTrackProcessor {
                     // Needs to be out here to access &mut cursor
                     if should_move {
                         cursor.move_next();
+                    }
+                }
+            });
+    }
+
+    fn with_relevant_clip(&mut self, f: impl FnOnce(Option<&mut AudioClipProcessor>)) {
+        self.relevant_clip
+            .as_mut()
+            .unwrap()
+            .with_cursor_mut(|cursor| match cursor.get() {
+                // .map() doesn't work because of the RefMut lifetime :(
+                Some(clip_cell) => {
+                    let clip = &mut *clip_cell.borrow_mut();
+                    f(Some(clip));
+                }
+                None => f(None),
+            });
+    }
+
+    /// Run a function on the clip at `clip_start`, and reset `self.relevant_clip` via `self.find_relevant_clip()`.
+    fn with_clip(&mut self, clip_start: Timestamp, f: impl FnOnce(&mut AudioClipProcessor)) {
+        let tree = self.relevant_clip.take().unwrap().into_inner();
+        let cursor = tree.find(&clip_start);
+        let clip_cell = cursor.get().expect("Attempted to access non-existing clip");
+        let mut clip = clip_cell.borrow_mut();
+
+        f(&mut clip);
+        drop(clip);
+
+        // Set relevant_clip to arbitrary value before calling update_relevant_clip
+        self.relevant_clip = Some(tree.cursor_owning());
+
+        // The relevant clip should be the same as before
+        self.update_relevant_clip();
+    }
+
+    /// Set the relevant clip in accordance with the current position.
+    /// Requires `self.relevant_clip` to be `Some`.
+    ///
+    /// Note: The positions within both the old and new relevant clips are preserved.
+    fn update_relevant_clip(&mut self) {
+        let pos_samples = self.position.load(Ordering::Relaxed);
+        let position = Timestamp::from_samples(pos_samples, self.sample_rate, self.bpm_cents);
+
+        let tree = self
+            .relevant_clip
+            .take()
+            .expect("self.relevant_clip is None")
+            .into_inner();
+        self.relevant_clip = Some(tree.upper_bound_owning(Bound::Included(&position)));
+
+        self.relevant_clip
+            .as_mut()
+            .unwrap()
+            .with_cursor_mut(|cursor| {
+                let clip = cursor.get();
+                match clip {
+                    None => cursor.move_next(),
+                    Some(clip) => {
+                        let clip_end = clip.borrow().end(self.sample_rate, self.bpm_cents);
+                        if clip_end <= position {
+                            cursor.move_next();
+                        }
                     }
                 }
             });
@@ -519,8 +568,8 @@ mod tests {
             t.insert_clip(c1);
             t.insert_clip(c2);
 
-            t.jump_to(Timestamp::from_beat_units(2));
             pos.store(2 * SBU as u64, Ordering::Relaxed);
+            t.jump();
 
             // Empty
             let mut out = [0.0; BUFFER_SIZE * CHANNELS];
@@ -570,7 +619,7 @@ mod tests {
             pos.fetch_add(info.buffer_size as u64, Ordering::Relaxed);
 
             pos.store(0, Ordering::Relaxed);
-            t.jump_to(Timestamp::zero());
+            t.jump();
 
             // Empty
             let mut out = [0.0; BUFFER_SIZE * CHANNELS];
