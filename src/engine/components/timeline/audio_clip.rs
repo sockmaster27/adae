@@ -127,12 +127,9 @@ impl AudioClipProcessor {
         let start_samples = self.start.samples(sample_rate, bpm_cents) as usize;
         let pos_samples = pos.samples(sample_rate, bpm_cents) as usize;
 
-        let is_before_start = pos_samples < start_samples + self.start_offset;
-        let inner_pos = if is_before_start {
-            0
-        } else {
-            pos_samples - (start_samples + self.start_offset)
-        };
+        // Saturating subtraction means that if the position is before the start of the clip,
+        // then the clip is reset to 0.
+        let inner_pos = pos_samples.saturating_sub(start_samples + self.start_offset);
 
         self.reader.jump(inner_pos, sample_rate)?;
 
