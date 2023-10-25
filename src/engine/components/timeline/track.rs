@@ -40,8 +40,11 @@ pub struct TimelineTrackProcessor {
     sample_rate: u32,
     bpm_cents: u16,
 
-    /// Optional because it needs to be swapped out in jump_to.
-    /// Should always be safely unwrappable.
+    /// The clip that is either currently playing, or will be played next.
+    /// If this is the null pointer then the track is past the last clip.
+    ///
+    /// Optional to allow temporary access to the tree.
+    /// Unless expicitly stated, all methods expect this to be `Some`.
     relevant_clip: Option<CursorOwning<TreeNodeAdapter<AudioClipProcessor>>>,
 
     output_track: MixerTrackKey,
@@ -147,19 +150,11 @@ impl TimelineTrackProcessor {
         let pos_samples = self.position.load(Ordering::Relaxed);
         let position = Timestamp::from_samples(pos_samples, sample_rate, self.bpm_cents);
 
-        self.with_relevant_clip(|old_clip_opt| {
-            if let Some(old_clip) = old_clip_opt {
-                old_clip.reset(sample_rate);
-            }
-        });
-
         self.update_relevant_clip();
 
         self.with_relevant_clip(|new_clip_opt| {
             if let Some(new_clip) = new_clip_opt {
-                if new_clip.start <= position {
-                    new_clip.jump_to(position, sample_rate, bpm_cents).unwrap();
-                }
+                new_clip.jump_to(position, sample_rate, bpm_cents).unwrap();
             }
         });
     }
@@ -206,9 +201,6 @@ impl TimelineTrackProcessor {
 
                             // Determine if we should move on to next clip
                             should_move = output.len() < requested_buffer;
-                            if should_move {
-                                clip.reset(sample_rate);
-                            }
                         }
 
                         None => {
@@ -221,6 +213,10 @@ impl TimelineTrackProcessor {
                     // Needs to be out here to access &mut cursor
                     if should_move {
                         cursor.move_next();
+                        if let Some(clip_cell) = cursor.get() {
+                            let mut clip = clip_cell.borrow_mut();
+                            clip.reset(sample_rate);
+                        }
                     }
                 }
             });

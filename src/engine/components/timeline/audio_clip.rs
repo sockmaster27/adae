@@ -116,6 +116,8 @@ impl AudioClipProcessor {
     }
 
     /// Jumps to the given position relative to the start of the timeline.
+    ///
+    /// If the position is before the start of the clip, the clip is reset.
     pub fn jump_to(
         &mut self,
         pos: Timestamp,
@@ -125,14 +127,14 @@ impl AudioClipProcessor {
         let start_samples = self.start.samples(sample_rate, bpm_cents) as usize;
         let pos_samples = pos.samples(sample_rate, bpm_cents) as usize;
 
-        if pos_samples < start_samples + self.start_offset {
-            return Err(JumpOutOfBounds);
-        }
+        let is_before_start = pos_samples < start_samples + self.start_offset;
+        let inner_pos = if is_before_start {
+            0
+        } else {
+            pos_samples - (start_samples + self.start_offset)
+        };
 
-        self.reader.jump(
-            pos_samples - (start_samples + self.start_offset),
-            sample_rate,
-        )?;
+        self.reader.jump(inner_pos, sample_rate)?;
 
         Ok(())
     }
