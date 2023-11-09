@@ -164,6 +164,46 @@ impl Engine {
         (engine, import_errors)
     }
 
+    /// Creates an engine that simulates outputting without outputting to any audio device,
+    /// while returning the processor to be poll and output manually.
+    ///
+    /// Useful for benchmarking.
+    pub fn dummy_with_processor() -> (Self, Processor) {
+        let (engine, processor, import_errors) =
+            Engine::dummy_with_processor_from_state(&EngineState::default());
+        debug_assert!(
+            import_errors.is_empty(),
+            "Empty engine should not have import errors"
+        );
+
+        (engine, processor)
+    }
+
+    /// Like [`Engine::dummy_with_processor()`], but uses the given state instead of the default state.
+    pub fn dummy_with_processor_from_state(
+        state: &EngineState,
+    ) -> (Self, Processor, Vec<ImportError>) {
+        let (processor_interface, processor, import_errors) = processor(
+            &state.processor,
+            &cpal::StreamConfig {
+                channels: 2,
+                sample_rate: cpal::SampleRate(48_000),
+                buffer_size: cpal::BufferSize::Default,
+            },
+            1024,
+        );
+
+        let engine = Engine {
+            stopped: Arc::new(AtomicBool::new(false)),
+            join_handle: None,
+            config: None,
+            processor_interface,
+            audio_tracks: HashSet::from_iter(state.audio_tracks.iter().cloned()),
+        };
+
+        (engine, processor, import_errors)
+    }
+
     /// Starts a stream with the given config and state.
     ///
     /// Returns a the stop flag, the join handle, the processor interface and a list of import errors.
