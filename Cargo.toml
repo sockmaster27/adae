@@ -20,6 +20,7 @@ rubato = "0.14.1"
 serde = { version = "1.0", features = ["derive"] }
 
 [dev-dependencies]
+criterion = { version = "0.4", features = ["html_reports"] }
 # Tests may want to output audio for debugging purposes
 hound = "3.5.0"
 
@@ -29,3 +30,10 @@ record_output = ["hound"]
 
 # Print all debug info to custom function
 custom_debug_output = []
+
+[[bench]]
+name = "benches"
+harness = false
+
+[profile.bench]
+debug = true
