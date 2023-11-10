@@ -45,6 +45,8 @@ pub struct TimelineTrackProcessor {
     ///
     /// Optional to allow temporary access to the tree.
     /// Unless expicitly stated, all methods expect this to be `Some`.
+    ///
+    /// All clips in this tree should be reset when the the position encounters them, not when it leaves them.
     relevant_clip: Option<CursorOwning<TreeNodeAdapter<AudioClipProcessor>>>,
 
     output_track: MixerTrackKey,
@@ -136,9 +138,38 @@ impl TimelineTrackProcessor {
     }
 
     pub fn crop_clip_end(&mut self, clip_start: Timestamp, new_length: Timestamp) {
-        self.with_clip(clip_start, |clip| {
+        let sample_rate = self.sample_rate;
+        let bpm_cents = self.bpm_cents;
+        let pos_samples = self.position.load(Ordering::Relaxed);
+        let position = Timestamp::from_samples(pos_samples, sample_rate, bpm_cents);
+
+        let (start, old_end, new_end) = self.with_clip(clip_start, |clip| {
+            let old_end = clip.end(sample_rate, bpm_cents);
             clip.length = Some(new_length);
+            (clip.start, old_end, clip.end(sample_rate, bpm_cents))
         });
+
+        let move_prev = start <= position && old_end < position && position <= new_end;
+        let move_next = start <= position && new_end < position && position <= old_end;
+        let should_move = move_prev || move_next;
+
+        if should_move {
+            if let Some(relevant_clip) = self.relevant_clip.as_mut() {
+                relevant_clip.with_cursor_mut(|cursor| {
+                    if move_prev {
+                        cursor.move_prev();
+
+                        if let Some(clip_cell) = cursor.get() {
+                            let mut clip = clip_cell.borrow_mut();
+                            clip.jump_to(position, sample_rate, bpm_cents).unwrap();
+                        }
+                    }
+                    if move_next {
+                        cursor.move_next();
+                    }
+                });
+            }
+        }
     }
 
     /// Jump to the global position.
@@ -267,20 +298,36 @@ impl TimelineTrackProcessor {
             })
     }
 
-    /// Run a function on the clip at `clip_start`, and reset `self.relevant_clip` via `self.find_relevant_clip()`.
-    fn with_clip(&mut self, clip_start: Timestamp, f: impl FnOnce(&mut AudioClipProcessor)) {
-        let tree = self.relevant_clip.take().unwrap().into_inner();
+    /// Run a function on the clip at `clip_start`.
+    ///
+    /// This will not update what the relevant clip is pointing to, so if the clip is moved or cropped the cursor might not point at the correct clip.
+    fn with_clip<F, R>(&mut self, clip_start: Timestamp, f: F) -> R
+    where
+        F: FnOnce(&mut AudioClipProcessor) -> R,
+    {
+        let relevant_clip = self.relevant_clip.take().unwrap();
+
+        let before_ptr = relevant_clip.as_cursor().get().map(|r| r as *const _);
+
+        let tree = relevant_clip.into_inner();
         let cursor = tree.find(&clip_start);
         let clip_cell = cursor.get().expect("Attempted to access non-existing clip");
         let mut clip = clip_cell.borrow_mut();
-
-        f(&mut clip);
+        let res = f(&mut clip);
         drop(clip);
 
-        // Set relevant_clip to arbitrary value before calling update_relevant_clip
-        self.relevant_clip = Some(tree.cursor_owning());
+        self.relevant_clip = match before_ptr {
+            Some(ptr) => {
+                // Safety:
+                // - before_ptr is a pointer to a node in the tree
+                // - tree is not modified
+                // - f cannot modify the tree or remove the node
+                unsafe { Some(tree.cursor_owning_from_ptr(ptr)) }
+            }
+            None => Some(tree.cursor_owning()),
+        };
 
-        self.jump();
+        res
     }
 }
 impl Debug for TimelineTrackProcessor {
