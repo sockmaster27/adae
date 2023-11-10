@@ -178,8 +178,6 @@ impl TimelineTrackProcessor {
         let pos_samples = self.position.load(Ordering::Relaxed);
         let position = Timestamp::from_samples(pos_samples, self.sample_rate, self.bpm_cents);
 
-        let old_clip_start = self.with_relevant_clip(|clip_opt| clip_opt.map(|clip| clip.start));
-
         let tree = self
             .relevant_clip
             .take()
@@ -203,19 +201,14 @@ impl TimelineTrackProcessor {
                 }
             });
 
-        let new_clip_start = self.with_relevant_clip(|clip_opt| clip_opt.map(|clip| clip.start));
+        let sample_rate = self.sample_rate;
+        let bpm_cents = self.bpm_cents;
 
-        let is_new_clip = old_clip_start != new_clip_start;
-        if is_new_clip {
-            let sample_rate = self.sample_rate;
-            let bpm_cents = self.bpm_cents;
-
-            self.with_relevant_clip(|clip_opt| {
-                if let Some(clip) = clip_opt {
-                    clip.jump_to(position, sample_rate, bpm_cents).unwrap();
-                }
-            });
-        }
+        self.with_relevant_clip(|clip_opt| {
+            if let Some(clip) = clip_opt {
+                clip.jump_to(position, sample_rate, bpm_cents).unwrap();
+            }
+        });
     }
 
     pub fn output(&mut self, info: &Info, buffer: &mut [Sample]) {
