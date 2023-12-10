@@ -31,17 +31,16 @@ pub struct AudioClip {
     pub reader: AudioClipReader,
 }
 impl AudioClip {
+    pub fn current_length(&self, sample_rate: u32, bpm_cents: u16) -> Timestamp {
+        self.length.unwrap_or(Timestamp::from_samples_ceil(
+            self.reader.len(sample_rate) as u64,
+            sample_rate,
+            bpm_cents,
+        ))
+    }
+
     pub fn end(&self, sample_rate: u32, bpm_cents: u16) -> Timestamp {
-        if let Some(length) = self.length {
-            self.start + length
-        } else {
-            self.start
-                + Timestamp::from_samples_ceil(
-                    self.reader.len(sample_rate) as u64,
-                    sample_rate,
-                    bpm_cents,
-                )
-        }
+        self.start + self.current_length(sample_rate, bpm_cents)
     }
 
     pub fn overlaps(&self, other: &Self, sample_rate: u32, bpm_cents: u16) -> bool {

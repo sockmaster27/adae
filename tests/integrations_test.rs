@@ -322,12 +322,12 @@ mod audio_clips {
     }
 
     #[test]
-    fn crop_audio_clip_end() {
+    fn crop_audio_clip_start() {
         let mut e = Engine::dummy();
         let at = e.add_audio_track().unwrap();
 
         let ck = import_audio_clip(&mut e);
-        let ac = e
+        let ack = e
             .add_audio_clip(
                 at.timeline_track_key(),
                 ck,
@@ -336,9 +336,64 @@ mod audio_clips {
             )
             .unwrap();
 
-        let r = e.audio_clip_crop_end(at.timeline_track_key(), ac, Timestamp::from_beats(1));
+        let r = e.audio_clip_crop_start(at.timeline_track_key(), ack, Timestamp::from_beats(1));
 
-        assert_eq!(r, Ok(()))
+        let ac = e.audio_clip(at.timeline_track_key(), ack).unwrap();
+
+        assert_eq!(r, Ok(()));
+        assert_eq!(ac.start, Timestamp::from_beats(1));
+        assert_eq!(ac.length, Some(Timestamp::from_beats(1)));
+    }
+
+    #[test]
+    fn crop_audio_clip_start_overlapping() {
+        let mut e = Engine::dummy();
+        let at = e.add_audio_track().unwrap();
+
+        let ck = import_audio_clip(&mut e);
+        e.add_audio_clip(
+            at.timeline_track_key(),
+            ck,
+            Timestamp::from_beats(0),
+            Some(Timestamp::from_beats(1)),
+        )
+        .unwrap();
+        let ac = e
+            .add_audio_clip(
+                at.timeline_track_key(),
+                ck,
+                Timestamp::from_beats(1),
+                Some(Timestamp::from_beats(1)),
+            )
+            .unwrap();
+
+        let r = e.audio_clip_crop_start(at.timeline_track_key(), ac, Timestamp::from_beats(2));
+
+        assert_eq!(r, Err(MoveAudioClipError::Overlapping));
+    }
+
+    #[test]
+    fn crop_audio_clip_end() {
+        let mut e = Engine::dummy();
+        let at = e.add_audio_track().unwrap();
+
+        let ck = import_audio_clip(&mut e);
+        let ack = e
+            .add_audio_clip(
+                at.timeline_track_key(),
+                ck,
+                Timestamp::from_beats(0),
+                Some(Timestamp::from_beats(2)),
+            )
+            .unwrap();
+
+        let r = e.audio_clip_crop_end(at.timeline_track_key(), ack, Timestamp::from_beats(1));
+
+        let ac = e.audio_clip(at.timeline_track_key(), ack).unwrap();
+
+        assert_eq!(r, Ok(()));
+        assert_eq!(ac.start, Timestamp::from_beats(0));
+        assert_eq!(ac.length, Some(Timestamp::from_beats(1)));
     }
 
     #[test]

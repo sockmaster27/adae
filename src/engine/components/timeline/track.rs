@@ -137,6 +137,18 @@ impl TimelineTrackProcessor {
         self.relevant_clip = Some(tree.upper_bound_owning(Bound::Included(&position)));
     }
 
+    pub fn crop_clip_start(
+        &mut self,
+        old_start: Timestamp,
+        new_start: Timestamp,
+        new_length: Timestamp,
+    ) {
+        self.with_clip(old_start, |clip| {
+            // While clip.start is the key, changing it will not change the position in the tree if no clips can ever be in an overlapping state.
+            clip.start = new_start;
+            clip.length = Some(new_length);
+        });
+    }
     pub fn crop_clip_end(&mut self, clip_start: Timestamp, new_length: Timestamp) {
         let sample_rate = self.sample_rate;
         let bpm_cents = self.bpm_cents;
@@ -146,7 +158,7 @@ impl TimelineTrackProcessor {
         let (start, old_end, new_end) = self.with_clip(clip_start, |clip| {
             let old_end = clip.end(sample_rate, bpm_cents);
             clip.length = Some(new_length);
-            (clip.start, old_end, clip.end(sample_rate, bpm_cents))
+            (clip.start, old_end, clip.start + new_length)
         });
 
         let move_prev = start <= position && old_end < position && position <= new_end;
