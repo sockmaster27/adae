@@ -12,6 +12,7 @@ env:
 jobs:
     build_and_test:
         name: Build and Test
+        runs-on: ubuntu-latest
         container:
             image: holgermogensen/voil-ci:adae
         timeout-minutes: 10
