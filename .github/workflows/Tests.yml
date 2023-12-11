@@ -16,8 +16,10 @@ jobs:
         timeout-minutes: 10
         steps:
             - uses: actions/checkout@v4
+            - name: Update apt index
+              run: apt update
             - name: Install ALSA
-              run: sudo apt-get install -y libasound2-dev
+              run: sudo apt install -y libasound2-dev
             - name: Check with Clippy
               run: cargo clippy --all-targets --all-features -- -D warnings
             - name: Run Tests
