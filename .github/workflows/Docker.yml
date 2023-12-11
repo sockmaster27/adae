@@ -6,6 +6,8 @@ jobs:
     release_dependency_image:
         name: Release Image with Dependencies
         runs-on: ubuntu-latest
+        env:
+            DOCKERHUB_USERNAME: holgermogensen
         steps:
             - uses: actions/checkout@v4
             - name: Login to DockerHub
