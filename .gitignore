@@ -6,3 +6,6 @@ recorded.wav
 
 # Rust Flamegraph Output
 flamegraph.svg
+
+.env
+.secrets
