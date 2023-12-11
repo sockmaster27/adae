@@ -8,6 +8,10 @@ use crate::engine::{Sample, CHANNELS};
 pub struct MixPoint {
     sum_buffer: Vec<f64>,
     output_buffer: Vec<Sample>,
+
+    /// Measures samples in buffer instead of frames
+    ///
+    /// `buffer_size_samples == buffer_size * CHANNELS`
     buffer_size_samples: Option<usize>,
 }
 impl MixPoint {
@@ -15,10 +19,6 @@ impl MixPoint {
         Self {
             sum_buffer: vec![0.0; max_buffer_size * CHANNELS],
             output_buffer: vec![0.0; max_buffer_size * CHANNELS],
-
-            /// Measures samples in buffer instead of frames
-            ///
-            /// `buffer_size_samples == buffer_size * CHANNELS`
             buffer_size_samples: None,
         }
     }
