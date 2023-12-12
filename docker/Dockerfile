@@ -16,3 +16,4 @@ RUN apt-get install -y libasound2-dev
 # Install Rust toolchain
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --default-toolchain stable -y
 ENV PATH="/root/.cargo/bin:$PATH"
+RUN rustup default stable
