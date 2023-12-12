@@ -16,6 +16,6 @@ jobs:
                   username: ${{ env.DOCKERHUB_USERNAME }}
                   password: ${{ secrets.DOCKERHUB_TOKEN }}
             - name: Build Docker image
-              run: docker buildx build --platform linux/amd64 -t ${{ env.DOCKERHUB_USERNAME }}/voil-ci:adae ./docker
+              run: docker buildx build --platform linux/amd64 -t ${{ env.DOCKERHUB_USERNAME }}/voil-ci:adae1 ./docker
             - name: Push image to DockerHub
-              run: docker push ${{ env.DOCKERHUB_USERNAME }}/voil-ci:adae
+              run: docker push ${{ env.DOCKERHUB_USERNAME }}/voil-ci:adae1
