@@ -14,10 +14,11 @@ jobs:
         name: Build and Test
         runs-on: ubuntu-latest
         container:
-            image: holgermogensen/voil-ci:adae2
+            image: holgermogensen/voil-ci:adae
         timeout-minutes: 10
         steps:
             - uses: actions/checkout@v4
+            - run: rustup default stable
             - name: Check with Clippy
               run: cargo clippy --all-targets --all-features -- -D warnings
             - name: Run Tests
