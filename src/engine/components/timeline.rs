@@ -484,16 +484,16 @@ impl Timeline {
         track_key: TimelineTrackKey,
         clip_key: AudioClipKey,
         new_length: Timestamp,
-    ) -> Result<(), MoveAudioClipError> {
+    ) -> Result<(), CropAudioClipError> {
         let track = self
             .tracks
             .get_mut(&track_key)
-            .ok_or(MoveAudioClipError::InvalidTrack { track_key })?;
+            .ok_or(CropAudioClipError::InvalidTrack { track_key })?;
 
         let clip = track
             .clips
             .get(&clip_key)
-            .ok_or(MoveAudioClipError::InvalidClip {
+            .ok_or(CropAudioClipError::InvalidClip {
                 track_key,
                 clip_key,
             })?;
@@ -508,7 +508,7 @@ impl Timeline {
             let overlapping = new_start < other_clip.end(self.sample_rate, self.bpm_cents)
                 && other_clip.start < clip_end;
             if !same && overlapping {
-                return Err(MoveAudioClipError::Overlapping);
+                return Err(CropAudioClipError::Overlapping);
             }
         }
 
@@ -530,16 +530,16 @@ impl Timeline {
         track_key: TimelineTrackKey,
         clip_key: AudioClipKey,
         new_length: Timestamp,
-    ) -> Result<(), MoveAudioClipError> {
+    ) -> Result<(), CropAudioClipError> {
         let track = self
             .tracks
             .get_mut(&track_key)
-            .ok_or(MoveAudioClipError::InvalidTrack { track_key })?;
+            .ok_or(CropAudioClipError::InvalidTrack { track_key })?;
 
         let clip = track
             .clips
             .get(&clip_key)
-            .ok_or(MoveAudioClipError::InvalidClip {
+            .ok_or(CropAudioClipError::InvalidClip {
                 track_key,
                 clip_key,
             })?;
@@ -551,7 +551,7 @@ impl Timeline {
             let same = other_clip.key == clip.key;
             let overlapping = clip_start < other_clip.start && other_clip.start < new_end;
             if !same && overlapping {
-                return Err(MoveAudioClipError::Overlapping);
+                return Err(CropAudioClipError::Overlapping);
             }
         }
 
@@ -1136,6 +1136,43 @@ impl Display for MoveAudioClipError {
     }
 }
 impl Error for MoveAudioClipError {}
+#[derive(Debug, PartialEq, Eq)]
+pub enum CropAudioClipError {
+    InvalidTrack {
+        track_key: TimelineTrackKey,
+    },
+    InvalidClip {
+        track_key: TimelineTrackKey,
+        clip_key: AudioClipKey,
+    },
+    Overlapping,
+    TooLong,
+}
+impl Display for CropAudioClipError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CropAudioClipError::InvalidTrack { track_key } => {
+                write!(f, "Attempted to access an audio clip on a non-existing timeline track with key, {track_key}")
+            }
+            CropAudioClipError::InvalidClip {
+                track_key,
+                clip_key,
+            } => {
+                write!(
+                    f,
+                    "No clip with key, {clip_key}, on track with key, {track_key}"
+                )
+            }
+            CropAudioClipError::Overlapping => {
+                write!(f, "Clip overlaps with another clip")
+            }
+            CropAudioClipError::TooLong => {
+                write!(f, "Attempted to expand clip beyond its start")
+            }
+        }
+    }
+}
+impl Error for CropAudioClipError {}
 
 #[cfg(test)]
 mod tests {

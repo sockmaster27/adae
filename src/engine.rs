@@ -34,8 +34,8 @@ pub use components::timeline::AudioClipState;
 pub use components::timeline::InvalidAudioClipError;
 pub use components::timeline::Timestamp;
 pub use components::timeline::{
-    AddClipError, InvalidTimelineTrackError, MoveAudioClipError, TimelineTrackKey,
-    TimelineTrackOverflowError, TimelineTrackState,
+    AddClipError, CropAudioClipError, InvalidTimelineTrackError, MoveAudioClipError,
+    TimelineTrackKey, TimelineTrackOverflowError, TimelineTrackState,
 };
 pub use components::MixerTrack;
 pub use components::{MixerTrackKey, MixerTrackState};
@@ -501,7 +501,7 @@ impl Engine {
         timeline_track_key: TimelineTrackKey,
         audio_clip_key: AudioClipKey,
         new_length: Timestamp,
-    ) -> Result<(), MoveAudioClipError> {
+    ) -> Result<(), CropAudioClipError> {
         self.processor_interface.timeline.audio_clip_crop_start(
             timeline_track_key,
             audio_clip_key,
@@ -513,7 +513,7 @@ impl Engine {
         timeline_track_key: TimelineTrackKey,
         audio_clip_key: AudioClipKey,
         new_length: Timestamp,
-    ) -> Result<(), MoveAudioClipError> {
+    ) -> Result<(), CropAudioClipError> {
         self.processor_interface.timeline.audio_clip_crop_end(
             timeline_track_key,
             audio_clip_key,

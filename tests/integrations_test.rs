@@ -2,7 +2,7 @@ extern crate adae;
 
 use std::{iter::zip, path::Path};
 
-use adae::error::MoveAudioClipError;
+use adae::error::CropAudioClipError;
 use adae::{Engine, StoredAudioClipKey, Timestamp};
 
 fn import_audio_clip(e: &mut Engine) -> StoredAudioClipKey {
@@ -369,7 +369,7 @@ mod audio_clips {
 
         let r = e.audio_clip_crop_start(at.timeline_track_key(), ac, Timestamp::from_beats(2));
 
-        assert_eq!(r, Err(MoveAudioClipError::Overlapping));
+        assert_eq!(r, Err(CropAudioClipError::Overlapping));
     }
 
     #[test]
@@ -420,6 +420,6 @@ mod audio_clips {
 
         let r = e.audio_clip_crop_end(at.timeline_track_key(), ac, Timestamp::from_beats(2));
 
-        assert_eq!(r, Err(MoveAudioClipError::Overlapping));
+        assert_eq!(r, Err(CropAudioClipError::Overlapping));
     }
 }
