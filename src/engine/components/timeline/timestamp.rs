@@ -34,9 +34,9 @@ impl Timestamp {
     /// Converts a number of samples to a timestamp.
     ///
     /// This rounds down. If this is undesirable, see `Timestamp::from_samples_ceil`.
-    pub const fn from_samples(samples: u64, sample_rate: u32, bpm_cents: u16) -> Self {
-        let beat_units =
-            (samples * bpm_cents as u64 * UNITS_PER_BEAT as u64) / (sample_rate as u64 * 60 * 100);
+    pub const fn from_samples(samples: usize, sample_rate: u32, bpm_cents: u16) -> Self {
+        let beat_units = (samples * bpm_cents as usize * UNITS_PER_BEAT as usize)
+            / (sample_rate as usize * 60 * 100);
         Self {
             beat_units: beat_units as u32,
         }
@@ -69,9 +69,9 @@ impl Timestamp {
     pub const fn beats(&self) -> u32 {
         self.beat_units / UNITS_PER_BEAT
     }
-    pub const fn samples(&self, sample_rate: u32, bpm_cents: u16) -> u64 {
-        (self.beat_units as u64 * sample_rate as u64 * 60 * 100)
-            / (bpm_cents as u64 * UNITS_PER_BEAT as u64)
+    pub const fn samples(&self, sample_rate: u32, bpm_cents: u16) -> usize {
+        (self.beat_units as usize * sample_rate as usize * 60 * 100)
+            / (bpm_cents as usize * UNITS_PER_BEAT as usize)
     }
 
     pub fn checked_add(&self, rhs: Self) -> Option<Self> {
@@ -176,7 +176,7 @@ mod tests {
     fn max_milli_beats_to_samples() {
         let ts = Timestamp::from_beat_units(u32::MAX);
         let result = ts.samples(40_000, 100_00);
-        assert_eq!(result, (u32::MAX as u64 * 40_000 * 60) / (100 * 1024));
+        assert_eq!(result, (u32::MAX as usize * 40_000 * 60) / (100 * 1024));
     }
 
     #[test]

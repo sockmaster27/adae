@@ -10,7 +10,7 @@ use std::{
     iter::zip,
     path::Path,
     sync::{
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc,
     },
 };
@@ -55,7 +55,7 @@ pub fn timeline(
     let playing1 = Arc::new(AtomicBool::new(false));
     let playing2 = Arc::clone(&playing1);
 
-    let position = Arc::new(AtomicU64::new(0));
+    let position = Arc::new(AtomicUsize::new(0));
 
     let (clip_store, import_errors) =
         AudioClipStore::new(store_state, sample_rate, max_buffer_size);
@@ -185,7 +185,7 @@ pub struct Timeline {
 
     playing: Arc<AtomicBool>,
     /// Should not be mutated from here
-    position: Arc<AtomicU64>,
+    position: Arc<AtomicUsize>,
 
     clip_store: AudioClipStore,
     tracks: HashMap<TimelineTrackKey, TimelineTrack>,
@@ -500,9 +500,9 @@ impl Timeline {
 
         // Check for overlaps
         let old_start = clip.start;
-        let clip_length = clip.current_length(self.sample_rate, self.bpm_cents);
+        let old_length = clip.current_length(self.sample_rate, self.bpm_cents);
         let clip_end = clip.end(self.sample_rate, self.bpm_cents);
-        let new_start = clip.start + clip_length - new_length;
+        let new_start = clip.start + old_length - new_length;
         for other_clip in track.clips.values() {
             let same = other_clip.key == clip.key;
             let overlapping = new_start < other_clip.end(self.sample_rate, self.bpm_cents)
@@ -793,7 +793,7 @@ pub struct TimelineProcessor {
     bpm_cents: u16,
 
     playing: Arc<AtomicBool>,
-    position: Arc<AtomicU64>,
+    position: Arc<AtomicUsize>,
 
     tracks: RemotePushedHashMap<TimelineTrackKey, DBox<TimelineTrackProcessor>>,
 
@@ -943,12 +943,7 @@ impl TimelineProcessor {
                 &mut mixer_ins.get_mut(&key).expect(NO_BUFFER_MSG)[..buffer_size * CHANNELS];
             track.output(info, buffer)
         }
-        self.position.fetch_add(
-            buffer_size
-                .try_into()
-                .expect("buffer_size doesn't fit in 64 bits"),
-            Ordering::Relaxed,
-        );
+        self.position.fetch_add(buffer_size, Ordering::Relaxed);
     }
 }
 

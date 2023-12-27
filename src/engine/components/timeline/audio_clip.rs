@@ -123,8 +123,8 @@ impl AudioClipProcessor {
         sample_rate: u32,
         bpm_cents: u16,
     ) -> Result<(), JumpOutOfBounds> {
-        let start_samples = self.start.samples(sample_rate, bpm_cents) as usize;
-        let pos_samples = pos.samples(sample_rate, bpm_cents) as usize;
+        let start_samples = self.start.samples(sample_rate, bpm_cents);
+        let pos_samples = pos.samples(sample_rate, bpm_cents);
 
         // Saturating subtraction means that if the position is before the start of the clip,
         // then the clip is reset to 0.
@@ -138,7 +138,7 @@ impl AudioClipProcessor {
     fn length_samples(&self, sample_rate: u32, bpm_cents: u16) -> usize {
         match self.length {
             None => self.reader.len(sample_rate),
-            Some(length) => length.samples(sample_rate, bpm_cents) as usize,
+            Some(length) => length.samples(sample_rate, bpm_cents),
         }
     }
 

@@ -6,7 +6,7 @@ use std::cmp::min;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::hash::{Hash, Hasher};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use super::audio_clip::{AudioClip, AudioClipKey, AudioClipState};
@@ -36,7 +36,7 @@ impl TimelineTrack {
 }
 
 pub struct TimelineTrackProcessor {
-    position: Arc<AtomicU64>,
+    position: Arc<AtomicUsize>,
     sample_rate: u32,
     bpm_cents: u16,
 
@@ -54,7 +54,7 @@ pub struct TimelineTrackProcessor {
 impl TimelineTrackProcessor {
     pub fn new(
         output: MixerTrackKey,
-        position: Arc<AtomicU64>,
+        position: Arc<AtomicUsize>,
         sample_rate: u32,
         bpm_cents: u16,
     ) -> Self {
@@ -244,8 +244,8 @@ impl TimelineTrackProcessor {
 
                             // Pad start with zero
                             let clip_start = clip.start.samples(sample_rate, self.bpm_cents);
-                            if position + (progress as u64) < clip_start {
-                                let end_zeroes = min((clip_start - position) as usize, buffer_size);
+                            if position + progress < clip_start {
+                                let end_zeroes = min(clip_start - position, buffer_size);
                                 buffer[progress * CHANNELS..end_zeroes * CHANNELS].fill(0.0);
                                 progress = end_zeroes;
                             }
@@ -388,7 +388,7 @@ mod tests {
     const SAMPLE_RATE: u32 = 40_960;
     const BPM_CENTS: u16 = 120_00;
     /// Samples per Beat Unit
-    const SBU: usize = Timestamp::from_beat_units(1).samples(SAMPLE_RATE, BPM_CENTS) as usize;
+    const SBU: usize = Timestamp::from_beat_units(1).samples(SAMPLE_RATE, BPM_CENTS);
 
     fn clip(
         start_beat_units: u32,
@@ -412,7 +412,7 @@ mod tests {
     #[test]
     fn insert() {
         let mut t =
-            TimelineTrackProcessor::new(0, Arc::new(AtomicU64::new(0)), SAMPLE_RATE, BPM_CENTS);
+            TimelineTrackProcessor::new(0, Arc::new(AtomicUsize::new(0)), SAMPLE_RATE, BPM_CENTS);
         let c1 = clip(3, Some(1), 100);
         let c2 = clip(1, Some(2), 100);
 
@@ -436,7 +436,7 @@ mod tests {
             sample_rate: SAMPLE_RATE,
             buffer_size: BUFFER_SIZE,
         };
-        let pos = Arc::new(AtomicU64::new(0));
+        let pos = Arc::new(AtomicUsize::new(0));
         let mut t = TimelineTrackProcessor::new(0, Arc::clone(&pos), SAMPLE_RATE, BPM_CENTS);
         let c1 = clip(1, Some(1), 3 * SBU);
         let c2 = clip(3, Some(2), 3 * SBU);
@@ -451,7 +451,7 @@ mod tests {
             for &mut s in out.iter_mut() {
                 assert_eq!(s, 0.0);
             }
-            pos.fetch_add(info.buffer_size as u64, Ordering::Relaxed);
+            pos.fetch_add(info.buffer_size, Ordering::Relaxed);
 
             // c1
             t.relevant_clip.as_mut().unwrap().with_cursor_mut(|cur| {
@@ -465,7 +465,7 @@ mod tests {
             for &mut s in out.iter_mut() {
                 assert_ne!(s, 0.0);
             }
-            pos.fetch_add(info.buffer_size as u64, Ordering::Relaxed);
+            pos.fetch_add(info.buffer_size, Ordering::Relaxed);
 
             // Empty
             let mut out = [0.0; BUFFER_SIZE * CHANNELS];
@@ -473,7 +473,7 @@ mod tests {
             for &mut s in out.iter_mut() {
                 assert_eq!(s, 0.0);
             }
-            pos.fetch_add(info.buffer_size as u64, Ordering::Relaxed);
+            pos.fetch_add(info.buffer_size, Ordering::Relaxed);
 
             // c2
             t.relevant_clip
@@ -521,7 +521,7 @@ mod tests {
         let mut out = vec![0.0; BUFFER_SIZE * CHANNELS];
 
         let mut t =
-            TimelineTrackProcessor::new(0, Arc::new(AtomicU64::new(0)), SAMPLE_RATE, BPM_CENTS);
+            TimelineTrackProcessor::new(0, Arc::new(AtomicUsize::new(0)), SAMPLE_RATE, BPM_CENTS);
         let c1 = clip(0, Some(1), BUFFER_SIZE);
         let c2 = clip(2, Some(1), BUFFER_SIZE);
         let c3 = clip(4, Some(1), BUFFER_SIZE);
@@ -605,7 +605,7 @@ mod tests {
             sample_rate: SAMPLE_RATE,
             buffer_size: BUFFER_SIZE,
         };
-        let pos = Arc::new(AtomicU64::new(0));
+        let pos = Arc::new(AtomicUsize::new(0));
         let mut t = TimelineTrackProcessor::new(0, Arc::clone(&pos), SAMPLE_RATE, BPM_CENTS);
         let c1 = clip(1, Some(1), 100);
         let c2 = clip(3, Some(2), 100);
@@ -614,7 +614,7 @@ mod tests {
             t.insert_clip(c1);
             t.insert_clip(c2);
 
-            pos.store(2 * SBU as u64, Ordering::Relaxed);
+            pos.store(2 * SBU, Ordering::Relaxed);
             t.jump();
 
             // Empty
@@ -623,7 +623,7 @@ mod tests {
             for &mut s in out.iter_mut() {
                 assert_eq!(s, 0.0);
             }
-            pos.fetch_add(info.buffer_size as u64, Ordering::Relaxed);
+            pos.fetch_add(info.buffer_size, Ordering::Relaxed);
 
             // c2
             t.relevant_clip
@@ -644,7 +644,7 @@ mod tests {
             for &s in &out[CHANNELS * (2 * SBU)..] {
                 assert_eq!(s, 0.0);
             }
-            pos.fetch_add(3 * SBU as u64, Ordering::Relaxed);
+            pos.fetch_add(3 * SBU, Ordering::Relaxed);
 
             // end
             t.relevant_clip
@@ -662,7 +662,7 @@ mod tests {
                 let clip = cur.get();
                 assert!(clip.is_none());
             });
-            pos.fetch_add(info.buffer_size as u64, Ordering::Relaxed);
+            pos.fetch_add(info.buffer_size, Ordering::Relaxed);
 
             pos.store(0, Ordering::Relaxed);
             t.jump();
@@ -673,7 +673,7 @@ mod tests {
             for &mut s in out.iter_mut() {
                 assert_eq!(s, 0.0);
             }
-            pos.fetch_add(info.buffer_size as u64, Ordering::Relaxed);
+            pos.fetch_add(info.buffer_size, Ordering::Relaxed);
 
             // c1
             t.relevant_clip.as_mut().unwrap().with_cursor_mut(|cur| {
@@ -687,7 +687,7 @@ mod tests {
             for &mut s in out.iter_mut() {
                 assert_ne!(s, 0.0);
             }
-            pos.fetch_add(info.buffer_size as u64, Ordering::Relaxed);
+            pos.fetch_add(info.buffer_size, Ordering::Relaxed);
         }}
     }
 }
