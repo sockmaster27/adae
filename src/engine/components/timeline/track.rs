@@ -142,11 +142,13 @@ impl TimelineTrackProcessor {
         old_start: Timestamp,
         new_start: Timestamp,
         new_length: Timestamp,
+        new_start_offset: usize,
     ) {
         self.with_clip(old_start, |clip| {
             // While clip.start is the key, changing it will not change the position in the tree if no clips can ever be in an overlapping state.
             clip.start = new_start;
             clip.length = Some(new_length);
+            clip.start_offset = new_start_offset;
         });
     }
     pub fn crop_clip_end(&mut self, clip_start: Timestamp, new_length: Timestamp) {

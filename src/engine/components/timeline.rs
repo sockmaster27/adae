@@ -169,6 +169,7 @@ enum Event {
         old_start: Timestamp,
         new_start: Timestamp,
         new_length: Timestamp,
+        new_start_offset: usize,
     },
     CropAudioClipEnd {
         track_key: MixerTrackKey,
@@ -498,11 +499,16 @@ impl Timeline {
                 clip_key,
             })?;
 
-        // Check for overlaps
         let old_start = clip.start;
         let old_length = clip.current_length(self.sample_rate, self.bpm_cents);
-        let clip_end = clip.end(self.sample_rate, self.bpm_cents);
+        let clip_end = old_start + old_length;
         let new_start = clip.start + old_length - new_length;
+
+        let old_start_offset = clip.start_offset;
+        let old_start_samples = old_start.samples(self.sample_rate, self.bpm_cents);
+        let new_start_samples = new_start.samples(self.sample_rate, self.bpm_cents);
+
+        // Check for overlaps
         for other_clip in track.clips.values() {
             let same = other_clip.key == clip.key;
             let overlapping = new_start < other_clip.end(self.sample_rate, self.bpm_cents)
@@ -512,15 +518,22 @@ impl Timeline {
             }
         }
 
+        if old_start_offset + new_start_samples < old_start_samples {
+            return Err(CropAudioClipError::TooLong);
+        }
+        let new_start_offset = old_start_offset + new_start_samples - old_start_samples;
+
         let clip_mut = track.clips.get_mut(&clip_key).unwrap();
         clip_mut.start = new_start;
         clip_mut.length = Some(new_length);
+        clip_mut.start_offset = new_start_offset;
 
         self.event_sender.send(Event::CropAudioClipStart {
             track_key,
             old_start,
             new_start,
             new_length,
+            new_start_offset,
         });
 
         Ok(())
@@ -544,9 +557,10 @@ impl Timeline {
                 clip_key,
             })?;
 
-        // Check for overlaps
         let clip_start = clip.start;
         let new_end = clip_start + new_length;
+
+        // Check for overlaps
         for other_clip in track.clips.values() {
             let same = other_clip.key == clip.key;
             let overlapping = clip_start < other_clip.start && other_clip.start < new_end;
@@ -824,7 +838,14 @@ impl TimelineProcessor {
                         old_start,
                         new_start,
                         new_length,
-                    } => self.crop_audio_clip_start(track_key, old_start, new_start, new_length),
+                        new_start_offset,
+                    } => self.crop_audio_clip_start(
+                        track_key,
+                        old_start,
+                        new_start,
+                        new_length,
+                        new_start_offset,
+                    ),
                     Event::CropAudioClipEnd {
                         track_key,
                         clip_start,
@@ -894,13 +915,14 @@ impl TimelineProcessor {
         old_start: Timestamp,
         new_start: Timestamp,
         new_length: Timestamp,
+        new_start_offset: usize,
     ) {
         let track = self
             .tracks
             .get_mut(&track_key)
             .expect("Track doesn't exist");
 
-        track.crop_clip_start(old_start, new_start, new_length);
+        track.crop_clip_start(old_start, new_start, new_length, new_start_offset);
     }
     pub fn crop_audio_clip_end(
         &mut self,
