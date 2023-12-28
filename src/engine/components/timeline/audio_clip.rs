@@ -33,7 +33,7 @@ pub struct AudioClip {
 impl AudioClip {
     pub fn current_length(&self, sample_rate: u32, bpm_cents: u16) -> Timestamp {
         self.length.unwrap_or(Timestamp::from_samples_ceil(
-            self.reader.len(sample_rate) as u64,
+            self.reader.len(sample_rate),
             sample_rate,
             bpm_cents,
         ))
@@ -102,7 +102,7 @@ impl AudioClipProcessor {
         } else {
             self.start
                 + Timestamp::from_samples_ceil(
-                    self.reader.len(sample_rate) as u64,
+                    self.reader.len(sample_rate) - self.start_offset,
                     sample_rate,
                     bpm_cents,
                 )
@@ -128,7 +128,7 @@ impl AudioClipProcessor {
 
         // Saturating subtraction means that if the position is before the start of the clip,
         // then the clip is reset to 0.
-        let inner_pos = pos_samples.saturating_sub(start_samples + self.start_offset);
+        let inner_pos = pos_samples.saturating_sub(start_samples) + self.start_offset;
 
         self.reader.jump(inner_pos, sample_rate)?;
 
@@ -137,7 +137,7 @@ impl AudioClipProcessor {
 
     fn length_samples(&self, sample_rate: u32, bpm_cents: u16) -> usize {
         match self.length {
-            None => self.reader.len(sample_rate),
+            None => self.reader.len(sample_rate) - self.start_offset,
             Some(length) => length.samples(sample_rate, bpm_cents),
         }
     }
@@ -152,7 +152,7 @@ impl AudioClipProcessor {
 
         let length = self.length_samples(sample_rate, bpm_cents);
         let pos = self.reader.position();
-        let remaining = length - min(pos + self.start_offset, length);
+        let remaining = length.saturating_sub(pos);
         let capped_buffer_size = min(buffer_size, remaining);
 
         self.reader.output(&Info {
