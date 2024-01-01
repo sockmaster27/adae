@@ -144,11 +144,30 @@ impl TimelineTrackProcessor {
         new_length: Timestamp,
         new_start_offset: usize,
     ) {
+        let sample_rate = self.sample_rate;
+        let bpm_cents = self.bpm_cents;
+        let pos_samples = self.position.load(Ordering::Relaxed);
+        let position = Timestamp::from_samples(pos_samples, sample_rate, bpm_cents);
+
         self.with_clip(old_start, |clip| {
             // While clip.start is the key, changing it will not change the position in the tree if no clips can ever be in an overlapping state.
             clip.start = new_start;
             clip.length = Some(new_length);
             clip.start_offset = new_start_offset;
+        });
+
+        // TODO: only jump when start crosses position
+        self.with_relevant_clip(|relevant_clip| {
+            if let Some(relevant_clip) = relevant_clip {
+                let relevant_was_cropped = relevant_clip.start == new_start;
+                let was_upcoming = position <= old_start;
+                let is_upcoming = position <= new_start;
+                if relevant_was_cropped && (was_upcoming || is_upcoming) {
+                    relevant_clip
+                        .jump_to(position, sample_rate, bpm_cents)
+                        .unwrap();
+                }
+            }
         });
     }
     pub fn crop_clip_end(&mut self, clip_start: Timestamp, new_length: Timestamp) {
