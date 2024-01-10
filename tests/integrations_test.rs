@@ -173,6 +173,8 @@ mod audio_tracks {
 }
 
 mod audio_clips {
+    use adae::error::MoveAudioClipError;
+
     use super::*;
 
     mod stored {
@@ -319,6 +321,56 @@ mod audio_clips {
 
         assert_eq!(e.audio_clips(at.timeline_track_key()).unwrap().count(), 42);
         assert_eq!(acs, acs_new);
+    }
+
+    #[test]
+    fn move_audo_clip() {
+        let mut e = Engine::dummy();
+        let at = e.add_audio_track().unwrap();
+
+        let ck = import_audio_clip(&mut e);
+        let ack = e
+            .add_audio_clip(
+                at.timeline_track_key(),
+                ck,
+                Timestamp::from_beats(0),
+                Some(Timestamp::from_beats(1)),
+            )
+            .unwrap();
+
+        let r = e.audio_clip_move(at.timeline_track_key(), ack, Timestamp::from_beats(1));
+
+        let ac = e.audio_clip(at.timeline_track_key(), ack).unwrap();
+
+        assert_eq!(r, Ok(()));
+        assert_eq!(ac.start, Timestamp::from_beats(1));
+    }
+
+    #[test]
+    fn move_audo_clip_overlapping() {
+        let mut e = Engine::dummy();
+        let at = e.add_audio_track().unwrap();
+
+        let ck = import_audio_clip(&mut e);
+        let ac = e
+            .add_audio_clip(
+                at.timeline_track_key(),
+                ck,
+                Timestamp::from_beats(0),
+                Some(Timestamp::from_beats(1)),
+            )
+            .unwrap();
+        e.add_audio_clip(
+            at.timeline_track_key(),
+            ck,
+            Timestamp::from_beats(1),
+            Some(Timestamp::from_beats(2)),
+        )
+        .unwrap();
+
+        let r = e.audio_clip_move(at.timeline_track_key(), ac, Timestamp::from_beats(2));
+
+        assert_eq!(r, Err(MoveAudioClipError::Overlapping));
     }
 
     #[test]

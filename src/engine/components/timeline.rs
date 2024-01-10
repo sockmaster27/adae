@@ -164,6 +164,11 @@ enum Event {
         track_key: MixerTrackKey,
         clip_starts: DBox<Vec<Timestamp>>,
     },
+    MoveAudioClip {
+        track_key: MixerTrackKey,
+        old_start: Timestamp,
+        new_start: Timestamp,
+    },
     CropAudioClipStart {
         track_key: MixerTrackKey,
         old_start: Timestamp,
@@ -478,6 +483,50 @@ impl Timeline {
             self.clip_key_generator.reserve(key).unwrap();
         }
         Ok(keys)
+    }
+
+    pub fn audio_clip_move(
+        &mut self,
+        track_key: TimelineTrackKey,
+        clip_key: AudioClipKey,
+        new_start: Timestamp,
+    ) -> Result<(), MoveAudioClipError> {
+        let track = self
+            .tracks
+            .get_mut(&track_key)
+            .ok_or(MoveAudioClipError::InvalidTrack { track_key })?;
+
+        let clip = track
+            .clips
+            .get(&clip_key)
+            .ok_or(MoveAudioClipError::InvalidClip {
+                track_key,
+                clip_key,
+            })?;
+
+        let old_start = clip.start;
+        let new_end = new_start + clip.current_length(self.sample_rate, self.bpm_cents);
+
+        // Check for overlaps
+        for other_clip in track.clips.values() {
+            let same = other_clip.key == clip.key;
+            let overlapping = new_start < other_clip.end(self.sample_rate, self.bpm_cents)
+                && other_clip.start < new_end;
+            if !same && overlapping {
+                return Err(MoveAudioClipError::Overlapping);
+            }
+        }
+
+        let clip_mut = track.clips.get_mut(&clip_key).unwrap();
+        clip_mut.start = new_start;
+
+        self.event_sender.send(Event::MoveAudioClip {
+            track_key,
+            old_start,
+            new_start,
+        });
+
+        Ok(())
     }
 
     pub fn audio_clip_crop_start(
@@ -833,6 +882,11 @@ impl TimelineProcessor {
                         track_key,
                         clip_starts,
                     } => self.delete_clips(track_key, clip_starts),
+                    Event::MoveAudioClip {
+                        track_key,
+                        old_start,
+                        new_start,
+                    } => self.move_audio_clip(track_key, old_start, new_start),
                     Event::CropAudioClipStart {
                         track_key,
                         old_start,
@@ -909,6 +963,20 @@ impl TimelineProcessor {
         track.delete_clips(clip_starts);
     }
 
+    pub fn move_audio_clip(
+        &mut self,
+        track_key: TimelineTrackKey,
+        old_start: Timestamp,
+        new_start: Timestamp,
+    ) {
+        let track = self
+            .tracks
+            .get_mut(&track_key)
+            .expect("Track doesn't exist");
+
+        track.move_clip(old_start, new_start);
+    }
+
     pub fn crop_audio_clip_start(
         &mut self,
         track_key: TimelineTrackKey,
@@ -924,6 +992,7 @@ impl TimelineProcessor {
 
         track.crop_clip_start(old_start, new_start, new_length, new_start_offset);
     }
+
     pub fn crop_audio_clip_end(
         &mut self,
         track_key: TimelineTrackKey,

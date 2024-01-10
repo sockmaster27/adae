@@ -137,6 +137,12 @@ impl TimelineTrackProcessor {
         self.relevant_clip = Some(tree.upper_bound_owning(Bound::Included(&position)));
     }
 
+    pub fn move_clip(&mut self, old_start: Timestamp, new_start: Timestamp) {
+        self.with_clip(old_start, |clip| {
+            clip.start = new_start;
+        });
+    }
+
     pub fn crop_clip_start(
         &mut self,
         old_start: Timestamp,
@@ -170,6 +176,7 @@ impl TimelineTrackProcessor {
             }
         });
     }
+
     pub fn crop_clip_end(&mut self, clip_start: Timestamp, new_length: Timestamp) {
         let sample_rate = self.sample_rate;
         let bpm_cents = self.bpm_cents;
