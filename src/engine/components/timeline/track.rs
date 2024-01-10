@@ -20,6 +20,9 @@ use crate::Timestamp;
 
 pub type TimelineTrackKey = u32;
 
+type TimelineTree = RBTree<TreeNodeAdapter<AudioClipProcessor>>;
+type TimelineCursor = CursorOwning<TreeNodeAdapter<AudioClipProcessor>>;
+
 /// A mirror for the state of a `TimelineTrackProcessor`.
 /// Unlike the convention, this does not do any synchronization with the `TimelineTrackProcessor`.
 pub struct TimelineTrack {
@@ -47,7 +50,7 @@ pub struct TimelineTrackProcessor {
     /// Unless expicitly stated, all methods expect this to be `Some`.
     ///
     /// All clips in this tree should be reset when the the position encounters them, not when it leaves them.
-    relevant_clip: Option<CursorOwning<TreeNodeAdapter<AudioClipProcessor>>>,
+    relevant_clip: Option<TimelineCursor>,
 
     output_track: MixerTrackKey,
 }
@@ -138,9 +141,35 @@ impl TimelineTrackProcessor {
     }
 
     pub fn move_clip(&mut self, old_start: Timestamp, new_start: Timestamp) {
-        self.with_clip(old_start, |clip| {
+        let sample_rate = self.sample_rate;
+        let bpm_cents = self.bpm_cents;
+        let pos_samples = self.position.load(Ordering::Relaxed);
+        let position = Timestamp::from_samples(pos_samples, sample_rate, bpm_cents);
+
+        let new_end = self.with_clip_moving(old_start, |clip| {
             clip.start = new_start;
+            clip.end(sample_rate, bpm_cents)
         });
+
+        let relevant_start = self.map_relevant_clip_not_moving(|clip| clip.start);
+
+        // The clip has become relevant if it's like this:
+        //
+        //  position         Relevant clip or None
+        //     ↓                     ↓
+        //     |   ...moved ]   [ relevant ]
+        //
+        let has_become_relevant = position <= new_end
+            && relevant_start.map_or(true, |relevant_start| new_end <= relevant_start);
+        if has_become_relevant {
+            self.relevant_clip
+                .as_mut()
+                .unwrap()
+                .with_cursor_mut(|cursor| cursor.move_prev());
+            self.map_relevant_clip_not_moving(|clip| {
+                clip.jump_to(position, sample_rate, bpm_cents).unwrap()
+            });
+        }
     }
 
     pub fn crop_clip_start(
@@ -155,7 +184,7 @@ impl TimelineTrackProcessor {
         let pos_samples = self.position.load(Ordering::Relaxed);
         let position = Timestamp::from_samples(pos_samples, sample_rate, bpm_cents);
 
-        self.with_clip(old_start, |clip| {
+        self.with_clip_not_moving(old_start, |clip| {
             // While clip.start is the key, changing it will not change the position in the tree if no clips can ever be in an overlapping state.
             clip.start = new_start;
             clip.length = Some(new_length);
@@ -163,7 +192,7 @@ impl TimelineTrackProcessor {
         });
 
         // TODO: only jump when start crosses position
-        self.with_relevant_clip(|relevant_clip| {
+        self.with_relevant_clip_not_moving(|relevant_clip| {
             if let Some(relevant_clip) = relevant_clip {
                 let relevant_was_cropped = relevant_clip.start == new_start;
                 let was_upcoming = position <= old_start;
@@ -183,7 +212,7 @@ impl TimelineTrackProcessor {
         let pos_samples = self.position.load(Ordering::Relaxed);
         let position = Timestamp::from_samples(pos_samples, sample_rate, bpm_cents);
 
-        let (start, old_end, new_end) = self.with_clip(clip_start, |clip| {
+        let (start, old_end, new_end) = self.with_clip_not_moving(clip_start, |clip| {
             let old_end = clip.end(sample_rate, bpm_cents);
             clip.length = Some(new_length);
             (clip.start, old_end, clip.start + new_length)
@@ -218,6 +247,20 @@ impl TimelineTrackProcessor {
         let pos_samples = self.position.load(Ordering::Relaxed);
         let position = Timestamp::from_samples(pos_samples, self.sample_rate, self.bpm_cents);
 
+        self.update_relevant_clip(position);
+
+        let sample_rate = self.sample_rate;
+        let bpm_cents = self.bpm_cents;
+
+        self.with_relevant_clip_not_moving(|clip_opt| {
+            if let Some(clip) = clip_opt {
+                clip.jump_to(position, sample_rate, bpm_cents).unwrap();
+            }
+        });
+    }
+
+    /// Update the relevant clip to point to the clip that is relevant at `position`.
+    fn update_relevant_clip(&mut self, position: Timestamp) {
         let tree = self
             .relevant_clip
             .take()
@@ -240,15 +283,6 @@ impl TimelineTrackProcessor {
                     }
                 }
             });
-
-        let sample_rate = self.sample_rate;
-        let bpm_cents = self.bpm_cents;
-
-        self.with_relevant_clip(|clip_opt| {
-            if let Some(clip) = clip_opt {
-                clip.jump_to(position, sample_rate, bpm_cents).unwrap();
-            }
-        });
     }
 
     pub fn output(&mut self, info: &Info, buffer: &mut [Sample]) {
@@ -314,7 +348,8 @@ impl TimelineTrackProcessor {
             });
     }
 
-    fn with_relevant_clip<F, R>(&mut self, f: F) -> R
+    /// Run a function on the (optional) relevant clip, which must not alter the ordering of the clips.
+    fn with_relevant_clip_not_moving<F, R>(&mut self, f: F) -> R
     where
         F: FnOnce(Option<&mut AudioClipProcessor>) -> R,
     {
@@ -331,30 +366,85 @@ impl TimelineTrackProcessor {
             })
     }
 
-    /// Run a function on the clip at `clip_start`.
-    ///
-    /// This will not update what the relevant clip is pointing to, so if the clip is moved or cropped the cursor might not point at the correct clip.
-    fn with_clip<F, R>(&mut self, clip_start: Timestamp, f: F) -> R
+    /// Run a function on the relevant clip if one exists, which must not alter the ordering of the clips.
+    fn map_relevant_clip_not_moving<F, R>(&mut self, f: F) -> Option<R>
     where
         F: FnOnce(&mut AudioClipProcessor) -> R,
     {
+        self.with_relevant_clip_not_moving(|clip_opt| clip_opt.map(f))
+    }
+
+    /// Run a function on the clip at `clip_start`, which must not alter the ordering of the clips.
+    ///
+    /// This will _not_ update what the relevant clip is pointing to, so if the clip is moved or cropped the cursor might not point at the correct clip.
+    fn with_clip_not_moving<F, R>(&mut self, clip_start: Timestamp, f: F) -> R
+    where
+        F: FnOnce(&mut AudioClipProcessor) -> R,
+    {
+        // Safety:
+        // - We don't remove any clip from the tree
+        // - f cannot remove any clip from the tree
+        unsafe {
+            self.with_tree(|tree| {
+                let cursor = tree.find(&clip_start);
+                let clip_cell = cursor.get().expect("Attempted to access non-existing clip");
+                let mut clip = clip_cell.borrow_mut();
+
+                f(&mut clip)
+            })
+        }
+    }
+
+    /// Run a function on the clip at `clip_start`, which is free to alter the ordering of the clips.
+    ///
+    /// This will _not_ update what the relevant clip is pointing to, so if the clip is moved or cropped the cursor might not point at the correct clip.
+    fn with_clip_moving<F, R>(&mut self, clip_start: Timestamp, f: F) -> R
+    where
+        F: FnOnce(&mut AudioClipProcessor) -> R,
+    {
+        // Safety:
+        // - We don't remove any clip from the tree
+        // - f cannot remove any clip from the tree
+        unsafe {
+            self.with_tree(|tree| {
+                let clip_cell = tree
+                    .find_mut(&clip_start)
+                    .remove()
+                    .expect("Attempted to access non-existing clip");
+                let mut clip = clip_cell.borrow_mut();
+
+                let res = f(&mut clip);
+
+                drop(clip);
+                tree.insert(clip_cell);
+
+                res
+            })
+        }
+    }
+
+    /// Run a function on the tree, which must not remove the relevant clip from it.
+    ///
+    /// # Safety
+    /// The relevant clip must not be removed from the tree.
+    unsafe fn with_tree<F, R>(&mut self, f: F) -> R
+    where
+        F: FnOnce(&mut TimelineTree) -> R,
+    {
+        // Save the cursor in the form of a raw pointer,
+        // taking advantage of the fact that it must remain valid,
+        // avoiding the overhead of searching for the relevant clip again.
         let relevant_clip = self.relevant_clip.take().unwrap();
-
         let before_ptr = relevant_clip.as_cursor().get().map(|r| r as *const _);
+        let mut tree = relevant_clip.into_inner();
 
-        let tree = relevant_clip.into_inner();
-        let cursor = tree.find(&clip_start);
-        let clip_cell = cursor.get().expect("Attempted to access non-existing clip");
-        let mut clip = clip_cell.borrow_mut();
-        let res = f(&mut clip);
-        drop(clip);
+        let res = f(&mut tree);
 
         self.relevant_clip = match before_ptr {
             Some(ptr) => {
                 // Safety:
-                // - before_ptr is a pointer to a node in the tree
-                // - tree is not modified
-                // - f cannot modify the tree or remove the node
+                // - before_ptr is a pointer to the relevant clip, which is a node in the tree
+                // - f must not remove the relevant clip from the tree
                 unsafe { Some(tree.cursor_owning_from_ptr(ptr)) }
             }
             None => Some(tree.cursor_owning()),
@@ -717,5 +807,28 @@ mod tests {
             }
             pos.fetch_add(info.buffer_size, Ordering::Relaxed);
         }}
+    }
+
+    #[test]
+    fn move_clip_right() {
+        let p = Arc::new(AtomicUsize::new(0));
+        let mut t = TimelineTrackProcessor::new(0, Arc::clone(&p), SAMPLE_RATE, BPM_CENTS);
+        let c = clip(0, Some(1), 100);
+
+        no_heap! {{
+            t.insert_clip(c);
+
+            // Jump to past the end of the clip
+            p.store(2 * SBU, Ordering::Relaxed);
+            t.jump();
+
+            // Move the clip past the position
+            t.move_clip(Timestamp::from_beat_units(0), Timestamp::from_beat_units(1));
+        }}
+
+        // The clip should now be the relevant clip
+        t.with_relevant_clip_not_moving(|clip_opt| {
+            assert!(clip_opt.is_some());
+        });
     }
 }
