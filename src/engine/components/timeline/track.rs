@@ -154,7 +154,7 @@ impl TimelineTrackProcessor {
         let relevant_start = self.map_relevant_clip_not_moving(|clip| clip.start);
         let was_relevant = relevant_start == Some(new_start);
 
-        if was_relevant {
+        let is_relevant = if was_relevant {
             let cursor = self.relevant_clip.as_mut().unwrap().as_cursor();
             let next_clip_opt = cursor.peek_next().get();
             let next_starts_before = match next_clip_opt {
@@ -165,6 +165,8 @@ impl TimelineTrackProcessor {
             if no_longer_relevant {
                 self.update_relevant_clip(position);
             }
+
+            !no_longer_relevant
         } else {
             // The clip has become relevant if it's like this:
             //
@@ -183,6 +185,14 @@ impl TimelineTrackProcessor {
                     clip.jump_to(position, sample_rate, bpm_cents).unwrap()
                 });
             }
+
+            has_become_relevant
+        };
+
+        if is_relevant {
+            self.map_relevant_clip_not_moving(|clip| {
+                clip.jump_to(position, sample_rate, bpm_cents).unwrap()
+            });
         }
     }
 
