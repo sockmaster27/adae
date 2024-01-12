@@ -152,23 +152,37 @@ impl TimelineTrackProcessor {
         });
 
         let relevant_start = self.map_relevant_clip_not_moving(|clip| clip.start);
+        let was_relevant = relevant_start == Some(new_start);
 
-        // The clip has become relevant if it's like this:
-        //
-        //  position         Relevant clip or None
-        //     ↓                     ↓
-        //     |   ...moved ]   [ relevant ]
-        //
-        let has_become_relevant = position <= new_end
-            && relevant_start.map_or(true, |relevant_start| new_end <= relevant_start);
-        if has_become_relevant {
-            self.relevant_clip
-                .as_mut()
-                .unwrap()
-                .with_cursor_mut(|cursor| cursor.move_prev());
-            self.map_relevant_clip_not_moving(|clip| {
-                clip.jump_to(position, sample_rate, bpm_cents).unwrap()
-            });
+        if was_relevant {
+            let cursor = self.relevant_clip.as_mut().unwrap().as_cursor();
+            let next_clip_opt = cursor.peek_next().get();
+            let next_starts_before = match next_clip_opt {
+                Some(next) => next.borrow().start < new_start,
+                None => false,
+            };
+            let no_longer_relevant = new_end <= position || next_starts_before;
+            if no_longer_relevant {
+                self.update_relevant_clip(position);
+            }
+        } else {
+            // The clip has become relevant if it's like this:
+            //
+            //  position         Relevant clip or None
+            //     ↓                     ↓
+            //     |   ...moved ]   [ relevant ]
+            //
+            let has_become_relevant = position < new_end
+                && relevant_start.map_or(true, |relevant_start| new_end <= relevant_start);
+            if has_become_relevant {
+                self.relevant_clip
+                    .as_mut()
+                    .unwrap()
+                    .with_cursor_mut(|cursor| cursor.move_prev());
+                self.map_relevant_clip_not_moving(|clip| {
+                    clip.jump_to(position, sample_rate, bpm_cents).unwrap()
+                });
+            }
         }
     }
 
@@ -810,7 +824,7 @@ mod tests {
     }
 
     #[test]
-    fn move_clip_right() {
+    fn move_clip_into_relevance() {
         let p = Arc::new(AtomicUsize::new(0));
         let mut t = TimelineTrackProcessor::new(0, Arc::clone(&p), SAMPLE_RATE, BPM_CENTS);
         let c = clip(0, Some(1), 100);
@@ -819,8 +833,13 @@ mod tests {
             t.insert_clip(c);
 
             // Jump to past the end of the clip
-            p.store(2 * SBU, Ordering::Relaxed);
+            p.store(SBU, Ordering::Relaxed);
             t.jump();
+
+            // The clip should now no longer be the relevant clip
+            t.with_relevant_clip_not_moving(|clip_opt| {
+                assert!(clip_opt.is_none());
+            });
 
             // Move the clip past the position
             t.move_clip(Timestamp::from_beat_units(0), Timestamp::from_beat_units(1));
@@ -829,6 +848,34 @@ mod tests {
         // The clip should now be the relevant clip
         t.with_relevant_clip_not_moving(|clip_opt| {
             assert!(clip_opt.is_some());
+        });
+    }
+
+    #[test]
+    fn move_clip_out_of_relevance() {
+        let p = Arc::new(AtomicUsize::new(0));
+        let mut t = TimelineTrackProcessor::new(0, Arc::clone(&p), SAMPLE_RATE, BPM_CENTS);
+        let c = clip(1, Some(1), 100);
+
+        no_heap! {{
+            t.insert_clip(c);
+
+            // Jump to past the end of the clip
+            p.store(SBU, Ordering::Relaxed);
+            t.jump();
+
+            // The clip should now be the relevant clip
+            t.with_relevant_clip_not_moving(|clip_opt| {
+                assert!(clip_opt.is_some());
+            });
+
+            // Move the clip past the position
+            t.move_clip(Timestamp::from_beat_units(1), Timestamp::from_beat_units(0));
+        }}
+
+        // The clip should now no longer be the relevant clip
+        t.with_relevant_clip_not_moving(|clip_opt| {
+            assert!(clip_opt.is_none());
         });
     }
 }
