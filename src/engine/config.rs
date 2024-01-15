@@ -14,6 +14,19 @@ pub struct Config {
     pub output_device: OutputDevice,
     pub output_config: OutputConfig,
 }
+impl Config {
+    pub fn dummy() -> Self {
+        Config {
+            output_device: OutputDevice::dummy(),
+            output_config: OutputConfig {
+                channels: 2,
+                sample_format: SampleFormat::Float(SampleFormatFloat::F32),
+                sample_rate: 48_000,
+                buffer_size: None,
+            },
+        }
+    }
+}
 impl Default for Config {
     fn default() -> Self {
         let host = Host::default();
@@ -111,6 +124,15 @@ pub struct OutputDevice {
     name: String,
 }
 impl OutputDevice {
+    fn dummy() -> Self {
+        OutputDevice {
+            host: Host {
+                name: "Dummy Host".to_string(),
+            },
+            name: "Dummy Device".to_string(),
+        }
+    }
+
     pub fn host(&self) -> &Host {
         &self.host
     }

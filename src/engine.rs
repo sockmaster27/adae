@@ -64,8 +64,7 @@ pub struct Engine {
     stopped: Arc<AtomicBool>,
     join_handle: Option<JoinHandle<()>>,
 
-    /// The config is `None` in the dummy engine.
-    config: Option<Config>,
+    config: Config,
     processor_interface: ProcessorInterface,
     audio_tracks: HashSet<AudioTrack>,
 }
@@ -95,7 +94,7 @@ impl Engine {
         let engine = Engine {
             stopped: stopped_flag,
             join_handle: Some(join_handle),
-            config: Some(config),
+            config,
             processor_interface,
             audio_tracks: HashSet::from_iter(state.audio_tracks.iter().cloned()),
         };
@@ -105,9 +104,7 @@ impl Engine {
 
     /// Get the config that is currently in use.
     pub fn config(&self) -> &Config {
-        self.config
-            .as_ref()
-            .expect("Config is not available on dummy engine")
+        &self.config
     }
     /// Restart the engine with the given config.
     pub fn set_config(&mut self, config: Config) -> Result<(), InvalidConfigError> {
@@ -128,7 +125,7 @@ impl Engine {
         self.join_handle = Some(join_handle);
         self.processor_interface = processor_interface;
 
-        self.config = Some(config);
+        self.config = config;
 
         Ok(())
     }
@@ -156,7 +153,7 @@ impl Engine {
         let engine = Engine {
             stopped,
             join_handle: Some(join_handle),
-            config: None,
+            config: Config::dummy(),
             processor_interface,
             audio_tracks: HashSet::from_iter(state.audio_tracks.iter().cloned()),
         };
@@ -196,7 +193,7 @@ impl Engine {
         let engine = Engine {
             stopped: Arc::new(AtomicBool::new(false)),
             join_handle: None,
-            config: None,
+            config: Config::dummy(),
             processor_interface,
             audio_tracks: HashSet::from_iter(state.audio_tracks.iter().cloned()),
         };
