@@ -104,7 +104,7 @@ impl Engine {
     }
 
     /// Get the config that is currently in use.
-    pub fn get_config(&self) -> &Config {
+    pub fn config(&self) -> &Config {
         self.config
             .as_ref()
             .expect("Config is not available on dummy engine")
@@ -394,6 +394,10 @@ impl Engine {
 
                 e => panic!("Stream could not be created: {e}"),
             })
+    }
+
+    pub fn bpm_cents(&self) -> u16 {
+        self.processor_interface.timeline.bpm_cents()
     }
 
     pub fn play(&mut self) {

@@ -200,6 +200,10 @@ pub struct Timeline {
     event_sender: ringbuffer::Sender<Event>,
 }
 impl Timeline {
+    pub fn bpm_cents(&self) -> u16 {
+        self.bpm_cents
+    }
+
     pub fn play(&mut self) {
         self.playing.store(true, Ordering::Release);
     }
