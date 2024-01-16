@@ -172,6 +172,32 @@ mod audio_tracks {
     }
 }
 
+mod mixer_tracks {
+    use super::*;
+
+    #[test]
+    fn set_panning() {
+        let mut e = Engine::dummy();
+        let at = e.add_audio_track().unwrap();
+        let mt = e.mixer_track_mut(at.mixer_track_key()).unwrap();
+
+        mt.set_panning(0.123);
+
+        assert_eq!(mt.panning(), 0.123);
+    }
+
+    #[test]
+    fn set_volume() {
+        let mut e = Engine::dummy();
+        let at = e.add_audio_track().unwrap();
+        let mt = e.mixer_track_mut(at.mixer_track_key()).unwrap();
+
+        mt.set_volume(0.123);
+
+        assert_eq!(mt.volume(), 0.123);
+    }
+}
+
 mod audio_clips {
     use adae::error::MoveAudioClipError;
 
