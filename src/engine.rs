@@ -537,12 +537,12 @@ impl Engine {
 
     pub fn audio_clip_move_to_track(
         &mut self,
-        timeline_track_key: TimelineTrackKey,
+        old_timeline_track_key: TimelineTrackKey,
         audio_clip_key: AudioClipKey,
         new_timeline_track_key: TimelineTrackKey,
     ) -> Result<(), MoveAudioClipToTrackError> {
         self.processor_interface.timeline.audio_clip_move_to_track(
-            timeline_track_key,
+            old_timeline_track_key,
             audio_clip_key,
             new_timeline_track_key,
         )
