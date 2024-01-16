@@ -11,6 +11,7 @@ use crate::{
     StoredAudioClipKey, Timestamp,
 };
 
+/// A key for an audio clip, identifying it uniquely across the entire timeline.
 pub type AudioClipKey = u32;
 
 /// A mirror of `AudioClipProcessor`'s state.

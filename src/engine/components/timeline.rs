@@ -634,6 +634,55 @@ impl Timeline {
         Ok(())
     }
 
+    pub fn audio_clip_move_to_track(
+        &mut self,
+        old_track_key: TimelineTrackKey,
+        clip_key: AudioClipKey,
+        new_track_key: TimelineTrackKey,
+    ) -> Result<(), MoveAudioClipToTrackError> {
+        let old_track =
+            self.tracks
+                .get(&old_track_key)
+                .ok_or(MoveAudioClipToTrackError::InvalidOldTrack {
+                    track_key: old_track_key,
+                })?;
+
+        let clip =
+            old_track
+                .clips
+                .get(&clip_key)
+                .ok_or(MoveAudioClipToTrackError::InvalidClip {
+                    track_key: old_track_key,
+                    clip_key,
+                })?;
+        let clip_start = clip.start;
+        let clip_end = clip.end(self.sample_rate, self.bpm_cents);
+
+        let new_track =
+            self.tracks
+                .get(&new_track_key)
+                .ok_or(MoveAudioClipToTrackError::InvalidNewTrack {
+                    track_key: new_track_key,
+                })?;
+
+        // Check for overlaps
+        for other_clip in new_track.clips.values() {
+            let same = other_clip.key == clip_key;
+            let overlapping = clip_start < other_clip.end(self.sample_rate, self.bpm_cents)
+                && other_clip.start < clip_end;
+            if !same && overlapping {
+                return Err(MoveAudioClipToTrackError::Overlapping);
+            }
+        }
+
+        let old_track_mut = self.tracks.get_mut(&old_track_key).unwrap();
+        let clip = old_track_mut.clips.remove(&clip_key).unwrap();
+        let new_track_mut = self.tracks.get_mut(&new_track_key).unwrap();
+        new_track_mut.clips.insert(clip_key, clip);
+
+        Ok(())
+    }
+
     pub fn add_track(
         &mut self,
         output: MixerTrackKey,
@@ -1226,6 +1275,7 @@ impl Display for MoveAudioClipError {
     }
 }
 impl Error for MoveAudioClipError {}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum CropAudioClipError {
     InvalidTrack {
@@ -1263,6 +1313,46 @@ impl Display for CropAudioClipError {
     }
 }
 impl Error for CropAudioClipError {}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum MoveAudioClipToTrackError {
+    InvalidOldTrack {
+        track_key: TimelineTrackKey,
+    },
+    InvalidNewTrack {
+        track_key: TimelineTrackKey,
+    },
+    InvalidClip {
+        track_key: TimelineTrackKey,
+        clip_key: AudioClipKey,
+    },
+    Overlapping,
+}
+impl Display for MoveAudioClipToTrackError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MoveAudioClipToTrackError::InvalidOldTrack { track_key } => {
+                write!(f, "Attempted to access an audio clip on a non-existing timeline track with key, {track_key}")
+            }
+            MoveAudioClipToTrackError::InvalidNewTrack { track_key } => {
+                write!(f, "Attempted to move an audio clip to a non-existing timeline track with key, {track_key}")
+            }
+            MoveAudioClipToTrackError::InvalidClip {
+                track_key,
+                clip_key,
+            } => {
+                write!(
+                    f,
+                    "No clip with key, {clip_key}, on track with key, {track_key}"
+                )
+            }
+            MoveAudioClipToTrackError::Overlapping => {
+                write!(f, "Clip overlaps with another clip")
+            }
+        }
+    }
+}
+impl Error for MoveAudioClipToTrackError {}
 
 #[cfg(test)]
 mod tests {

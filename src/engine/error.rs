@@ -4,5 +4,5 @@ pub use super::{
     AudioTrackReconstructionError, CropAudioClipError, ImportError, InvalidAudioClipError,
     InvalidAudioTrackError, InvalidConfigError, InvalidMixerTrackError,
     InvalidStoredAudioClipError, InvalidTimelineTrackError, MixerTrackOverflowError,
-    MoveAudioClipError, TimelineTrackOverflowError,
+    MoveAudioClipError, MoveAudioClipToTrackError, TimelineTrackOverflowError,
 };

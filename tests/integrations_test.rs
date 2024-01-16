@@ -199,7 +199,7 @@ mod mixer_tracks {
 }
 
 mod audio_clips {
-    use adae::error::MoveAudioClipError;
+    use adae::error::{MoveAudioClipError, MoveAudioClipToTrackError};
 
     use super::*;
 
@@ -499,5 +499,58 @@ mod audio_clips {
         let r = e.audio_clip_crop_end(at.timeline_track_key(), ac, Timestamp::from_beats(2));
 
         assert_eq!(r, Err(CropAudioClipError::Overlapping));
+    }
+
+    #[test]
+    fn move_audio_clip_to_another_track() {
+        let mut e = Engine::dummy();
+        let at1 = e.add_audio_track().unwrap();
+        let at2 = e.add_audio_track().unwrap();
+
+        let ck = import_audio_clip(&mut e);
+        let ac = e
+            .add_audio_clip(
+                at1.timeline_track_key(),
+                ck,
+                Timestamp::from_beats(0),
+                Some(Timestamp::from_beats(1)),
+            )
+            .unwrap();
+
+        let r = e.audio_clip_move_to_track(at1.timeline_track_key(), ac, at2.timeline_track_key());
+
+        assert!(r.is_ok());
+        assert_eq!(e.audio_clips(at1.timeline_track_key()).unwrap().count(), 0);
+        assert_eq!(e.audio_clips(at2.timeline_track_key()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn move_audio_clip_to_another_track_overlapping() {
+        let mut e = Engine::dummy();
+        let at1 = e.add_audio_track().unwrap();
+        let at2 = e.add_audio_track().unwrap();
+
+        let ck = import_audio_clip(&mut e);
+        let ac = e
+            .add_audio_clip(
+                at1.timeline_track_key(),
+                ck,
+                Timestamp::from_beats(0),
+                Some(Timestamp::from_beats(1)),
+            )
+            .unwrap();
+        e.add_audio_clip(
+            at2.timeline_track_key(),
+            ck,
+            Timestamp::from_beats(0),
+            Some(Timestamp::from_beats(1)),
+        )
+        .unwrap();
+
+        let r = e.audio_clip_move_to_track(at1.timeline_track_key(), ac, at2.timeline_track_key());
+
+        assert_eq!(r, Err(MoveAudioClipToTrackError::Overlapping));
+        assert_eq!(e.audio_clips(at1.timeline_track_key()).unwrap().count(), 1);
+        assert_eq!(e.audio_clips(at2.timeline_track_key()).unwrap().count(), 1);
     }
 }

@@ -32,6 +32,7 @@ pub use components::timeline::AudioClip;
 pub use components::timeline::AudioClipKey;
 pub use components::timeline::AudioClipState;
 pub use components::timeline::InvalidAudioClipError;
+pub use components::timeline::MoveAudioClipToTrackError;
 pub use components::timeline::Timestamp;
 pub use components::timeline::{
     AddClipError, CropAudioClipError, InvalidTimelineTrackError, MoveAudioClipError,
@@ -509,7 +510,6 @@ impl Engine {
             new_start,
         )
     }
-
     pub fn audio_clip_crop_start(
         &mut self,
         timeline_track_key: TimelineTrackKey,
@@ -532,6 +532,19 @@ impl Engine {
             timeline_track_key,
             audio_clip_key,
             new_length,
+        )
+    }
+
+    pub fn audio_clip_move_to_track(
+        &mut self,
+        timeline_track_key: TimelineTrackKey,
+        audio_clip_key: AudioClipKey,
+        new_timeline_track_key: TimelineTrackKey,
+    ) -> Result<(), MoveAudioClipToTrackError> {
+        self.processor_interface.timeline.audio_clip_move_to_track(
+            timeline_track_key,
+            audio_clip_key,
+            new_timeline_track_key,
         )
     }
 
