@@ -261,7 +261,7 @@ mod audio_clips {
 
         assert_eq!(e.audio_clips(at.timeline_track_key()).unwrap().count(), 1);
 
-        let r = e.delete_audio_clip(at.timeline_track_key(), ac);
+        let r = e.delete_audio_clip(ac);
 
         assert!(r.is_ok());
         assert_eq!(e.audio_clips(at.timeline_track_key()).unwrap().count(), 0);
@@ -288,7 +288,7 @@ mod audio_clips {
 
         assert_eq!(e.audio_clips(at.timeline_track_key()).unwrap().count(), 42);
 
-        let r = e.delete_audio_clips(at.timeline_track_key(), acs);
+        let r = e.delete_audio_clips(&acs);
 
         assert!(r.is_ok());
         assert_eq!(e.audio_clips(at.timeline_track_key()).unwrap().count(), 0);
@@ -304,9 +304,9 @@ mod audio_clips {
             .add_audio_clip(at.timeline_track_key(), ck, Timestamp::from_beats(0), None)
             .unwrap();
 
-        let s = e.audio_clip(at.timeline_track_key(), ac).unwrap().state();
+        let s = e.audio_clip(ac).unwrap().state();
 
-        e.delete_audio_clip(at.timeline_track_key(), ac).unwrap();
+        e.delete_audio_clip(ac).unwrap();
 
         let ac_new = e
             .reconstruct_audio_clip(at.timeline_track_key(), s)
@@ -335,11 +335,10 @@ mod audio_clips {
                 )
                 .unwrap();
             acs.push(ac);
-            ss.push(e.audio_clip(at.timeline_track_key(), ac).unwrap().state())
+            ss.push(e.audio_clip(ac).unwrap().state())
         }
 
-        e.delete_audio_clips(at.timeline_track_key(), acs.clone())
-            .unwrap();
+        e.delete_audio_clips(&acs).unwrap();
 
         let acs_new = e
             .reconstruct_audio_clips(at.timeline_track_key(), ss)
@@ -364,9 +363,9 @@ mod audio_clips {
             )
             .unwrap();
 
-        let r = e.audio_clip_move(at.timeline_track_key(), ack, Timestamp::from_beats(1));
+        let r = e.audio_clip_move(ack, Timestamp::from_beats(1));
 
-        let ac = e.audio_clip(at.timeline_track_key(), ack).unwrap();
+        let ac = e.audio_clip(ack).unwrap();
 
         assert_eq!(r, Ok(()));
         assert_eq!(ac.start, Timestamp::from_beats(1));
@@ -394,9 +393,9 @@ mod audio_clips {
         )
         .unwrap();
 
-        let r = e.audio_clip_move(at.timeline_track_key(), ack, Timestamp::from_beats(2));
+        let r = e.audio_clip_move(ack, Timestamp::from_beats(2));
 
-        let ac = e.audio_clip(at.timeline_track_key(), ack).unwrap();
+        let ac = e.audio_clip(ack).unwrap();
 
         assert_eq!(r, Err(MoveAudioClipError::Overlapping));
         assert_eq!(ac.start, Timestamp::from_beats(0));
@@ -417,9 +416,9 @@ mod audio_clips {
             )
             .unwrap();
 
-        let r = e.audio_clip_crop_start(at.timeline_track_key(), ack, Timestamp::from_beats(1));
+        let r = e.audio_clip_crop_start(ack, Timestamp::from_beats(1));
 
-        let ac = e.audio_clip(at.timeline_track_key(), ack).unwrap();
+        let ac = e.audio_clip(ack).unwrap();
 
         assert_eq!(r, Ok(()));
         assert_eq!(ac.start, Timestamp::from_beats(1));
@@ -448,9 +447,9 @@ mod audio_clips {
             )
             .unwrap();
 
-        let r = e.audio_clip_crop_start(at.timeline_track_key(), ack, Timestamp::from_beats(2));
+        let r = e.audio_clip_crop_start(ack, Timestamp::from_beats(2));
 
-        let ac = e.audio_clip(at.timeline_track_key(), ack).unwrap();
+        let ac = e.audio_clip(ack).unwrap();
 
         assert_eq!(r, Err(CropAudioClipError::Overlapping));
         assert_eq!(ac.start, Timestamp::from_beats(1));
@@ -472,9 +471,9 @@ mod audio_clips {
             )
             .unwrap();
 
-        let r = e.audio_clip_crop_end(at.timeline_track_key(), ack, Timestamp::from_beats(1));
+        let r = e.audio_clip_crop_end(ack, Timestamp::from_beats(1));
 
-        let ac = e.audio_clip(at.timeline_track_key(), ack).unwrap();
+        let ac = e.audio_clip(ack).unwrap();
 
         assert_eq!(r, Ok(()));
         assert_eq!(ac.start, Timestamp::from_beats(0));
@@ -503,9 +502,9 @@ mod audio_clips {
         )
         .unwrap();
 
-        let r = e.audio_clip_crop_end(at.timeline_track_key(), ack, Timestamp::from_beats(2));
+        let r = e.audio_clip_crop_end(ack, Timestamp::from_beats(2));
 
-        let ac = e.audio_clip(at.timeline_track_key(), ack).unwrap();
+        let ac = e.audio_clip(ack).unwrap();
 
         assert_eq!(r, Err(CropAudioClipError::Overlapping));
         assert_eq!(ac.start, Timestamp::from_beats(0));
@@ -528,7 +527,7 @@ mod audio_clips {
             )
             .unwrap();
 
-        let r = e.audio_clip_move_to_track(at1.timeline_track_key(), ac, at2.timeline_track_key());
+        let r = e.audio_clip_move_to_track(ac, at2.timeline_track_key());
 
         assert!(r.is_ok());
         assert_eq!(e.audio_clips(at1.timeline_track_key()).unwrap().count(), 0);
@@ -558,7 +557,7 @@ mod audio_clips {
         )
         .unwrap();
 
-        let r = e.audio_clip_move_to_track(at1.timeline_track_key(), ac, at2.timeline_track_key());
+        let r = e.audio_clip_move_to_track(ac, at2.timeline_track_key());
 
         assert_eq!(r, Err(MoveAudioClipToTrackError::Overlapping));
         assert_eq!(e.audio_clips(at1.timeline_track_key()).unwrap().count(), 1);

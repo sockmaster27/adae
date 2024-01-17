@@ -13,7 +13,7 @@ use super::audio_clip::{AudioClip, AudioClipKey, AudioClipState};
 use super::AudioClipProcessor;
 use crate::engine::components::track::MixerTrackKey;
 use crate::engine::info::Info;
-use crate::engine::utils::dropper::{self, DBox};
+use crate::engine::utils::dropper;
 use crate::engine::utils::rbtree_node::{TreeNode, TreeNodeAdapter};
 use crate::engine::{Sample, CHANNELS};
 use crate::Timestamp;
@@ -119,21 +119,6 @@ impl TimelineTrackProcessor {
             .remove()
             .expect("Attempted to delete non-existing clip");
         dropper::send(el);
-
-        let pos_samples = self.position.load(Ordering::Relaxed);
-        let position = Timestamp::from_samples(pos_samples, self.sample_rate, self.bpm_cents);
-        self.relevant_clip = Some(tree.upper_bound_owning(Bound::Included(&position)));
-    }
-    pub fn delete_clips(&mut self, clip_starts: DBox<Vec<Timestamp>>) {
-        let mut tree = self.relevant_clip.take().unwrap().into_inner();
-
-        for clip_start in clip_starts.iter() {
-            let el = tree
-                .find_mut(clip_start)
-                .remove()
-                .expect("Attempted to delete non-existing clip");
-            dropper::send(el);
-        }
 
         let pos_samples = self.position.load(Ordering::Relaxed);
         let position = Timestamp::from_samples(pos_samples, self.sample_rate, self.bpm_cents);

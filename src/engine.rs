@@ -443,12 +443,9 @@ impl Engine {
 
     pub fn audio_clip(
         &self,
-        timeline_track_key: TimelineTrackKey,
         audio_clip_key: AudioClipKey,
     ) -> Result<&AudioClip, InvalidAudioClipError> {
-        self.processor_interface
-            .timeline
-            .audio_clip(timeline_track_key, audio_clip_key)
+        self.processor_interface.timeline.audio_clip(audio_clip_key)
     }
 
     pub fn audio_clips(
@@ -462,21 +459,19 @@ impl Engine {
 
     pub fn delete_audio_clip(
         &mut self,
-        timeline_track_key: TimelineTrackKey,
         audio_clip_key: AudioClipKey,
     ) -> Result<(), InvalidAudioClipError> {
         self.processor_interface
             .timeline
-            .delete_audio_clip(timeline_track_key, audio_clip_key)
+            .delete_audio_clip(audio_clip_key)
     }
     pub fn delete_audio_clips(
         &mut self,
-        timeline_track_key: TimelineTrackKey,
-        audio_clip_keys: Vec<AudioClipKey>,
-    ) -> Result<(), InvalidAudioClipError> {
+        audio_clip_keys: &[AudioClipKey],
+    ) -> Result<(), Vec<InvalidAudioClipError>> {
         self.processor_interface
             .timeline
-            .delete_audio_clips(timeline_track_key, audio_clip_keys)
+            .delete_audio_clips(audio_clip_keys)
     }
 
     pub fn reconstruct_audio_clip(
@@ -500,52 +495,40 @@ impl Engine {
 
     pub fn audio_clip_move(
         &mut self,
-        timeline_track_key: TimelineTrackKey,
         audio_clip_key: AudioClipKey,
         new_start: Timestamp,
     ) -> Result<(), MoveAudioClipError> {
-        self.processor_interface.timeline.audio_clip_move(
-            timeline_track_key,
-            audio_clip_key,
-            new_start,
-        )
+        self.processor_interface
+            .timeline
+            .audio_clip_move(audio_clip_key, new_start)
     }
     pub fn audio_clip_crop_start(
         &mut self,
-        timeline_track_key: TimelineTrackKey,
         audio_clip_key: AudioClipKey,
         new_length: Timestamp,
     ) -> Result<(), CropAudioClipError> {
-        self.processor_interface.timeline.audio_clip_crop_start(
-            timeline_track_key,
-            audio_clip_key,
-            new_length,
-        )
+        self.processor_interface
+            .timeline
+            .audio_clip_crop_start(audio_clip_key, new_length)
     }
     pub fn audio_clip_crop_end(
         &mut self,
-        timeline_track_key: TimelineTrackKey,
         audio_clip_key: AudioClipKey,
         new_length: Timestamp,
     ) -> Result<(), CropAudioClipError> {
-        self.processor_interface.timeline.audio_clip_crop_end(
-            timeline_track_key,
-            audio_clip_key,
-            new_length,
-        )
+        self.processor_interface
+            .timeline
+            .audio_clip_crop_end(audio_clip_key, new_length)
     }
 
     pub fn audio_clip_move_to_track(
         &mut self,
-        old_timeline_track_key: TimelineTrackKey,
         audio_clip_key: AudioClipKey,
         new_timeline_track_key: TimelineTrackKey,
     ) -> Result<(), MoveAudioClipToTrackError> {
-        self.processor_interface.timeline.audio_clip_move_to_track(
-            old_timeline_track_key,
-            audio_clip_key,
-            new_timeline_track_key,
-        )
+        self.processor_interface
+            .timeline
+            .audio_clip_move_to_track(audio_clip_key, new_timeline_track_key)
     }
 
     pub fn master(&self) -> &MixerTrack {
