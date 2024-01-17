@@ -427,18 +427,15 @@ impl Timeline {
     pub fn delete_audio_clips(
         &mut self,
         clip_keys: &[AudioClipKey],
-    ) -> Result<(), Vec<InvalidAudioClipError>> {
+    ) -> Result<(), InvalidAudioClipsError> {
         let some_invalid = clip_keys
             .iter()
             .any(|&key| !self.clip_key_generator.in_use(key));
         if some_invalid {
-            let invalid = clip_keys
+            let invalid_keys = clip_keys
                 .iter()
-                .filter(|&&key| !self.clip_key_generator.in_use(key));
-            let errors = invalid
-                .map(|&key| InvalidAudioClipError { clip_key: key })
-                .collect();
-            return Err(errors);
+                .filter(|&&key| !self.clip_key_generator.in_use(key)).copied().collect();
+            return Err(InvalidAudioClipsError {clip_keys: invalid_keys});
         }
 
         let track_and_clip_keys: Vec<(TimelineTrackKey, AudioClipKey)> = clip_keys
@@ -1190,6 +1187,18 @@ impl Display for InvalidAudioClipError {
     }
 }
 impl Error for InvalidAudioClipError {}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct InvalidAudioClipsError {
+    clip_keys: Vec<AudioClipKey>,
+}
+impl Display for InvalidAudioClipsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let keys = &self.clip_keys;
+        write!(f, "No clip found on timeline for keys: {keys:?}")
+    }
+}
+impl Error for InvalidAudioClipsError {}
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum AudioClipReconstructionError {

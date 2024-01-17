@@ -28,7 +28,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             .unwrap();
 
         b.iter(|| {
-            let _ = e.audio_clip_crop_end(at.timeline_track_key(), ac, Timestamp::from_beats(1));
+            let _ = e.audio_clip_crop_end(ac, Timestamp::from_beats(1));
             p.poll();
         });
     });
