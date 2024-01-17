@@ -15,6 +15,12 @@ pub trait Key: Copy + Eq + Hash + Debug {
 
 /// Macro for generating a new key type.
 /// The resulting type will be a simple newtype wrapper around the given type.
+///
+/// ```
+/// key_type!(MyKey, u32);
+///          ↓
+/// pub struct MyKey(u32);
+/// ```
 macro_rules! key_type {
     ($name:ident, $id:ty) => {
         #[derive(serde::Serialize, serde::Deserialize, Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -26,6 +32,11 @@ macro_rules! key_type {
             }
             fn id(&self) -> Self::Id {
                 self.0
+            }
+        }
+        impl From<$name> for $id {
+            fn from(key: $name) -> Self {
+                key.0
             }
         }
     };
