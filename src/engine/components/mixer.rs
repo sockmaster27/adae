@@ -283,7 +283,8 @@ pub struct InvalidMixerTrackError {
 }
 impl Display for InvalidMixerTrackError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "No track with key, {}, on mixer", self.key)
+        let key = self.key;
+        write!(f, "No track with key, {key:?}, on mixer")
     }
 }
 impl Error for InvalidMixerTrackError {}
@@ -304,6 +305,8 @@ impl From<key_generator::OverflowError> for MixerTrackOverflowError {
 
 #[cfg(test)]
 mod tests {
+    use crate::engine::utils::key_generator::Key;
+
     use super::*;
 
     #[test]
@@ -389,7 +392,7 @@ mod tests {
             .map(|key| MixerTrackState {
                 panning: 0.0,
                 volume: 1.0,
-                key: key as MixerTrackKey,
+                key: MixerTrackKey::new(key as u32),
             })
             .collect();
 

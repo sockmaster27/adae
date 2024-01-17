@@ -167,11 +167,8 @@ pub struct InvalidStoredAudioClipError {
 }
 impl Display for InvalidStoredAudioClipError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "No audio clip with key, {}, in audio clip store",
-            self.key
-        )
+        let key = self.key;
+        write!(f, "No audio clip with key, {key:?}, in audio clip store")
     }
 }
 impl Error for InvalidStoredAudioClipError {}

@@ -14,11 +14,22 @@ use super::AudioClipProcessor;
 use crate::engine::components::track::MixerTrackKey;
 use crate::engine::info::Info;
 use crate::engine::utils::dropper;
+use crate::engine::utils::key_generator::Key;
 use crate::engine::utils::rbtree_node::{TreeNode, TreeNodeAdapter};
 use crate::engine::{Sample, CHANNELS};
 use crate::Timestamp;
 
-pub type TimelineTrackKey = u32;
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct TimelineTrackKey(u32);
+impl Key for TimelineTrackKey {
+    type Id = u32;
+    fn new(id: Self::Id) -> Self {
+        Self(id)
+    }
+    fn id(&self) -> Self::Id {
+        self.0
+    }
+}
 
 type TimelineTree = RBTree<TreeNodeAdapter<AudioClipProcessor>>;
 type TimelineCursor = CursorOwning<TreeNodeAdapter<AudioClipProcessor>>;
@@ -505,9 +516,12 @@ impl Hash for TimelineTrackState {
 #[cfg(test)]
 mod tests {
 
-    use crate::engine::{
-        components::{audio_clip_reader::AudioClipReader, stored_audio_clip::StoredAudioClip},
-        utils::test_file_path,
+    use crate::{
+        engine::{
+            components::{audio_clip_reader::AudioClipReader, stored_audio_clip::StoredAudioClip},
+            utils::test_file_path,
+        },
+        StoredAudioClipKey,
     };
 
     use super::*;
@@ -523,7 +537,7 @@ mod tests {
         max_buffer_size: usize,
     ) -> Box<TreeNode<AudioClipProcessor>> {
         thread_local! {
-            static AC: Arc<StoredAudioClip> = Arc::new(StoredAudioClip::import(0, &test_file_path("44100 16-bit.wav")).unwrap());
+            static AC: Arc<StoredAudioClip> = Arc::new(StoredAudioClip::import(StoredAudioClipKey::new(0), &test_file_path("44100 16-bit.wav")).unwrap());
         }
 
         AC.with(|ac| {
@@ -538,8 +552,12 @@ mod tests {
 
     #[test]
     fn insert() {
-        let mut t =
-            TimelineTrackProcessor::new(0, Arc::new(AtomicUsize::new(0)), SAMPLE_RATE, BPM_CENTS);
+        let mut t = TimelineTrackProcessor::new(
+            MixerTrackKey::new(0),
+            Arc::new(AtomicUsize::new(0)),
+            SAMPLE_RATE,
+            BPM_CENTS,
+        );
         let c1 = clip(3, Some(1), 100);
         let c2 = clip(1, Some(2), 100);
 
@@ -564,7 +582,12 @@ mod tests {
             buffer_size: BUFFER_SIZE,
         };
         let pos = Arc::new(AtomicUsize::new(0));
-        let mut t = TimelineTrackProcessor::new(0, Arc::clone(&pos), SAMPLE_RATE, BPM_CENTS);
+        let mut t = TimelineTrackProcessor::new(
+            MixerTrackKey::new(0),
+            Arc::clone(&pos),
+            SAMPLE_RATE,
+            BPM_CENTS,
+        );
         let c1 = clip(1, Some(1), 3 * SBU);
         let c2 = clip(3, Some(2), 3 * SBU);
 
@@ -647,8 +670,12 @@ mod tests {
         const SBUC: usize = SBU * CHANNELS;
         let mut out = vec![0.0; BUFFER_SIZE * CHANNELS];
 
-        let mut t =
-            TimelineTrackProcessor::new(0, Arc::new(AtomicUsize::new(0)), SAMPLE_RATE, BPM_CENTS);
+        let mut t = TimelineTrackProcessor::new(
+            MixerTrackKey::new(0),
+            Arc::new(AtomicUsize::new(0)),
+            SAMPLE_RATE,
+            BPM_CENTS,
+        );
         let c1 = clip(0, Some(1), BUFFER_SIZE);
         let c2 = clip(2, Some(1), BUFFER_SIZE);
         let c3 = clip(4, Some(1), BUFFER_SIZE);
@@ -733,7 +760,12 @@ mod tests {
             buffer_size: BUFFER_SIZE,
         };
         let pos = Arc::new(AtomicUsize::new(0));
-        let mut t = TimelineTrackProcessor::new(0, Arc::clone(&pos), SAMPLE_RATE, BPM_CENTS);
+        let mut t = TimelineTrackProcessor::new(
+            MixerTrackKey::new(0),
+            Arc::clone(&pos),
+            SAMPLE_RATE,
+            BPM_CENTS,
+        );
         let c1 = clip(1, Some(1), 100);
         let c2 = clip(3, Some(2), 100);
 
@@ -821,7 +853,12 @@ mod tests {
     #[test]
     fn move_clip_into_relevance() {
         let p = Arc::new(AtomicUsize::new(0));
-        let mut t = TimelineTrackProcessor::new(0, Arc::clone(&p), SAMPLE_RATE, BPM_CENTS);
+        let mut t = TimelineTrackProcessor::new(
+            MixerTrackKey::new(0),
+            Arc::clone(&p),
+            SAMPLE_RATE,
+            BPM_CENTS,
+        );
         let c = clip(0, Some(1), 100);
 
         no_heap! {{
@@ -849,7 +886,12 @@ mod tests {
     #[test]
     fn move_clip_out_of_relevance() {
         let p = Arc::new(AtomicUsize::new(0));
-        let mut t = TimelineTrackProcessor::new(0, Arc::clone(&p), SAMPLE_RATE, BPM_CENTS);
+        let mut t = TimelineTrackProcessor::new(
+            MixerTrackKey::new(0),
+            Arc::clone(&p),
+            SAMPLE_RATE,
+            BPM_CENTS,
+        );
         let c = clip(1, Some(1), 100);
 
         no_heap! {{

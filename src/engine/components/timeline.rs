@@ -1073,9 +1073,9 @@ impl TimelineProcessor {
         const NO_BUFFER_MSG: &str = "No buffer found for output track";
 
         if !self.playing.load(Ordering::Relaxed) {
-            for key in self.tracks.keys() {
+            for track in self.tracks.values() {
                 let buffer =
-                    &mut mixer_ins.get_mut(key).expect(NO_BUFFER_MSG)[..buffer_size * CHANNELS];
+                    &mut mixer_ins.get_mut(&track.output_track()).expect(NO_BUFFER_MSG)[..buffer_size * CHANNELS];
                 buffer.fill(0.0);
             }
             return;
@@ -1152,7 +1152,8 @@ pub struct InvalidTimelineTrackError {
 }
 impl Display for InvalidTimelineTrackError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "No track with key, {}, on timeline", self.key)
+        let key = self.key;
+        write!(f, "No track with key, {key:?}, on timeline")
     }
 }
 impl Error for InvalidTimelineTrackError {}
@@ -1167,9 +1168,9 @@ impl Display for AddClipError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InvalidTimelineTrack(key) => {
-                write!(f, "No timeline track with key, {key}, on timeline")
+                write!(f, "No timeline track with key, {key:?}, on timeline")
             }
-            Self::InvalidClip(key) => write!(f, "No stored audio clip with key, {key}"),
+            Self::InvalidClip(key) => write!(f, "No stored audio clip with key, {key:?}"),
             Self::Overlapping => write!(f, "Clip overlaps with another clip"),
         }
     }
@@ -1183,7 +1184,7 @@ pub struct InvalidAudioClipError {
 impl Display for InvalidAudioClipError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let key = self.clip_key;
-        write!(f, "No clip with key, {key}, on the timeline")
+        write!(f, "No clip with key, {key:?}, on the timeline")
     }
 }
 impl Error for InvalidAudioClipError {}
@@ -1220,15 +1221,15 @@ impl Display for AudioClipReconstructionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             AudioClipReconstructionError::InvalidTrack(key) => {
-                write!(f, "No timeline track with key, {key}, on timeline")
+                write!(f, "No timeline track with key, {key:?}, on timeline")
             }
 
             AudioClipReconstructionError::InvalidStoredClip(key) => {
-                write!(f, "No stored audio clip with key, {key}")
+                write!(f, "No stored audio clip with key, {key:?}")
             }
 
             AudioClipReconstructionError::KeyInUse(key) => {
-                write!(f, "Clip key, {key}, already in use")
+                write!(f, "Clip key, {key:?}, already in use")
             }
 
             AudioClipReconstructionError::Overlapping => {
@@ -1282,7 +1283,7 @@ impl Display for MoveAudioClipToTrackError {
         match self {
             MoveAudioClipToTrackError::InvalidClip(e) => Display::fmt(e, f),
             MoveAudioClipToTrackError::InvalidNewTrack { track_key } => 
-                write!(f, "Attempted to move an audio clip to a non-existing timeline track with key, {track_key}"),
+                write!(f, "Attempted to move an audio clip to a non-existing timeline track with key, {track_key:?}"),
             MoveAudioClipToTrackError::Overlapping => 
                 write!(f, "Clip overlaps with another clip"),
         }
@@ -1292,6 +1293,8 @@ impl Error for MoveAudioClipToTrackError {}
 
 #[cfg(test)]
 mod tests {
+    use tests::key_generator::Key;
+
     use crate::engine::utils::test_file_path;
 
     use super::*;
@@ -1302,7 +1305,7 @@ mod tests {
         assert!(ie.is_empty());
 
         for _ in 0..50 {
-            tl.add_track(0).unwrap();
+            tl.add_track(MixerTrackKey::new(0)).unwrap();
         }
 
         no_heap! {{
@@ -1321,7 +1324,7 @@ mod tests {
         let ck = tl
             .import_audio_clip(&test_file_path("44100 16-bit.wav"))
             .unwrap();
-        let tk = tl.add_track(0).unwrap();
+        let tk = tl.add_track(MixerTrackKey::new(0)).unwrap();
         tl.add_audio_clip(tk, ck, Timestamp::from_beat_units(0), None)
             .unwrap();
 
@@ -1338,7 +1341,7 @@ mod tests {
         let ck = tl
             .import_audio_clip(&test_file_path("44100 16-bit.wav"))
             .unwrap();
-        let tk = tl.add_track(0).unwrap();
+        let tk = tl.add_track(MixerTrackKey::new(0)).unwrap();
 
         tl.add_audio_clip(
             tk,
@@ -1367,7 +1370,7 @@ mod tests {
         let ck = tl
             .import_audio_clip(&test_file_path("44100 16-bit.wav"))
             .unwrap();
-        let tk = tl.add_track(0).unwrap();
+        let tk = tl.add_track(MixerTrackKey::new(0)).unwrap();
         let ak = tl
             .add_audio_clip(tk, ck, Timestamp::from_beat_units(0), None)
             .unwrap();
@@ -1387,7 +1390,7 @@ mod tests {
         let ck = tl
             .import_audio_clip(&test_file_path("44100 16-bit.wav"))
             .unwrap();
-        let tk = tl.add_track(0).unwrap();
+        let tk = tl.add_track(MixerTrackKey::new(0)).unwrap();
         let ak = tl
             .add_audio_clip(tk, ck, Timestamp::from_beat_units(0), None)
             .unwrap();

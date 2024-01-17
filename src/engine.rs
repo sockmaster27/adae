@@ -915,8 +915,8 @@ pub enum AudioTrackReconstructionError {
 impl Display for AudioTrackReconstructionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Tracks(k) => write!(f, "Track key already in use: {}", k),
-            Self::TimelineTracks(k) => write!(f, "Timeline track key already in use: {}", k),
+            Self::Tracks(k) => write!(f, "Track key already in use: {k:?}"),
+            Self::TimelineTracks(k) => write!(f, "Timeline track key already in use: {k:?}"),
         }
     }
 }
