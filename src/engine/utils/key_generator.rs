@@ -16,7 +16,7 @@ pub trait Key: Copy + Eq + Hash + Debug {
 /// Macro for generating a new key type.
 /// The resulting type will be a simple newtype wrapper around the given type.
 ///
-/// ```
+/// ```ignore
 /// key_type!(MyKey, u32);
 ///          ↓
 /// pub struct MyKey(u32);
