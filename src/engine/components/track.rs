@@ -5,10 +5,10 @@ use std::iter::zip;
 use super::audio_meter::{audio_meter, AudioMeter, AudioMeterProcessor};
 use super::parameter::{f32_parameter, F32Parameter, F32ParameterProcessor};
 use crate::engine::info::Info;
-use crate::engine::utils::key_generator::{key_type, Key};
+use crate::engine::utils::key_generator::key_type;
 use crate::engine::{Sample, CHANNELS};
 
-key_type!(MixerTrackKey, u32);
+key_type!(pub struct MixerTrackKey(u32));
 
 pub fn mixer_track(
     key: MixerTrackKey,

@@ -13,19 +13,18 @@ pub trait Key: Copy + Eq + Hash + Debug {
     fn id(&self) -> Self::Id;
 }
 
-/// Macro for generating a new key type.
-/// The resulting type will be a simple newtype wrapper around the given type.
+/// Macro for generating a new key type and implementing the necessary traits for it to be used as a key.
 ///
+/// # Example
 /// ```ignore
-/// key_type!(MyKey, u32);
-///          ↓
-/// pub struct MyKey(u32);
+/// key_type!(pub struct MyFirstKey(u32));
+/// key_type!(struct MySecondKey(u16));
 /// ```
 macro_rules! key_type {
-    ($name:ident, $id:ty) => {
+    ($v:vis struct $name:ident($id:ty)) => {
         #[derive(serde::Serialize, serde::Deserialize, Clone, Copy, PartialEq, Eq, Hash, Debug)]
-        pub struct $name($id);
-        impl Key for $name {
+        $v struct $name($id);
+        impl crate::engine::utils::key_generator::Key for $name {
             type Id = $id;
             fn new(id: Self::Id) -> Self {
                 Self(id)
@@ -203,11 +202,15 @@ impl<K> Error for KeyCollisionError<K> where K: Key {}
 mod tests {
     use super::*;
 
-    key_type!(TestKey, u8);
+    key_type!(struct TestKey1(u8));
+    key_type!(pub struct TestKey2(u16));
+    key_type!(pub(crate) struct TestKey3(u32));
+    key_type!(pub(super) struct TestKey4(u64));
+    key_type!(pub(in super::tests) struct TestKey5(u128));
 
     #[test]
     fn add_one() {
-        let mut kg = KeyGenerator::<TestKey>::new();
+        let mut kg = KeyGenerator::<TestKey1>::new();
         assert_eq!(kg.remaining_keys(), u8::MAX);
         kg.next().unwrap();
         assert_eq!(kg.remaining_keys(), u8::MAX - 1);
@@ -215,7 +218,7 @@ mod tests {
 
     #[test]
     fn add_multiple() {
-        let mut kg = KeyGenerator::<TestKey>::new();
+        let mut kg = KeyGenerator::<TestKey1>::new();
 
         for i in 1..50 {
             kg.next().unwrap();
@@ -225,7 +228,7 @@ mod tests {
 
     #[test]
     fn free_one() {
-        let mut kg = KeyGenerator::<TestKey>::new();
+        let mut kg = KeyGenerator::<TestKey1>::new();
         let k = kg.next().unwrap();
         kg.free(k).unwrap();
         assert_eq!(kg.remaining_keys(), u8::MAX);
@@ -233,7 +236,7 @@ mod tests {
 
     #[test]
     fn free_multiple() {
-        let mut kg = KeyGenerator::<TestKey>::new();
+        let mut kg = KeyGenerator::<TestKey1>::new();
 
         let mut ks = Vec::new();
         for _ in 0..50 {
@@ -249,27 +252,27 @@ mod tests {
 
     #[test]
     fn free_invalid() {
-        let mut kg = KeyGenerator::<TestKey>::new();
-        let r = kg.free(TestKey(6));
-        assert_eq!(r, Err(InvalidKeyError { key: TestKey(6) }));
+        let mut kg = KeyGenerator::<TestKey1>::new();
+        let r = kg.free(TestKey1(6));
+        assert_eq!(r, Err(InvalidKeyError { key: TestKey1(6) }));
         assert_eq!(kg.remaining_keys(), u8::MAX);
     }
 
     #[test]
     fn reserve() {
-        let mut kg = KeyGenerator::<TestKey>::new();
+        let mut kg = KeyGenerator::<TestKey1>::new();
 
-        kg.reserve(TestKey(0)).unwrap();
+        kg.reserve(TestKey1(0)).unwrap();
         assert_eq!(kg.remaining_keys(), u8::MAX - 1);
 
         // Depends on key starting at 0
         let k = kg.next().unwrap();
-        assert_eq!(k, TestKey(1));
+        assert_eq!(k, TestKey1(1));
     }
 
     #[test]
     fn reserve_invalid() {
-        let mut kg = KeyGenerator::<TestKey>::new();
+        let mut kg = KeyGenerator::<TestKey1>::new();
         let k = kg.next().unwrap();
         let r = kg.reserve(k);
         assert_eq!(r, Err(KeyCollisionError { key: k }));
@@ -277,7 +280,7 @@ mod tests {
 
     #[test]
     fn free_reserve() {
-        let mut kg = KeyGenerator::<TestKey>::new();
+        let mut kg = KeyGenerator::<TestKey1>::new();
         let k = kg.next().unwrap();
 
         // When freeing a key it should not be reused immediately
@@ -291,7 +294,7 @@ mod tests {
 
     #[test]
     fn overflow() {
-        let mut kg = KeyGenerator::<TestKey>::new();
+        let mut kg = KeyGenerator::<TestKey1>::new();
         for i in 1..=255 {
             kg.next().unwrap();
             assert_eq!(kg.remaining_keys(), u8::MAX - i);
@@ -304,10 +307,10 @@ mod tests {
 
     #[test]
     fn in_use() {
-        let mut kg = KeyGenerator::<TestKey>::new();
+        let mut kg = KeyGenerator::<TestKey1>::new();
 
-        assert!(!kg.in_use(TestKey(0)));
-        kg.reserve(TestKey(0)).unwrap();
-        assert!(kg.in_use(TestKey(0)));
+        assert!(!kg.in_use(TestKey1(0)));
+        kg.reserve(TestKey1(0)).unwrap();
+        assert!(kg.in_use(TestKey1(0)));
     }
 }

@@ -5,17 +5,14 @@ use crate::{
     engine::{
         components::audio_clip_reader::{AudioClipReader, JumpOutOfBounds},
         info::Info,
-        utils::{
-            key_generator::{key_type, Key},
-            rbtree_node,
-        },
+        utils::{key_generator::key_type, rbtree_node},
         Sample,
     },
     StoredAudioClipKey, Timestamp,
 };
 
 // A key for an audio clip, identifying it uniquely across the entire timeline.
-key_type!(AudioClipKey, u32);
+key_type!(pub struct AudioClipKey(u32));
 
 /// A mirror of `AudioClipProcessor`'s state.
 /// Does no synchronization.

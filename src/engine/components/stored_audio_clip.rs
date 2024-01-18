@@ -18,12 +18,9 @@ use symphonia::core::{
     sample::Sample as SymphoniaSample,
 };
 
-use crate::engine::{
-    utils::key_generator::{key_type, Key},
-    Sample,
-};
+use crate::engine::{utils::key_generator::key_type, Sample};
 
-key_type!(StoredAudioClipKey, u32);
+key_type!(pub struct StoredAudioClipKey(u32));
 
 /// An audio clip that has been imported.
 #[derive(PartialEq)]
