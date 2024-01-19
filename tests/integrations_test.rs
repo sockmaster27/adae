@@ -44,6 +44,8 @@ fn get_playhead_position() {
 }
 
 mod audio_tracks {
+    use adae::{AudioTrackKey, AudioTrackState};
+
     use super::*;
 
     #[test]
@@ -111,9 +113,9 @@ mod audio_tracks {
         let mut e = Engine::dummy();
         let at = e.add_audio_track().unwrap();
 
-        e.mixer_track(e.audio_mixer_track_key(at).unwrap())
-            .unwrap()
-            .set_panning(0.42);
+        let mt = e.mixer_track(e.audio_mixer_track_key(at).unwrap()).unwrap();
+        mt.set_panning(0.42);
+        mt.set_volume(0.65);
 
         let s = e.audio_track_state(at).unwrap();
         e.delete_audio_track(at).unwrap();
@@ -124,38 +126,61 @@ mod audio_tracks {
         assert_eq!(e.audio_tracks().next(), Some(at_new));
         assert_eq!(at_new, at);
         assert_eq!(
+            e.audio_timeline_track_key(at_new),
+            e.audio_timeline_track_key(at)
+        );
+        assert_eq!(e.audio_mixer_track_key(at_new), e.audio_mixer_track_key(at));
+        assert_eq!(
             e.mixer_track(e.audio_mixer_track_key(at).unwrap())
                 .unwrap()
                 .panning(),
             0.42
         );
+        assert_eq!(
+            e.mixer_track(e.audio_mixer_track_key(at).unwrap())
+                .unwrap()
+                .volume(),
+            0.65
+        );
     }
 
     #[test]
-    fn reconstruct_audio_tracks() {
+    fn reconstruct_audio_track_repeat() {
         let mut e = Engine::dummy();
         let ats = e.add_audio_tracks(42).unwrap();
 
         for &at in &ats {
-            e.mixer_track(e.audio_mixer_track_key(at).unwrap())
-                .unwrap()
-                .set_panning(0.42);
+            let mt = e.mixer_track(e.audio_mixer_track_key(at).unwrap()).unwrap();
+            mt.set_panning(0.42);
+            mt.set_volume(0.65);
         }
 
-        let mut ss = Vec::new();
-        for &at in &ats {
-            ss.push(e.audio_track_state(at).unwrap());
-            e.delete_audio_track(at).unwrap();
-        }
+        let ss: Vec<AudioTrackState> = ats
+            .iter()
+            .map(|&at| e.audio_track_state(at).unwrap())
+            .collect();
+        e.delete_audio_tracks(&ats).unwrap();
 
         for (at, s) in zip(ats, ss) {
             let at_new = e.reconstruct_audio_track(s).unwrap();
+
             assert_eq!(at_new, at);
+            assert_eq!(
+                e.audio_timeline_track_key(at_new),
+                e.audio_timeline_track_key(at)
+            );
+            assert_eq!(e.audio_mixer_track_key(at_new), e.audio_mixer_track_key(at));
             assert_eq!(
                 e.mixer_track(e.audio_mixer_track_key(at).unwrap())
                     .unwrap()
                     .panning(),
                 0.42
+            );
+            assert_eq!(
+                e.mixer_track(e.audio_mixer_track_key(at).unwrap())
+                    .unwrap()
+                    .volume(),
+                0.65
             );
         }
 
@@ -186,6 +211,49 @@ mod audio_tracks {
             .unwrap();
 
         assert_eq!(acs_new.count(), 1);
+    }
+
+    #[test]
+    fn reconstruct_audio_tracks() {
+        let mut e = Engine::dummy();
+        let ats = e.add_audio_tracks(42).unwrap();
+
+        for &at in &ats {
+            let mt = e.mixer_track(e.audio_mixer_track_key(at).unwrap()).unwrap();
+            mt.set_panning(0.42);
+            mt.set_volume(0.65);
+        }
+
+        let ss: Vec<AudioTrackState> = ats
+            .iter()
+            .map(|&at| e.audio_track_state(at).unwrap())
+            .collect();
+        e.delete_audio_tracks(&ats).unwrap();
+
+        let ats_new: Vec<AudioTrackKey> = e.reconstruct_audio_tracks(&ss).unwrap().collect();
+
+        for (at_new, at) in zip(ats_new, ats) {
+            assert_eq!(at_new, at);
+            assert_eq!(
+                e.audio_timeline_track_key(at_new),
+                e.audio_timeline_track_key(at)
+            );
+            assert_eq!(e.audio_mixer_track_key(at_new), e.audio_mixer_track_key(at));
+            assert_eq!(
+                e.mixer_track(e.audio_mixer_track_key(at).unwrap())
+                    .unwrap()
+                    .panning(),
+                0.42
+            );
+            assert_eq!(
+                e.mixer_track(e.audio_mixer_track_key(at).unwrap())
+                    .unwrap()
+                    .volume(),
+                0.65
+            );
+        }
+
+        assert_eq!(e.audio_tracks().count(), 42);
     }
 }
 

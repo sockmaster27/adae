@@ -514,12 +514,12 @@ impl Engine {
     }
     pub fn reconstruct_audio_clips(
         &mut self,
-        timneline_track_key: TimelineTrackKey,
+        timeline_track_key: TimelineTrackKey,
         audio_clip_states: Vec<AudioClipState>,
     ) -> Result<Vec<AudioClipKey>, AudioClipReconstructionError> {
         self.processor_interface
             .timeline
-            .reconstruct_audio_clips(timneline_track_key, audio_clip_states)
+            .reconstruct_audio_clips(timeline_track_key, audio_clip_states)
     }
 
     pub fn audio_clip_move(
@@ -718,11 +718,6 @@ impl Engine {
             .map(|&key| self.audio_tracks.get(&key).unwrap().1)
             .collect();
 
-        for &key in audio_track_keys {
-            self.audio_tracks.remove(&key);
-            self.key_generator.free(key).unwrap();
-        }
-
         self.processor_interface
             .timeline
             .delete_tracks(timeline_track_keys)
@@ -731,6 +726,11 @@ impl Engine {
             .mixer
             .delete_tracks(mixer_track_keys)
             .unwrap();
+
+        for &key in audio_track_keys {
+            self.audio_tracks.remove(&key);
+            self.key_generator.free(key).unwrap();
+        }
         Ok(())
     }
 
@@ -792,6 +792,7 @@ impl Engine {
 
         self.audio_tracks
             .insert(audio_track_key, (timeline_track_key, mixer_track_key));
+        self.key_generator.reserve(audio_track_key).unwrap();
 
         Ok(audio_track_key)
     }
@@ -829,7 +830,13 @@ impl Engine {
             .reconstruct_tracks(states.iter().map(|state| &state.mixer_track_state));
 
         for state in states {
-            self.key_generator.free(state.key).unwrap();
+            let audio_track_key = state.key;
+            let timeline_track_key = state.timeline_track_state.key;
+            let mixer_track_key = state.mixer_track_state.key;
+
+            self.audio_tracks
+                .insert(audio_track_key, (timeline_track_key, mixer_track_key));
+            self.key_generator.reserve(audio_track_key).unwrap();
         }
 
         let audio_track_keys = states.iter().map(|state| state.key);
