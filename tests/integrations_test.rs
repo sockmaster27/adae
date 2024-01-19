@@ -50,7 +50,7 @@ mod audio_tracks {
     fn get_from_key() {
         let mut e = Engine::dummy();
         let at = e.add_audio_track().unwrap();
-        let k = at.mixer_track_key();
+        let k = e.audio_mixer_track_key(at).unwrap();
         let t = e.mixer_track(k).unwrap();
         assert_eq!(t.key(), k);
     }
@@ -63,7 +63,7 @@ mod audio_tracks {
         let at = e.add_audio_track().unwrap();
 
         assert_eq!(e.audio_tracks().count(), 1);
-        assert_eq!(e.audio_tracks().next(), Some(&at));
+        assert_eq!(e.audio_tracks().next(), Some(at));
     }
 
     #[test]
@@ -71,12 +71,12 @@ mod audio_tracks {
         let mut e = Engine::dummy();
         assert_eq!(e.audio_tracks().count(), 0);
 
-        let mut ats: Vec<_> = e.add_audio_tracks(42).unwrap().collect();
+        let mut ats = e.add_audio_tracks(42).unwrap();
 
         assert_eq!(ats.len(), 42);
         assert_eq!(e.audio_tracks().count(), 42);
         for at1 in e.audio_tracks() {
-            let pos = ats.iter().position(|at2| at1 == at2).expect(
+            let pos = ats.iter().position(|&at2| at1 == at2).expect(
             "add_audio_tracks() returned different tracks than the ones added to audio_tracks()",
         );
             ats.swap_remove(pos);
@@ -100,7 +100,7 @@ mod audio_tracks {
         let mut e = Engine::dummy();
         let ats = e.add_audio_tracks(42).unwrap();
 
-        let r = e.delete_audio_tracks(ats.collect());
+        let r = e.delete_audio_tracks(&ats);
 
         assert!(r.is_ok());
         assert_eq!(e.audio_tracks().count(), 0);
@@ -111,42 +111,52 @@ mod audio_tracks {
         let mut e = Engine::dummy();
         let at = e.add_audio_track().unwrap();
 
-        e.mixer_track(at.mixer_track_key())
+        e.mixer_track(e.audio_mixer_track_key(at).unwrap())
             .unwrap()
             .set_panning(0.42);
 
-        let s = e.audio_track_state(&at).unwrap();
-        e.delete_audio_track(at.clone()).unwrap();
+        let s = e.audio_track_state(at).unwrap();
+        e.delete_audio_track(at).unwrap();
 
         let at_new = e.reconstruct_audio_track(s).unwrap();
 
         assert_eq!(e.audio_tracks().count(), 1);
-        assert_eq!(e.audio_tracks().next(), Some(&at_new));
+        assert_eq!(e.audio_tracks().next(), Some(at_new));
         assert_eq!(at_new, at);
-        assert_eq!(e.mixer_track(at.mixer_track_key()).unwrap().panning(), 0.42);
+        assert_eq!(
+            e.mixer_track(e.audio_mixer_track_key(at).unwrap())
+                .unwrap()
+                .panning(),
+            0.42
+        );
     }
 
     #[test]
     fn reconstruct_audio_tracks() {
         let mut e = Engine::dummy();
-        let ats: Vec<_> = e.add_audio_tracks(42).unwrap().collect();
+        let ats = e.add_audio_tracks(42).unwrap();
 
-        for at in &ats {
-            e.mixer_track(at.mixer_track_key())
+        for &at in &ats {
+            e.mixer_track(e.audio_mixer_track_key(at).unwrap())
                 .unwrap()
                 .set_panning(0.42);
         }
 
         let mut ss = Vec::new();
-        for at in &ats {
+        for &at in &ats {
             ss.push(e.audio_track_state(at).unwrap());
-            e.delete_audio_track(at.clone()).unwrap();
+            e.delete_audio_track(at).unwrap();
         }
 
         for (at, s) in zip(ats, ss) {
             let at_new = e.reconstruct_audio_track(s).unwrap();
             assert_eq!(at_new, at);
-            assert_eq!(e.mixer_track(at.mixer_track_key()).unwrap().panning(), 0.42);
+            assert_eq!(
+                e.mixer_track(e.audio_mixer_track_key(at).unwrap())
+                    .unwrap()
+                    .panning(),
+                0.42
+            );
         }
 
         assert_eq!(e.audio_tracks().count(), 42);
@@ -159,14 +169,21 @@ mod audio_tracks {
 
         let ck = import_audio_clip(&mut e);
 
-        e.add_audio_clip(at.timeline_track_key(), ck, Timestamp::zero(), None)
-            .unwrap();
+        e.add_audio_clip(
+            e.audio_timeline_track_key(at).unwrap(),
+            ck,
+            Timestamp::zero(),
+            None,
+        )
+        .unwrap();
 
-        let s = e.audio_track_state(&at).unwrap();
-        e.delete_audio_track(at.clone()).unwrap();
+        let s = e.audio_track_state(at).unwrap();
+        e.delete_audio_track(at).unwrap();
 
         let at_new = e.reconstruct_audio_track(s).unwrap();
-        let acs_new = e.audio_clips(at_new.timeline_track_key()).unwrap();
+        let acs_new = e
+            .audio_clips(e.audio_timeline_track_key(at_new).unwrap())
+            .unwrap();
 
         assert_eq!(acs_new.count(), 1);
     }
@@ -179,7 +196,9 @@ mod mixer_tracks {
     fn set_panning() {
         let mut e = Engine::dummy();
         let at = e.add_audio_track().unwrap();
-        let mt = e.mixer_track_mut(at.mixer_track_key()).unwrap();
+        let mt = e
+            .mixer_track_mut(e.audio_mixer_track_key(at).unwrap())
+            .unwrap();
 
         mt.set_panning(0.123);
 
@@ -190,7 +209,9 @@ mod mixer_tracks {
     fn set_volume() {
         let mut e = Engine::dummy();
         let at = e.add_audio_track().unwrap();
-        let mt = e.mixer_track_mut(at.mixer_track_key()).unwrap();
+        let mt = e
+            .mixer_track_mut(e.audio_mixer_track_key(at).unwrap())
+            .unwrap();
 
         mt.set_volume(0.123);
 
@@ -240,13 +261,28 @@ mod audio_clips {
         let mut e = Engine::dummy();
         let at = e.add_audio_track().unwrap();
 
-        assert_eq!(e.audio_clips(at.timeline_track_key()).unwrap().count(), 0);
+        assert_eq!(
+            e.audio_clips(e.audio_timeline_track_key(at).unwrap())
+                .unwrap()
+                .count(),
+            0
+        );
 
         let ck = import_audio_clip(&mut e);
-        let r = e.add_audio_clip(at.timeline_track_key(), ck, Timestamp::from_beats(0), None);
+        let r = e.add_audio_clip(
+            e.audio_timeline_track_key(at).unwrap(),
+            ck,
+            Timestamp::from_beats(0),
+            None,
+        );
 
         assert!(r.is_ok());
-        assert_eq!(e.audio_clips(at.timeline_track_key()).unwrap().count(), 1);
+        assert_eq!(
+            e.audio_clips(e.audio_timeline_track_key(at).unwrap())
+                .unwrap()
+                .count(),
+            1
+        );
     }
 
     #[test]
@@ -256,15 +292,30 @@ mod audio_clips {
 
         let ck = import_audio_clip(&mut e);
         let ac = e
-            .add_audio_clip(at.timeline_track_key(), ck, Timestamp::from_beats(0), None)
+            .add_audio_clip(
+                e.audio_timeline_track_key(at).unwrap(),
+                ck,
+                Timestamp::from_beats(0),
+                None,
+            )
             .unwrap();
 
-        assert_eq!(e.audio_clips(at.timeline_track_key()).unwrap().count(), 1);
+        assert_eq!(
+            e.audio_clips(e.audio_timeline_track_key(at).unwrap())
+                .unwrap()
+                .count(),
+            1
+        );
 
         let r = e.delete_audio_clip(ac);
 
         assert!(r.is_ok());
-        assert_eq!(e.audio_clips(at.timeline_track_key()).unwrap().count(), 0);
+        assert_eq!(
+            e.audio_clips(e.audio_timeline_track_key(at).unwrap())
+                .unwrap()
+                .count(),
+            0
+        );
     }
 
     #[test]
@@ -277,7 +328,7 @@ mod audio_clips {
         for i in 0..42 {
             acs.push(
                 e.add_audio_clip(
-                    at.timeline_track_key(),
+                    e.audio_timeline_track_key(at).unwrap(),
                     ck,
                     Timestamp::from_beats(i),
                     Some(Timestamp::from_beats(1)),
@@ -286,12 +337,22 @@ mod audio_clips {
             );
         }
 
-        assert_eq!(e.audio_clips(at.timeline_track_key()).unwrap().count(), 42);
+        assert_eq!(
+            e.audio_clips(e.audio_timeline_track_key(at).unwrap())
+                .unwrap()
+                .count(),
+            42
+        );
 
         let r = e.delete_audio_clips(&acs);
 
         assert!(r.is_ok());
-        assert_eq!(e.audio_clips(at.timeline_track_key()).unwrap().count(), 0);
+        assert_eq!(
+            e.audio_clips(e.audio_timeline_track_key(at).unwrap())
+                .unwrap()
+                .count(),
+            0
+        );
     }
 
     #[test]
@@ -301,7 +362,12 @@ mod audio_clips {
 
         let ck = import_audio_clip(&mut e);
         let ac = e
-            .add_audio_clip(at.timeline_track_key(), ck, Timestamp::from_beats(0), None)
+            .add_audio_clip(
+                e.audio_timeline_track_key(at).unwrap(),
+                ck,
+                Timestamp::from_beats(0),
+                None,
+            )
             .unwrap();
 
         let s = e.audio_clip(ac).unwrap().state();
@@ -309,10 +375,15 @@ mod audio_clips {
         e.delete_audio_clip(ac).unwrap();
 
         let ac_new = e
-            .reconstruct_audio_clip(at.timeline_track_key(), s)
+            .reconstruct_audio_clip(e.audio_timeline_track_key(at).unwrap(), s)
             .unwrap();
 
-        assert_eq!(e.audio_clips(at.timeline_track_key()).unwrap().count(), 1);
+        assert_eq!(
+            e.audio_clips(e.audio_timeline_track_key(at).unwrap())
+                .unwrap()
+                .count(),
+            1
+        );
         assert_eq!(ac, ac_new);
     }
 
@@ -328,7 +399,7 @@ mod audio_clips {
         for i in 0..42 {
             let ac = e
                 .add_audio_clip(
-                    at.timeline_track_key(),
+                    e.audio_timeline_track_key(at).unwrap(),
                     ck,
                     Timestamp::from_beats(i),
                     Some(Timestamp::from_beats(1)),
@@ -341,10 +412,15 @@ mod audio_clips {
         e.delete_audio_clips(&acs).unwrap();
 
         let acs_new = e
-            .reconstruct_audio_clips(at.timeline_track_key(), ss)
+            .reconstruct_audio_clips(e.audio_timeline_track_key(at).unwrap(), ss)
             .unwrap();
 
-        assert_eq!(e.audio_clips(at.timeline_track_key()).unwrap().count(), 42);
+        assert_eq!(
+            e.audio_clips(e.audio_timeline_track_key(at).unwrap())
+                .unwrap()
+                .count(),
+            42
+        );
         assert_eq!(acs, acs_new);
     }
 
@@ -356,7 +432,7 @@ mod audio_clips {
         let ck = import_audio_clip(&mut e);
         let ack = e
             .add_audio_clip(
-                at.timeline_track_key(),
+                e.audio_timeline_track_key(at).unwrap(),
                 ck,
                 Timestamp::from_beats(0),
                 Some(Timestamp::from_beats(1)),
@@ -379,14 +455,14 @@ mod audio_clips {
         let ck = import_audio_clip(&mut e);
         let ack = e
             .add_audio_clip(
-                at.timeline_track_key(),
+                e.audio_timeline_track_key(at).unwrap(),
                 ck,
                 Timestamp::from_beats(0),
                 Some(Timestamp::from_beats(1)),
             )
             .unwrap();
         e.add_audio_clip(
-            at.timeline_track_key(),
+            e.audio_timeline_track_key(at).unwrap(),
             ck,
             Timestamp::from_beats(1),
             Some(Timestamp::from_beats(2)),
@@ -409,7 +485,7 @@ mod audio_clips {
         let ck = import_audio_clip(&mut e);
         let ack = e
             .add_audio_clip(
-                at.timeline_track_key(),
+                e.audio_timeline_track_key(at).unwrap(),
                 ck,
                 Timestamp::from_beats(0),
                 Some(Timestamp::from_beats(2)),
@@ -432,7 +508,7 @@ mod audio_clips {
 
         let ck = import_audio_clip(&mut e);
         e.add_audio_clip(
-            at.timeline_track_key(),
+            e.audio_timeline_track_key(at).unwrap(),
             ck,
             Timestamp::from_beats(0),
             Some(Timestamp::from_beats(1)),
@@ -440,7 +516,7 @@ mod audio_clips {
         .unwrap();
         let ack = e
             .add_audio_clip(
-                at.timeline_track_key(),
+                e.audio_timeline_track_key(at).unwrap(),
                 ck,
                 Timestamp::from_beats(1),
                 Some(Timestamp::from_beats(1)),
@@ -464,7 +540,7 @@ mod audio_clips {
         let ck = import_audio_clip(&mut e);
         let ack = e
             .add_audio_clip(
-                at.timeline_track_key(),
+                e.audio_timeline_track_key(at).unwrap(),
                 ck,
                 Timestamp::from_beats(0),
                 Some(Timestamp::from_beats(2)),
@@ -488,14 +564,14 @@ mod audio_clips {
         let ck = import_audio_clip(&mut e);
         let ack = e
             .add_audio_clip(
-                at.timeline_track_key(),
+                e.audio_timeline_track_key(at).unwrap(),
                 ck,
                 Timestamp::from_beats(0),
                 Some(Timestamp::from_beats(1)),
             )
             .unwrap();
         e.add_audio_clip(
-            at.timeline_track_key(),
+            e.audio_timeline_track_key(at).unwrap(),
             ck,
             Timestamp::from_beats(1),
             Some(Timestamp::from_beats(1)),
@@ -520,18 +596,28 @@ mod audio_clips {
         let ck = import_audio_clip(&mut e);
         let ac = e
             .add_audio_clip(
-                at1.timeline_track_key(),
+                e.audio_timeline_track_key(at1).unwrap(),
                 ck,
                 Timestamp::from_beats(0),
                 Some(Timestamp::from_beats(1)),
             )
             .unwrap();
 
-        let r = e.audio_clip_move_to_track(ac, at2.timeline_track_key());
+        let r = e.audio_clip_move_to_track(ac, e.audio_timeline_track_key(at2).unwrap());
 
         assert!(r.is_ok());
-        assert_eq!(e.audio_clips(at1.timeline_track_key()).unwrap().count(), 0);
-        assert_eq!(e.audio_clips(at2.timeline_track_key()).unwrap().count(), 1);
+        assert_eq!(
+            e.audio_clips(e.audio_timeline_track_key(at1).unwrap())
+                .unwrap()
+                .count(),
+            0
+        );
+        assert_eq!(
+            e.audio_clips(e.audio_timeline_track_key(at2).unwrap())
+                .unwrap()
+                .count(),
+            1
+        );
     }
 
     #[test]
@@ -543,24 +629,34 @@ mod audio_clips {
         let ck = import_audio_clip(&mut e);
         let ac = e
             .add_audio_clip(
-                at1.timeline_track_key(),
+                e.audio_timeline_track_key(at1).unwrap(),
                 ck,
                 Timestamp::from_beats(0),
                 Some(Timestamp::from_beats(1)),
             )
             .unwrap();
         e.add_audio_clip(
-            at2.timeline_track_key(),
+            e.audio_timeline_track_key(at2).unwrap(),
             ck,
             Timestamp::from_beats(0),
             Some(Timestamp::from_beats(1)),
         )
         .unwrap();
 
-        let r = e.audio_clip_move_to_track(ac, at2.timeline_track_key());
+        let r = e.audio_clip_move_to_track(ac, e.audio_timeline_track_key(at2).unwrap());
 
         assert_eq!(r, Err(MoveAudioClipToTrackError::Overlapping));
-        assert_eq!(e.audio_clips(at1.timeline_track_key()).unwrap().count(), 1);
-        assert_eq!(e.audio_clips(at2.timeline_track_key()).unwrap().count(), 1);
+        assert_eq!(
+            e.audio_clips(e.audio_timeline_track_key(at1).unwrap())
+                .unwrap()
+                .count(),
+            1
+        );
+        assert_eq!(
+            e.audio_clips(e.audio_timeline_track_key(at2).unwrap())
+                .unwrap()
+                .count(),
+            1
+        );
     }
 }

@@ -3,6 +3,7 @@ use std::{
     error::Error,
     fmt::{Debug, Display},
     hash::Hash,
+    ops::AddAssign,
 };
 
 use num_traits::{cast, Bounded, One, PrimInt, Unsigned, WrappingAdd, Zero};
@@ -58,7 +59,7 @@ where
     K: Key,
 
     // ↓ This should be implied by the above, but rustc doesn't seem to think so
-    K::Id: Bounded + Zero + One + Ord,
+    K::Id: Bounded + Zero + One + Ord + AddAssign,
 {
     /// Create new `KeyGenerator` with no keys in use.
     pub fn new() -> Self {
@@ -108,6 +109,23 @@ where
         self.reserve(key).unwrap();
         self.last_id = id;
         Ok(key)
+    }
+
+    /// Return `count` new unique key, registering them as occupied
+    /// until [`Self::free()`] is called with these keys as argument.
+    pub fn next_n(&mut self, count: K::Id) -> Result<Vec<K>, OverflowError> {
+        if self.remaining_keys() < count {
+            return Err(OverflowError);
+        }
+
+        let mut keys = Vec::with_capacity(cast(count).unwrap());
+        let mut i = K::Id::zero();
+        while i < count {
+            keys.push(self.next().unwrap());
+            i += K::Id::one();
+        }
+
+        Ok(keys)
     }
 
     /// Checks what the next key will be, without actually reserving it.

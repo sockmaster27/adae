@@ -435,7 +435,7 @@ impl Timeline {
             let invalid_keys = clip_keys
                 .iter()
                 .filter(|&&key| !self.clip_key_generator.in_use(key)).copied().collect();
-            return Err(InvalidAudioClipsError {clip_keys: invalid_keys});
+            return Err(InvalidAudioClipsError {keys: invalid_keys});
         }
 
         let track_and_clip_keys: Vec<(TimelineTrackKey, AudioClipKey)> = clip_keys
@@ -1136,7 +1136,7 @@ impl Eq for TimelineState {}
 pub struct TimelineTrackOverflowError;
 impl Display for TimelineTrackOverflowError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "The max number of tracks has been exceeded. Impressive")
+        write!(f, "The max number of timeline tracks has been exceeded")
     }
 }
 impl Error for TimelineTrackOverflowError {}
@@ -1191,11 +1191,11 @@ impl Error for InvalidAudioClipError {}
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct InvalidAudioClipsError {
-    clip_keys: Vec<AudioClipKey>,
+    keys: Vec<AudioClipKey>,
 }
 impl Display for InvalidAudioClipsError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let keys = &self.clip_keys;
+        let keys = &self.keys;
         write!(f, "No clip found on timeline for keys: {keys:?}")
     }
 }

@@ -20,7 +20,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         let ck = import_audio_clip(&mut e);
         let ac = e
             .add_audio_clip(
-                at.timeline_track_key(),
+                e.audio_timeline_track_key(at).unwrap(),
                 ck,
                 Timestamp::from_beats(0),
                 Some(Timestamp::from_beats(2)),

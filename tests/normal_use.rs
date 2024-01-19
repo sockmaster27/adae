@@ -2,7 +2,7 @@ extern crate adae;
 
 use std::{path::Path, thread::sleep, time::Duration};
 
-use adae::Timestamp;
+use adae::{TimelineTrackKey, Timestamp};
 
 #[test]
 fn play_around() {
@@ -10,8 +10,12 @@ fn play_around() {
     let mut engine = adae::Engine::dummy();
 
     // Add tracks
-    let track_keys: Vec<_> = engine.add_audio_tracks(3).unwrap().collect();
-    assert!(track_keys.len() == 3);
+    let audio_track_keys = engine.add_audio_tracks(3).unwrap();
+    assert!(audio_track_keys.len() == 3);
+    let timeline_track_keys: Vec<TimelineTrackKey> = audio_track_keys
+        .into_iter()
+        .map(|k| engine.audio_timeline_track_key(k).unwrap())
+        .collect();
 
     // Play and stop
     engine.play();
@@ -27,7 +31,7 @@ fn play_around() {
         .unwrap();
     engine
         .add_audio_clip(
-            track_keys[0].timeline_track_key(),
+            timeline_track_keys[0],
             clip_key,
             Timestamp::from_beats(2),
             None,
@@ -35,7 +39,7 @@ fn play_around() {
         .unwrap();
     engine
         .add_audio_clip(
-            track_keys[1].timeline_track_key(),
+            timeline_track_keys[1],
             clip_key,
             Timestamp::from_beats(1),
             Some(Timestamp::from_beats(2)),
@@ -50,7 +54,7 @@ fn play_around() {
     // Insert clip before playhead while playing
     engine
         .add_audio_clip(
-            track_keys[2].timeline_track_key(),
+            timeline_track_keys[2],
             clip_key,
             Timestamp::from_beats(0),
             None,

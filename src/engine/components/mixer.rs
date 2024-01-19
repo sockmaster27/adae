@@ -293,7 +293,7 @@ impl Error for InvalidMixerTrackError {}
 pub struct MixerTrackOverflowError;
 impl Display for MixerTrackOverflowError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "The max number of tracks has been exceeded. Impressive")
+        write!(f, "The max number of mixer tracks has been exceeded")
     }
 }
 impl Error for MixerTrackOverflowError {}
