@@ -3,7 +3,7 @@ use std::cmp::min;
 
 use crate::{
     engine::{
-        components::audio_clip_reader::{AudioClipReader, JumpOutOfBounds},
+        components::audio_clip_reader::AudioClipReader,
         info::Info,
         utils::{key_generator::key_type, rbtree_node},
         Sample,
@@ -112,18 +112,14 @@ impl AudioClipProcessor {
 
     /// Resets the position to the start of the clip.
     pub fn reset(&mut self, sample_rate: u32) {
-        self.reader.jump(self.start_offset, sample_rate).unwrap();
+        self.reader.jump(self.start_offset, sample_rate);
     }
 
     /// Jumps to the given position relative to the start of the timeline.
     ///
-    /// If the position is before the start of the clip, the clip is reset.
-    pub fn jump_to(
-        &mut self,
-        pos: Timestamp,
-        sample_rate: u32,
-        bpm_cents: u16,
-    ) -> Result<(), JumpOutOfBounds> {
+    /// - If the position is before the start of the clip, the position is set to the start of the clip.
+    /// - If the position is after the end of the clip, the position is set to the end of the clip.
+    pub fn jump_to(&mut self, pos: Timestamp, sample_rate: u32, bpm_cents: u16) {
         let start_samples = self.start.samples(sample_rate, bpm_cents);
         let pos_samples = pos.samples(sample_rate, bpm_cents);
 
@@ -131,9 +127,7 @@ impl AudioClipProcessor {
         // then the clip is reset to 0.
         let inner_pos = pos_samples.saturating_sub(start_samples) + self.start_offset;
 
-        self.reader.jump(inner_pos, sample_rate)?;
-
-        Ok(())
+        self.reader.jump(inner_pos, sample_rate);
     }
 
     fn length_samples(&self, sample_rate: u32, bpm_cents: u16) -> usize {

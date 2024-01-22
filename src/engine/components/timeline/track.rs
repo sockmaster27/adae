@@ -109,9 +109,7 @@ impl TimelineTrackProcessor {
                 };
 
                 if clip_ref.start <= position && position < clip_end {
-                    clip_ref
-                        .jump_to(position, self.sample_rate, self.bpm_cents)
-                        .unwrap();
+                    clip_ref.jump_to(position, self.sample_rate, self.bpm_cents);
                 }
 
                 drop(clip_ref);
@@ -178,7 +176,7 @@ impl TimelineTrackProcessor {
                     .unwrap()
                     .with_cursor_mut(|cursor| cursor.move_prev());
                 self.map_relevant_clip_not_moving(|clip| {
-                    clip.jump_to(position, sample_rate, bpm_cents).unwrap()
+                    clip.jump_to(position, sample_rate, bpm_cents);
                 });
             }
 
@@ -187,7 +185,7 @@ impl TimelineTrackProcessor {
 
         if is_relevant {
             self.map_relevant_clip_not_moving(|clip| {
-                clip.jump_to(position, sample_rate, bpm_cents).unwrap()
+                clip.jump_to(position, sample_rate, bpm_cents);
             });
         }
     }
@@ -218,9 +216,7 @@ impl TimelineTrackProcessor {
                 let was_upcoming = position <= old_start;
                 let is_upcoming = position <= new_start;
                 if relevant_was_cropped && (was_upcoming || is_upcoming) {
-                    relevant_clip
-                        .jump_to(position, sample_rate, bpm_cents)
-                        .unwrap();
+                    relevant_clip.jump_to(position, sample_rate, bpm_cents);
                 }
             }
         });
@@ -250,7 +246,7 @@ impl TimelineTrackProcessor {
 
                         if let Some(clip_cell) = cursor.get() {
                             let mut clip = clip_cell.borrow_mut();
-                            clip.jump_to(position, sample_rate, bpm_cents).unwrap();
+                            clip.jump_to(position, sample_rate, bpm_cents);
                         }
                     }
                     if move_next {
@@ -274,7 +270,7 @@ impl TimelineTrackProcessor {
 
         self.with_relevant_clip_not_moving(|clip_opt| {
             if let Some(clip) = clip_opt {
-                clip.jump_to(position, sample_rate, bpm_cents).unwrap();
+                clip.jump_to(position, sample_rate, bpm_cents);
             }
         });
     }

@@ -1,7 +1,6 @@
 use std::{
     cmp::min,
-    error::Error,
-    fmt::{Debug, Display},
+    fmt::Debug,
     iter::zip,
     ops::{Add, AddAssign, Mul, Range, Sub, SubAssign},
     sync::Arc,
@@ -112,15 +111,17 @@ impl AudioClipReader {
     ///
     /// - `sample_rate` is the sample rate of the output.
     /// - `position` is converted from `sample_rate` into the clips original sample rate.
-    pub fn jump(&mut self, position: usize, sample_rate: u32) -> Result<(), JumpOutOfBounds> {
-        let pos_resampled = ResampledSamples(position);
-        let pos_original = pos_resampled.into_original(sample_rate, self.inner.sample_rate());
+    /// - If the position is after the end of the clip, the position is set to the end of the clip.
+    pub fn jump(&mut self, position: usize, sample_rate: u32) {
+        let desired_pos_resampled = ResampledSamples(position);
+        let desired_pos_original =
+            desired_pos_resampled.into_original(sample_rate, self.inner.sample_rate());
 
-        if self.len_original() <= pos_original {
-            return Err(JumpOutOfBounds);
-        }
-
-        self.inner_position = pos_original;
+        let (pos_resample, pos_original) = if self.len_original() < desired_pos_original {
+            (self.len_resampled(sample_rate), self.len_original())
+        } else {
+            (desired_pos_resampled, desired_pos_original)
+        };
 
         let delay = self
             .resampler
@@ -134,9 +135,8 @@ impl AudioClipReader {
 
         self.resample_buffer_unused = ResampledSamples(0);
 
-        self.position = pos_resampled;
-
-        Ok(())
+        self.position = pos_resample;
+        self.inner_position = pos_original;
     }
 
     // The length of the inner clip in frames (samples per channel), converted relative to the given sample rate.
@@ -338,18 +338,6 @@ impl Debug for AudioClipReader {
         )
     }
 }
-
-#[derive(Debug, PartialEq, Eq)]
-pub struct JumpOutOfBounds;
-impl Display for JumpOutOfBounds {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Attempted to jump before the start or past end of audio clip data"
-        )
-    }
-}
-impl Error for JumpOutOfBounds {}
 
 /// A number of samples in the domain of the clip's original sample rate.
 #[repr(transparent)]
@@ -672,7 +660,7 @@ mod tests {
         let rs = output[1];
         assert!((-1.001..=-0.999).contains(&rs), "Sample: {}", rs);
 
-        acr.jump(0, 48_000).unwrap();
+        acr.jump(0, 48_000);
 
         let output = acr.output(&Info {
             sample_rate: 48_000,
@@ -688,7 +676,7 @@ mod tests {
     }
 
     #[test]
-    fn jump_out_of_bounds() {
+    fn jump_past_end() {
         let ac = StoredAudioClip::import(
             StoredAudioClipKey::new(0),
             &test_file_path("48000 16-bit.wav"),
@@ -696,6 +684,8 @@ mod tests {
         .unwrap();
         let mut acr = AudioClipReader::new(Arc::new(ac), 50, 48_000);
 
-        assert_eq!(acr.jump(1_322_978, 48_000), Err(JumpOutOfBounds));
+        acr.jump(2_000_000, 48_000);
+
+        assert_eq!(acr.position(), 1_322_978);
     }
 }
