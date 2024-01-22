@@ -2,7 +2,6 @@ extern crate adae;
 
 use std::{iter::zip, path::Path};
 
-use adae::error::CropAudioClipError;
 use adae::{Engine, StoredAudioClipKey, Timestamp};
 
 fn import_audio_clip(e: &mut Engine) -> StoredAudioClipKey {
@@ -575,6 +574,17 @@ mod audio_clips {
         let at = e.add_audio_track().unwrap();
 
         let ck = import_audio_clip(&mut e);
+        let ack = e
+            .add_audio_clip(
+                e.audio_timeline_track_key(at).unwrap(),
+                ck,
+                Timestamp::from_beats(0),
+                Some(Timestamp::from_beats(2)),
+            )
+            .unwrap();
+        e.audio_clip_crop_start(ack, Timestamp::from_beats(1))
+            .unwrap();
+
         e.add_audio_clip(
             e.audio_timeline_track_key(at).unwrap(),
             ck,
@@ -582,22 +592,66 @@ mod audio_clips {
             Some(Timestamp::from_beats(1)),
         )
         .unwrap();
-        let ack = e
-            .add_audio_clip(
-                e.audio_timeline_track_key(at).unwrap(),
-                ck,
-                Timestamp::from_beats(1),
-                Some(Timestamp::from_beats(1)),
-            )
-            .unwrap();
 
         let r = e.audio_clip_crop_start(ack, Timestamp::from_beats(2));
 
         let ac = e.audio_clip(ack).unwrap();
 
-        assert_eq!(r, Err(CropAudioClipError::Overlapping));
+        assert_eq!(r, Err(MoveAudioClipError::Overlapping));
         assert_eq!(ac.start, Timestamp::from_beats(1));
         assert_eq!(ac.length, Some(Timestamp::from_beats(1)));
+    }
+
+    #[test]
+    fn crop_audio_clip_start_too_long() {
+        let mut e = Engine::dummy();
+        let at = e.add_audio_track().unwrap();
+
+        let ck = import_audio_clip(&mut e);
+        let ack = e
+            .add_audio_clip(
+                e.audio_timeline_track_key(at).unwrap(),
+                ck,
+                Timestamp::from_beats(1),
+                Some(Timestamp::from_beats(2)),
+            )
+            .unwrap();
+
+        // When stretched beyond its original length
+        e.audio_clip_crop_start(ack, Timestamp::from_beats(1))
+            .unwrap();
+        e.audio_clip_crop_start(ack, Timestamp::from_beats(3))
+            .unwrap();
+
+        let ac = e.audio_clip(ack).unwrap();
+
+        // Then it's capped at the original length
+        assert_eq!(ac.start, Timestamp::from_beats(1));
+        assert_eq!(ac.length, Some(Timestamp::from_beats(2)));
+    }
+
+    #[test]
+    fn crop_audio_clip_start_originally_before_zero() {
+        let mut e = Engine::dummy();
+        let at = e.add_audio_track().unwrap();
+
+        // Given a clip whose inner start is before zero
+        let ck = import_audio_clip(&mut e);
+        let ack = e
+            .add_audio_clip(
+                e.audio_timeline_track_key(at).unwrap(),
+                ck,
+                Timestamp::from_beats(0),
+                Some(Timestamp::from_beats(3)),
+            )
+            .unwrap();
+        e.audio_clip_crop_start(ack, Timestamp::from_beats(2))
+            .unwrap();
+        e.audio_clip_move(ack, Timestamp::from_beats(0)).unwrap();
+
+        // When start is cropped it should not overflow
+        e.audio_clip_crop_start(ack, Timestamp::from_beats(1))
+            .unwrap();
     }
 
     #[test]
@@ -650,7 +704,7 @@ mod audio_clips {
 
         let ac = e.audio_clip(ack).unwrap();
 
-        assert_eq!(r, Err(CropAudioClipError::Overlapping));
+        assert_eq!(r, Err(MoveAudioClipError::Overlapping));
         assert_eq!(ac.start, Timestamp::from_beats(0));
         assert_eq!(ac.length, Some(Timestamp::from_beats(1)));
     }

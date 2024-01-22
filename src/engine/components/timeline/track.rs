@@ -406,6 +406,13 @@ impl TimelineTrackProcessor {
         // - f cannot remove any clip from the tree
         unsafe {
             self.with_tree(|tree| {
+                allow_heap! {{
+                    if tree.find(&clip_start).is_null() {
+                        let t: Vec<_> = tree.iter().map(|v| v.borrow().start).collect();
+                        panic!("{clip_start:?} - {t:?}");
+                    }
+                }}
+
                 let cursor = tree.find(&clip_start);
                 let clip_cell = cursor.get().expect("Attempted to access non-existing clip");
                 let mut clip = clip_cell.borrow_mut();

@@ -37,8 +37,8 @@ pub use components::timeline::InvalidAudioClipsError;
 pub use components::timeline::MoveAudioClipToTrackError;
 pub use components::timeline::Timestamp;
 pub use components::timeline::{
-    AddClipError, CropAudioClipError, InvalidTimelineTrackError, MoveAudioClipError,
-    TimelineTrackKey, TimelineTrackOverflowError, TimelineTrackState,
+    AddClipError, InvalidTimelineTrackError, MoveAudioClipError, TimelineTrackKey,
+    TimelineTrackOverflowError, TimelineTrackState,
 };
 pub use components::MixerTrack;
 pub use components::{MixerTrackKey, MixerTrackState};
@@ -522,6 +522,7 @@ impl Engine {
             .reconstruct_audio_clips(timeline_track_key, audio_clip_states)
     }
 
+    /// Set the start position of the clip.
     pub fn audio_clip_move(
         &mut self,
         audio_clip_key: AudioClipKey,
@@ -531,20 +532,29 @@ impl Engine {
             .timeline
             .audio_clip_move(audio_clip_key, new_start)
     }
+
+    /// Set the length of the clip, keeping the end position fixed.
+    ///
+    /// If this would result in the clip being extended past the beginning of the stored clip, or the beginning of the timeline, it will be capped to this length.
+    /// The resulting start and length can queried from [AudioClip::start] and [AudioClip::current_length] after this.
     pub fn audio_clip_crop_start(
         &mut self,
         audio_clip_key: AudioClipKey,
         new_length: Timestamp,
-    ) -> Result<(), CropAudioClipError> {
+    ) -> Result<(), MoveAudioClipError> {
         self.processor_interface
             .timeline
             .audio_clip_crop_start(audio_clip_key, new_length)
     }
+
+    /// Set the length of the clip, keeping the start position fixed.
+    ///
+    /// If this results in the clip being extended past the end of the stored clip, the clip will be extended with silence.
     pub fn audio_clip_crop_end(
         &mut self,
         audio_clip_key: AudioClipKey,
         new_length: Timestamp,
-    ) -> Result<(), CropAudioClipError> {
+    ) -> Result<(), MoveAudioClipError> {
         self.processor_interface
             .timeline
             .audio_clip_crop_end(audio_clip_key, new_length)

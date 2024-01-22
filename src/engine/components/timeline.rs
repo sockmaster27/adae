@@ -4,6 +4,7 @@ mod track;
 
 use serde::{Deserialize, Serialize};
 use std::{
+    cmp::max,
     collections::{HashMap, HashSet},
     error::Error,
     fmt::{Debug, Display},
@@ -434,8 +435,10 @@ impl Timeline {
         if some_invalid {
             let invalid_keys = clip_keys
                 .iter()
-                .filter(|&&key| !self.clip_key_generator.in_use(key)).copied().collect();
-            return Err(InvalidAudioClipsError {keys: invalid_keys});
+                .filter(|&&key| !self.clip_key_generator.in_use(key))
+                .copied()
+                .collect();
+            return Err(InvalidAudioClipsError { keys: invalid_keys });
         }
 
         let track_and_clip_keys: Vec<(TimelineTrackKey, AudioClipKey)> = clip_keys
@@ -548,9 +551,9 @@ impl Timeline {
         &mut self,
         clip_key: AudioClipKey,
         new_length: Timestamp,
-    ) -> Result<(), CropAudioClipError> {
+    ) -> Result<(), MoveAudioClipError> {
         if !self.clip_key_generator.in_use(clip_key) {
-            return Err(CropAudioClipError::InvalidClip(InvalidAudioClipError {
+            return Err(MoveAudioClipError::InvalidClip(InvalidAudioClipError {
                 clip_key,
             }));
         }
@@ -562,11 +565,20 @@ impl Timeline {
         let old_start = clip.start;
         let old_length = clip.current_length(self.sample_rate, self.bpm_cents);
         let clip_end = old_start + old_length;
-        let new_start = clip.start + old_length - new_length;
 
         let old_start_offset = clip.start_offset;
         let old_start_samples = old_start.samples(self.sample_rate, self.bpm_cents);
-        let new_start_samples = new_start.samples(self.sample_rate, self.bpm_cents);
+        let desired_new_start = clip.start + old_length - new_length;
+
+        let new_start_samples = max(
+            desired_new_start.samples(self.sample_rate, self.bpm_cents),
+            old_start_samples.saturating_sub(old_start_offset),
+        );
+        let new_start_offset = old_start_offset + new_start_samples - old_start_samples;
+        let new_start =
+            Timestamp::from_samples(new_start_samples, self.sample_rate, self.bpm_cents);
+
+        let new_length = old_length + old_start - new_start;
 
         // Check for overlaps
         for other_clip in track.clips.values() {
@@ -574,14 +586,9 @@ impl Timeline {
             let overlapping = new_start < other_clip.end(self.sample_rate, self.bpm_cents)
                 && other_clip.start < clip_end;
             if !same && overlapping {
-                return Err(CropAudioClipError::Overlapping);
+                return Err(MoveAudioClipError::Overlapping);
             }
         }
-
-        if old_start_offset + new_start_samples < old_start_samples {
-            return Err(CropAudioClipError::TooLong);
-        }
-        let new_start_offset = old_start_offset + new_start_samples - old_start_samples;
 
         let clip_mut = track.clips.get_mut(&clip_key).unwrap();
         clip_mut.start = new_start;
@@ -602,9 +609,9 @@ impl Timeline {
         &mut self,
         clip_key: AudioClipKey,
         new_length: Timestamp,
-    ) -> Result<(), CropAudioClipError> {
+    ) -> Result<(), MoveAudioClipError> {
         if !self.clip_key_generator.in_use(clip_key) {
-            return Err(CropAudioClipError::InvalidClip(InvalidAudioClipError {
+            return Err(MoveAudioClipError::InvalidClip(InvalidAudioClipError {
                 clip_key,
             }));
         }
@@ -621,7 +628,7 @@ impl Timeline {
             let same = other_clip.key == clip.key;
             let overlapping = clip_start < other_clip.start && other_clip.start < new_end;
             if !same && overlapping {
-                return Err(CropAudioClipError::Overlapping);
+                return Err(MoveAudioClipError::Overlapping);
             }
         }
 
@@ -1074,8 +1081,9 @@ impl TimelineProcessor {
 
         if !self.playing.load(Ordering::Relaxed) {
             for track in self.tracks.values() {
-                let buffer =
-                    &mut mixer_ins.get_mut(&track.output_track()).expect(NO_BUFFER_MSG)[..buffer_size * CHANNELS];
+                let buffer = &mut mixer_ins
+                    .get_mut(&track.output_track())
+                    .expect(NO_BUFFER_MSG)[..buffer_size * CHANNELS];
                 buffer.fill(0.0);
             }
             return;
@@ -1256,23 +1264,6 @@ impl Display for MoveAudioClipError {
 impl Error for MoveAudioClipError {}
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum CropAudioClipError {
-    InvalidClip(InvalidAudioClipError),
-    Overlapping,
-    TooLong,
-}
-impl Display for CropAudioClipError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            CropAudioClipError::InvalidClip(e) => Display::fmt(e, f),
-            CropAudioClipError::Overlapping => write!(f, "Clip overlaps with another clip"),
-            CropAudioClipError::TooLong => write!(f, "Attempted to expand clip beyond its start"),
-        }
-    }
-}
-impl Error for CropAudioClipError {}
-
-#[derive(Debug, PartialEq, Eq)]
 pub enum MoveAudioClipToTrackError {
     InvalidClip(InvalidAudioClipError),
     InvalidNewTrack { track_key: TimelineTrackKey },
@@ -1282,9 +1273,9 @@ impl Display for MoveAudioClipToTrackError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             MoveAudioClipToTrackError::InvalidClip(e) => Display::fmt(e, f),
-            MoveAudioClipToTrackError::InvalidNewTrack { track_key } => 
+            MoveAudioClipToTrackError::InvalidNewTrack { track_key } =>
                 write!(f, "Attempted to move an audio clip to a non-existing timeline track with key, {track_key:?}"),
-            MoveAudioClipToTrackError::Overlapping => 
+            MoveAudioClipToTrackError::Overlapping =>
                 write!(f, "Clip overlaps with another clip"),
         }
     }
