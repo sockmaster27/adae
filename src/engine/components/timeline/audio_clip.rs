@@ -146,7 +146,7 @@ impl AudioClipProcessor {
         } = *info;
 
         let length = self.length_samples(sample_rate, bpm_cents);
-        let pos = self.reader.position();
+        let pos = self.reader.position() - self.start_offset;
         let remaining = length.saturating_sub(pos);
         let capped_buffer_size = min(buffer_size, remaining);
 
