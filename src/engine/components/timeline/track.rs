@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 use super::audio_clip::{AudioClip, AudioClipKey, AudioClipState};
 use super::AudioClipProcessor;
+use crate::engine::components::audio_clip_reader::OriginalSamples;
 use crate::engine::components::track::MixerTrackKey;
 use crate::engine::info::Info;
 use crate::engine::utils::dropper;
@@ -100,7 +101,7 @@ impl TimelineTrackProcessor {
                 let pos_samples = self.position.load(Ordering::Relaxed);
                 let position =
                     Timestamp::from_samples(pos_samples, self.sample_rate, self.bpm_cents);
-                let clip_end = clip_ref.end(self.sample_rate, self.bpm_cents);
+                let clip_end = clip_ref.end(self.bpm_cents);
                 let next = cursor.get();
 
                 let is_more_relevant = match next {
@@ -109,7 +110,7 @@ impl TimelineTrackProcessor {
                 };
 
                 if clip_ref.start <= position && position < clip_end {
-                    clip_ref.jump_to(position, self.sample_rate, self.bpm_cents);
+                    clip_ref.jump(position, self.sample_rate, self.bpm_cents);
                 }
 
                 drop(clip_ref);
@@ -142,7 +143,7 @@ impl TimelineTrackProcessor {
 
         let new_end = self.with_clip_moving(old_start, |clip| {
             clip.start = new_start;
-            clip.end(sample_rate, bpm_cents)
+            clip.end(bpm_cents)
         });
 
         let relevant_start = self.map_relevant_clip_not_moving(|clip| clip.start);
@@ -176,7 +177,7 @@ impl TimelineTrackProcessor {
                     .unwrap()
                     .with_cursor_mut(|cursor| cursor.move_prev());
                 self.map_relevant_clip_not_moving(|clip| {
-                    clip.jump_to(position, sample_rate, bpm_cents);
+                    clip.jump(position, sample_rate, bpm_cents);
                 });
             }
 
@@ -185,7 +186,7 @@ impl TimelineTrackProcessor {
 
         if is_relevant {
             self.map_relevant_clip_not_moving(|clip| {
-                clip.jump_to(position, sample_rate, bpm_cents);
+                clip.jump(position, sample_rate, bpm_cents);
             });
         }
     }
@@ -195,7 +196,7 @@ impl TimelineTrackProcessor {
         old_start: Timestamp,
         new_start: Timestamp,
         new_length: Timestamp,
-        new_start_offset: usize,
+        new_start_offset: OriginalSamples,
     ) {
         let sample_rate = self.sample_rate;
         let bpm_cents = self.bpm_cents;
@@ -216,7 +217,7 @@ impl TimelineTrackProcessor {
                 let was_upcoming = position <= old_start;
                 let is_upcoming = position <= new_start;
                 if relevant_was_cropped && (was_upcoming || is_upcoming) {
-                    relevant_clip.jump_to(position, sample_rate, bpm_cents);
+                    relevant_clip.jump(position, sample_rate, bpm_cents);
                 }
             }
         });
@@ -229,7 +230,7 @@ impl TimelineTrackProcessor {
         let position = Timestamp::from_samples(pos_samples, sample_rate, bpm_cents);
 
         let (start, old_end, new_end) = self.with_clip_not_moving(clip_start, |clip| {
-            let old_end = clip.end(sample_rate, bpm_cents);
+            let old_end = clip.end(bpm_cents);
             clip.length = Some(new_length);
             (clip.start, old_end, clip.start + new_length)
         });
@@ -246,7 +247,7 @@ impl TimelineTrackProcessor {
 
                         if let Some(clip_cell) = cursor.get() {
                             let mut clip = clip_cell.borrow_mut();
-                            clip.jump_to(position, sample_rate, bpm_cents);
+                            clip.jump(position, sample_rate, bpm_cents);
                         }
                     }
                     if move_next {
@@ -270,7 +271,7 @@ impl TimelineTrackProcessor {
 
         self.with_relevant_clip_not_moving(|clip_opt| {
             if let Some(clip) = clip_opt {
-                clip.jump_to(position, sample_rate, bpm_cents);
+                clip.jump(position, sample_rate, bpm_cents);
             }
         });
     }
@@ -292,7 +293,7 @@ impl TimelineTrackProcessor {
                 match clip {
                     None => cursor.move_next(),
                     Some(clip) => {
-                        let clip_end = clip.borrow().end(self.sample_rate, self.bpm_cents);
+                        let clip_end = clip.borrow().end(self.bpm_cents);
                         if clip_end <= position {
                             cursor.move_next();
                         }
@@ -521,7 +522,10 @@ mod tests {
 
     use crate::{
         engine::{
-            components::{audio_clip_reader::AudioClipReader, stored_audio_clip::StoredAudioClip},
+            components::{
+                audio_clip_reader::{AudioClipReader, OriginalSamples},
+                stored_audio_clip::StoredAudioClip,
+            },
             utils::test_file_path,
         },
         StoredAudioClipKey,
@@ -547,7 +551,7 @@ mod tests {
             Box::new(TreeNode::new(AudioClipProcessor::new(
                 Timestamp::from_beat_units(start_beat_units),
                 length_beat_units.map(Timestamp::from_beat_units),
-                0,
+                OriginalSamples::new(0),
                 AudioClipReader::new(Arc::clone(ac), max_buffer_size, 48_000),
             )))
         })
@@ -683,7 +687,7 @@ mod tests {
         let c2 = clip(2, Some(1), BUFFER_SIZE);
         let c3 = clip(4, Some(1), BUFFER_SIZE);
         let c4 = clip(6, None, BUFFER_SIZE);
-        let c4_end = c4.borrow().end(SAMPLE_RATE, BPM_CENTS).beat_units() as usize;
+        let c4_end = c4.borrow().end(BPM_CENTS).beat_units() as usize;
         let c5 = clip((c4_end as u32) + 1, Some(1), BUFFER_SIZE);
 
         no_heap! {{

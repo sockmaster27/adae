@@ -23,7 +23,7 @@ fn play_around() {
     engine.pause();
 
     // Add clips
-    let clip_key = engine
+    let stored_clip_key = engine
         .import_audio_clip(Path::new(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/test_files/44100 16-bit.wav"
@@ -32,7 +32,7 @@ fn play_around() {
     engine
         .add_audio_clip(
             timeline_track_keys[0],
-            clip_key,
+            stored_clip_key,
             Timestamp::from_beats(2),
             None,
         )
@@ -40,7 +40,7 @@ fn play_around() {
     engine
         .add_audio_clip(
             timeline_track_keys[1],
-            clip_key,
+            stored_clip_key,
             Timestamp::from_beats(1),
             Some(Timestamp::from_beats(2)),
         )
@@ -55,8 +55,8 @@ fn play_around() {
     engine
         .add_audio_clip(
             timeline_track_keys[2],
-            clip_key,
-            Timestamp::from_beats(0),
+            stored_clip_key,
+            Timestamp::zero(),
             None,
         )
         .unwrap();
@@ -70,4 +70,40 @@ fn play_around() {
     let (engine, import_erros) = adae::Engine::dummy_from_state(&state);
     assert!(import_erros.is_empty());
     assert_eq!(engine.state(), state);
+}
+
+#[test]
+fn stretch_around() {
+    // Start engine
+    let mut engine = adae::Engine::dummy();
+
+    // Add tracks
+    let audio_track_key = engine.add_audio_track().unwrap();
+    let timeline_track_key = engine.audio_timeline_track_key(audio_track_key).unwrap();
+
+    // Add clip
+    let stored_clip_key = engine
+        .import_audio_clip(Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/test_files/44100 16-bit.wav"
+        )))
+        .unwrap();
+    let audio_clip_key = engine
+        .add_audio_clip(
+            timeline_track_key,
+            stored_clip_key,
+            Timestamp::zero(),
+            Some(Timestamp::from_beats(30)),
+        )
+        .unwrap();
+
+    let new_length = Timestamp::from_beats(20) + Timestamp::from_beat_units(1);
+    engine
+        .audio_clip_crop_start(audio_clip_key, new_length)
+        .unwrap();
+    engine
+        .audio_clip_crop_start(audio_clip_key, Timestamp::from_beats(30))
+        .unwrap();
+
+    // No rounding error should result in an overflow
 }

@@ -17,6 +17,7 @@ use std::{
 };
 
 use super::{
+    audio_clip_reader::OriginalSamples,
     audio_clip_store::{
         AudioClipStore, AudioClipStoreState, ImportError, InvalidStoredAudioClipError,
     },
@@ -73,7 +74,7 @@ pub fn timeline(
                         AudioClip {
                             key: clip_state.key,
                             start: clip_state.start,
-                            length: clip_state.length,
+                            set_length: clip_state.length,
                             start_offset: clip_state.start_offset,
                             reader: clip_store
                                 .reader(clip_state.inner)
@@ -183,7 +184,7 @@ enum Event {
         old_start: Timestamp,
         new_start: Timestamp,
         new_length: Timestamp,
-        new_start_offset: usize,
+        new_start_offset: OriginalSamples,
     },
     CropAudioClipEnd {
         track_key: TimelineTrackKey,
@@ -271,17 +272,18 @@ impl Timeline {
         let audio_clip = AudioClip {
             key: clip_key,
             start,
-            length,
+            set_length: length,
             start_offset,
             reader: reader1,
         };
 
         let reader2 = self.clip_store.reader(stored_clip_key).unwrap();
-        let audio_clip_processor = AudioClipProcessor::new(start, length, 0, reader2);
+        let audio_clip_processor =
+            AudioClipProcessor::new(start, length, OriginalSamples::new(0), reader2);
 
         let track = self.tracks.get_mut(&track_key).unwrap();
         for clip in track.clips.values() {
-            if clip.overlaps(&audio_clip, self.sample_rate, self.bpm_cents) {
+            if clip.overlaps(&audio_clip, self.bpm_cents) {
                 return Err(AddClipError::Overlapping);
             }
         }
@@ -325,17 +327,18 @@ impl Timeline {
                 let audio_clip = AudioClip {
                     key: clip_key,
                     start,
-                    length,
+                    set_length: length,
                     start_offset,
                     reader: reader1,
                 };
 
                 let reader2 = self.clip_store.reader(stored_clip_key).unwrap();
-                let audio_clip_processor = AudioClipProcessor::new(start, length, 0, reader2);
+                let audio_clip_processor =
+                    AudioClipProcessor::new(start, length, OriginalSamples::new(0), reader2);
 
                 let track = self.tracks.get_mut(&track_key).unwrap();
                 for clip in track.clips.values() {
-                    if clip.overlaps(&audio_clip, self.sample_rate, self.bpm_cents) {
+                    if clip.overlaps(&audio_clip, self.bpm_cents) {
                         return Err(AddClipError::Overlapping);
                     }
                 }
@@ -368,7 +371,7 @@ impl Timeline {
             track_key,
             AudioClipState {
                 key,
-                start_offset: 0,
+                start_offset: OriginalSamples::new(0),
                 start,
                 length,
                 inner: stored_clip_key,
@@ -523,13 +526,13 @@ impl Timeline {
         let clip = track.clips.get(&clip_key).unwrap();
 
         let old_start = clip.start;
-        let new_end = new_start + clip.current_length(self.sample_rate, self.bpm_cents);
+        let new_end = new_start + clip.length(self.bpm_cents);
 
         // Check for overlaps
         for other_clip in track.clips.values() {
             let same = other_clip.key == clip.key;
-            let overlapping = new_start < other_clip.end(self.sample_rate, self.bpm_cents)
-                && other_clip.start < new_end;
+            let overlapping =
+                new_start < other_clip.end(self.bpm_cents) && other_clip.start < new_end;
             if !same && overlapping {
                 return Err(MoveAudioClipError::Overlapping);
             }
@@ -562,13 +565,18 @@ impl Timeline {
         let track = self.tracks.get_mut(&track_key).unwrap();
         let clip = track.clips.get(&clip_key).unwrap();
 
+        let original_sample_rate = clip.reader.sample_rate_original();
+
         let old_start = clip.start;
-        let old_length = clip.current_length(self.sample_rate, self.bpm_cents);
+        let old_length = clip.length(self.bpm_cents);
         let clip_end = old_start + old_length;
 
         let old_start_offset = clip.start_offset;
-        let old_start_offset_timestamp =
-            Timestamp::from_samples_ceil(old_start_offset, self.sample_rate, self.bpm_cents);
+        let old_start_offset_timestamp = Timestamp::from_samples_ceil(
+            old_start_offset.into(),
+            original_sample_rate,
+            self.bpm_cents,
+        );
 
         let desired_new_start = clip.start + old_length - new_length;
 
@@ -577,16 +585,16 @@ impl Timeline {
             old_start.saturating_sub(old_start_offset_timestamp),
         );
         let new_start_offset = old_start_offset
-            + new_start.samples(self.sample_rate, self.bpm_cents)
-            - old_start.samples(self.sample_rate, self.bpm_cents);
+            + OriginalSamples::new(new_start.samples(original_sample_rate, self.bpm_cents))
+            - OriginalSamples::new(old_start.samples(original_sample_rate, self.bpm_cents));
 
         let new_length = old_length + old_start - new_start;
 
         // Check for overlaps
         for other_clip in track.clips.values() {
             let same = other_clip.key == clip.key;
-            let overlapping = new_start < other_clip.end(self.sample_rate, self.bpm_cents)
-                && other_clip.start < clip_end;
+            let overlapping =
+                new_start < other_clip.end(self.bpm_cents) && other_clip.start < clip_end;
             if !same && overlapping {
                 return Err(MoveAudioClipError::Overlapping);
             }
@@ -594,7 +602,7 @@ impl Timeline {
 
         let clip_mut = track.clips.get_mut(&clip_key).unwrap();
         clip_mut.start = new_start;
-        clip_mut.length = Some(new_length);
+        clip_mut.set_length = Some(new_length);
         clip_mut.start_offset = new_start_offset;
 
         self.event_sender.send(Event::CropAudioClipStart {
@@ -635,7 +643,7 @@ impl Timeline {
         }
 
         let clip_mut = track.clips.get_mut(&clip_key).unwrap();
-        clip_mut.length = Some(new_length);
+        clip_mut.set_length = Some(new_length);
 
         self.event_sender.send(Event::CropAudioClipEnd {
             track_key,
@@ -662,7 +670,7 @@ impl Timeline {
         let clip = old_track.clips.get(&clip_key).unwrap();
 
         let clip_start = clip.start;
-        let clip_end = clip.end(self.sample_rate, self.bpm_cents);
+        let clip_end = clip.end(self.bpm_cents);
 
         let new_track =
             self.tracks
@@ -674,8 +682,8 @@ impl Timeline {
         // Check for overlaps
         for other_clip in new_track.clips.values() {
             let same = other_clip.key == clip_key;
-            let overlapping = clip_start < other_clip.end(self.sample_rate, self.bpm_cents)
-                && other_clip.start < clip_end;
+            let overlapping =
+                clip_start < other_clip.end(self.bpm_cents) && other_clip.start < clip_end;
             if !same && overlapping {
                 return Err(MoveAudioClipToTrackError::Overlapping);
             }
@@ -806,7 +814,7 @@ impl Timeline {
                         AudioClip {
                             key: clip_state.key,
                             start: clip_state.start,
-                            length: clip_state.length,
+                            set_length: clip_state.length,
                             start_offset: clip_state.start_offset,
                             reader: self
                                 .clip_store
@@ -1045,7 +1053,7 @@ impl TimelineProcessor {
         old_start: Timestamp,
         new_start: Timestamp,
         new_length: Timestamp,
-        new_start_offset: usize,
+        new_start_offset: OriginalSamples,
     ) {
         let track = self
             .tracks
@@ -1288,7 +1296,7 @@ impl Error for MoveAudioClipToTrackError {}
 mod tests {
     use tests::key_generator::Key;
 
-    use crate::engine::utils::test_file_path;
+    use crate::engine::{components::audio_clip_reader::OriginalSamples, utils::test_file_path};
 
     use super::*;
 
@@ -1431,6 +1439,6 @@ mod tests {
         let clip = tl.audio_clip(ack).unwrap();
 
         // Then the start offset should be 0
-        assert_eq!(clip.start_offset, 0);
+        assert_eq!(clip.start_offset, OriginalSamples::new(0));
     }
 }

@@ -7,6 +7,7 @@ use std::{
 };
 
 use rubato::{FftFixedOut, Resampler};
+use serde::{Deserialize, Serialize};
 
 use crate::{
     engine::{info::Info, utils::non_copy_array, Sample, CHANNELS},
@@ -51,33 +52,37 @@ impl AudioClipReader {
             )
             .expect("Failed to create resampler");
             let m = r.input_frames_max();
-            let d = ResampledSamples(r.output_delay());
+            let d = ResampledSamples::new(r.output_delay());
             (Some(r), m, d)
         } else {
-            (None, max_buffer_size, ResampledSamples(0))
+            (None, max_buffer_size, ResampledSamples::new(0))
         };
 
         let mut audio_clip_reader = AudioClipReader {
             inner: clip,
             resampler,
 
-            inner_position: OriginalSamples(0),
-            position: ResampledSamples(0),
+            inner_position: OriginalSamples::new(0),
+            position: ResampledSamples::new(0),
 
             channel_scale_buffer: non_copy_array![vec![0.0; max_input_size]; CHANNELS],
-            resample_buffer_unused: ResampledSamples(0),
+            resample_buffer_unused: ResampledSamples::new(0),
             resample_buffer: non_copy_array![vec![0.0; resampler_chunk_size]; CHANNELS],
             output_buffer: vec![0.0; max_buffer_size * CHANNELS],
         };
 
         audio_clip_reader.chop_delay(delay, sample_rate);
-        audio_clip_reader.position = ResampledSamples(0);
+        audio_clip_reader.position = ResampledSamples::new(0);
 
         audio_clip_reader
     }
 
     pub fn key(&self) -> StoredAudioClipKey {
         self.inner.key()
+    }
+
+    pub fn sample_rate_original(&self) -> u32 {
+        self.inner.sample_rate()
     }
 
     /// Throws out the given delay from the start of the clip.
@@ -103,20 +108,28 @@ impl AudioClipReader {
     }
 
     /// Returns the current position in samples relative to the start of the clip, within the given `sample_rate`.
-    pub fn position(&self) -> usize {
-        self.position.into()
+    pub fn position(&self) -> ResampledSamples {
+        self.position
     }
 
-    /// Jump to position with sample precision relative to the start of the clip.
+    /// Jump to position with sample precision relative to the start of the clip, in the domain of the clip's original sample rate.
     ///
     /// - `sample_rate` is the sample rate of the output.
-    /// - `position` is converted from `sample_rate` into the clips original sample rate.
     /// - If the position is after the end of the clip, the position is set to the end of the clip.
-    pub fn jump(&mut self, position: usize, sample_rate: u32) {
-        let desired_pos_resampled = ResampledSamples(position);
-        let desired_pos_original =
-            desired_pos_resampled.into_original(sample_rate, self.inner.sample_rate());
+    pub fn jump_original(&mut self, position: OriginalSamples, sample_rate: u32) {
+        let desired_pos_original = position;
+        let desired_pos_resampled =
+            desired_pos_original.into_resampled(sample_rate, self.inner.sample_rate());
 
+        self.jump(desired_pos_original, desired_pos_resampled, sample_rate)
+    }
+
+    fn jump(
+        &mut self,
+        desired_pos_original: OriginalSamples,
+        desired_pos_resampled: ResampledSamples,
+        sample_rate: u32,
+    ) {
         let (pos_resample, pos_original) = if self.len_original() < desired_pos_original {
             (self.len_resampled(sample_rate), self.len_original())
         } else {
@@ -128,27 +141,25 @@ impl AudioClipReader {
             .as_mut()
             .map(|r| {
                 r.reset();
-                ResampledSamples(r.output_delay())
+                ResampledSamples::new(r.output_delay())
             })
-            .unwrap_or(ResampledSamples(0));
+            .unwrap_or(ResampledSamples::new(0));
         self.chop_delay(delay, sample_rate);
 
-        self.resample_buffer_unused = ResampledSamples(0);
+        self.resample_buffer_unused = ResampledSamples::new(0);
 
         self.position = pos_resample;
         self.inner_position = pos_original;
     }
 
     // The length of the inner clip in frames (samples per channel), converted relative to the given sample rate.
-    pub fn len(&self, sample_rate: u32) -> usize {
-        self.len_resampled(sample_rate).into()
-    }
-    fn len_resampled(&self, sample_rate: u32) -> ResampledSamples {
+    pub fn len_resampled(&self, sample_rate: u32) -> ResampledSamples {
         self.len_original()
             .into_resampled(sample_rate, self.inner.sample_rate())
     }
-    fn len_original(&self) -> OriginalSamples {
-        OriginalSamples(self.inner.length())
+    // The length of the inner clip in frames (samples per channel), before resampling.
+    pub fn len_original(&self) -> OriginalSamples {
+        OriginalSamples::new(self.inner.length())
     }
 
     /// Scales `range` of each channel in `input` to down to two channels and writes it to `output`.
@@ -224,7 +235,7 @@ impl AudioClipReader {
             sample_rate,
             buffer_size,
         } = *info;
-        let buffer_size = ResampledSamples(buffer_size);
+        let buffer_size = ResampledSamples::new(buffer_size);
 
         let resampler = self
             .resampler
@@ -232,21 +243,21 @@ impl AudioClipReader {
             .expect("output_resampling was called on AudioClipReader without resampler");
 
         // self.len_original() cannot be used, since self is already borrowed by resampler
-        let len_original = OriginalSamples(self.inner.length());
+        let len_original = OriginalSamples::new(self.inner.length());
 
         let resampled_length = len_original.into_resampled(sample_rate, self.inner.sample_rate());
         let remaining = resampled_length - self.position;
 
         let output_size = min(buffer_size, remaining);
 
-        let mut filled = ResampledSamples(0);
+        let mut filled = ResampledSamples::new(0);
         while filled < output_size {
-            let resample_chunk_size = ResampledSamples(resampler.output_frames_max());
+            let resample_chunk_size = ResampledSamples::new(resampler.output_frames_max());
 
-            if self.resample_buffer_unused == ResampledSamples(0) {
+            if self.resample_buffer_unused == ResampledSamples::new(0) {
                 let range = self.inner_position
                     ..min(
-                        self.inner_position + OriginalSamples(resampler.input_frames_next()),
+                        self.inner_position + OriginalSamples::new(resampler.input_frames_next()),
                         len_original,
                     );
                 self.inner_position += range.end - range.start;
@@ -295,14 +306,14 @@ impl AudioClipReader {
 
         // Here ResampledSamples and OriginalSamples are exectly the same
 
-        let buffer_size = OriginalSamples(buffer_size);
-        let position = OriginalSamples(self.position.into());
+        let buffer_size = OriginalSamples::new(buffer_size);
+        let position = OriginalSamples::new(self.position.into());
 
         let remaining = self.len_original() - position;
         let output_size = min(buffer_size, remaining);
 
         let range = position..position + output_size;
-        self.position += ResampledSamples(output_size.into());
+        self.position += ResampledSamples::new(output_size.into());
 
         let mut c = self.channel_scale_buffer.iter_mut();
         let mut channel_scale_buffer = [
@@ -312,7 +323,7 @@ impl AudioClipReader {
         Self::scale_channels(self.inner.data(), range, &mut channel_scale_buffer);
         Self::interleave(
             &self.channel_scale_buffer,
-            ResampledSamples(0)..ResampledSamples(output_size.into()),
+            ResampledSamples::new(0)..ResampledSamples::new(output_size.into()),
             &mut self.output_buffer,
         );
 
@@ -341,19 +352,31 @@ impl Debug for AudioClipReader {
 
 /// A number of samples in the domain of the clip's original sample rate.
 #[repr(transparent)]
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
-struct OriginalSamples(usize);
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Serialize, Deserialize, Hash)]
+pub struct OriginalSamples(usize);
 impl OriginalSamples {
-    fn into_resampled(self, sample_rate: u32, clip_sample_rate: u32) -> ResampledSamples {
-        let resample_ratio = sample_rate as f64 / clip_sample_rate as f64;
-        ResampledSamples((self.0 as f64 * resample_ratio).ceil() as usize)
+    pub fn new(samples: usize) -> Self {
+        OriginalSamples(samples)
+    }
+
+    pub fn into_resampled(
+        self,
+        resampled_sample_rate: u32,
+        original_sample_rate: u32,
+    ) -> ResampledSamples {
+        let resample_ratio = resampled_sample_rate as f64 / original_sample_rate as f64;
+        ResampledSamples::new((self.0 as f64 * resample_ratio).ceil() as usize)
+    }
+
+    pub fn saturating_sub(self, rhs: Self) -> Self {
+        OriginalSamples::new(self.0.saturating_sub(rhs.0))
     }
 }
 impl Add<OriginalSamples> for OriginalSamples {
     type Output = OriginalSamples;
 
     fn add(self, rhs: OriginalSamples) -> Self::Output {
-        OriginalSamples(self.0 + rhs.0)
+        OriginalSamples::new(self.0 + rhs.0)
     }
 }
 impl AddAssign<OriginalSamples> for OriginalSamples {
@@ -365,7 +388,7 @@ impl Sub<OriginalSamples> for OriginalSamples {
     type Output = OriginalSamples;
 
     fn sub(self, rhs: OriginalSamples) -> Self::Output {
-        OriginalSamples(self.0 - rhs.0)
+        OriginalSamples::new(self.0 - rhs.0)
     }
 }
 impl SubAssign for OriginalSamples {
@@ -377,14 +400,14 @@ impl Mul<usize> for OriginalSamples {
     type Output = OriginalSamples;
 
     fn mul(self, rhs: usize) -> Self::Output {
-        OriginalSamples(self.0 * rhs)
+        OriginalSamples::new(self.0 * rhs)
     }
 }
 impl Mul<OriginalSamples> for usize {
     type Output = OriginalSamples;
 
     fn mul(self, rhs: OriginalSamples) -> Self::Output {
-        OriginalSamples(self * rhs.0)
+        OriginalSamples::new(self * rhs.0)
     }
 }
 impl From<OriginalSamples> for usize {
@@ -395,19 +418,27 @@ impl From<OriginalSamples> for usize {
 
 /// A number of samples in the domain of the engine's sample rate.
 #[repr(transparent)]
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
-struct ResampledSamples(usize);
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Serialize, Deserialize, Hash)]
+pub struct ResampledSamples(usize);
 impl ResampledSamples {
-    fn into_original(self, sample_rate: u32, clip_sample_rate: u32) -> OriginalSamples {
+    pub fn new(samples: usize) -> Self {
+        ResampledSamples(samples)
+    }
+
+    pub fn into_original(self, sample_rate: u32, clip_sample_rate: u32) -> OriginalSamples {
         let resample_ratio = clip_sample_rate as f64 / sample_rate as f64;
-        OriginalSamples((self.0 as f64 * resample_ratio).ceil() as usize)
+        OriginalSamples::new((self.0 as f64 * resample_ratio).ceil() as usize)
+    }
+
+    pub fn saturating_sub(self, rhs: Self) -> Self {
+        ResampledSamples::new(self.0.saturating_sub(rhs.0))
     }
 }
 impl Add<ResampledSamples> for ResampledSamples {
     type Output = ResampledSamples;
 
     fn add(self, rhs: ResampledSamples) -> Self::Output {
-        ResampledSamples(self.0 + rhs.0)
+        ResampledSamples::new(self.0 + rhs.0)
     }
 }
 impl AddAssign<ResampledSamples> for ResampledSamples {
@@ -419,7 +450,7 @@ impl Sub<ResampledSamples> for ResampledSamples {
     type Output = ResampledSamples;
 
     fn sub(self, rhs: ResampledSamples) -> Self::Output {
-        ResampledSamples(self.0 - rhs.0)
+        ResampledSamples::new(self.0 - rhs.0)
     }
 }
 impl SubAssign<ResampledSamples> for ResampledSamples {
@@ -431,14 +462,14 @@ impl Mul<usize> for ResampledSamples {
     type Output = ResampledSamples;
 
     fn mul(self, rhs: usize) -> Self::Output {
-        ResampledSamples(self.0 * rhs)
+        ResampledSamples::new(self.0 * rhs)
     }
 }
 impl Mul<ResampledSamples> for usize {
     type Output = ResampledSamples;
 
     fn mul(self, rhs: ResampledSamples) -> Self::Output {
-        ResampledSamples(self * rhs.0)
+        ResampledSamples::new(self * rhs.0)
     }
 }
 impl From<ResampledSamples> for usize {
@@ -458,13 +489,13 @@ mod tests {
         let sample_rate = 44_100;
         let clip_sample_rate = 22_050;
 
-        let resampled = OriginalSamples(clip_sample_rate as usize)
+        let resampled = OriginalSamples::new(clip_sample_rate as usize)
             .into_resampled(sample_rate, clip_sample_rate);
-        assert_eq!(resampled, ResampledSamples(sample_rate as usize));
+        assert_eq!(resampled, ResampledSamples::new(sample_rate as usize));
 
-        let original =
-            ResampledSamples(sample_rate as usize).into_original(sample_rate, clip_sample_rate);
-        assert_eq!(original, OriginalSamples(clip_sample_rate as usize));
+        let original = ResampledSamples::new(sample_rate as usize)
+            .into_original(sample_rate, clip_sample_rate);
+        assert_eq!(original, OriginalSamples::new(clip_sample_rate as usize));
     }
 
     #[test]
@@ -660,7 +691,7 @@ mod tests {
         let rs = output[1];
         assert!((-1.001..=-0.999).contains(&rs), "Sample: {}", rs);
 
-        acr.jump(0, 48_000);
+        acr.jump_original(OriginalSamples::new(0), 48_000);
 
         let output = acr.output(&Info {
             sample_rate: 48_000,
@@ -684,8 +715,8 @@ mod tests {
         .unwrap();
         let mut acr = AudioClipReader::new(Arc::new(ac), 50, 48_000);
 
-        acr.jump(2_000_000, 48_000);
+        acr.jump_original(OriginalSamples::new(2_000_000), 48_000);
 
-        assert_eq!(acr.position(), 1_322_978);
+        assert_eq!(acr.position(), ResampledSamples::new(1_322_978));
     }
 }

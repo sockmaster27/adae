@@ -3,7 +3,7 @@ use std::cmp::min;
 
 use crate::{
     engine::{
-        components::audio_clip_reader::AudioClipReader,
+        components::audio_clip_reader::{AudioClipReader, OriginalSamples, ResampledSamples},
         info::Info,
         utils::{key_generator::key_type, rbtree_node},
         Sample,
@@ -21,35 +21,39 @@ pub struct AudioClip {
     pub key: AudioClipKey,
 
     /// Start on the timeline
-    pub start: Timestamp,
+    pub(crate) start: Timestamp,
     /// Duration on the timeline.
     /// If `None` clip should play till end.
-    pub length: Option<Timestamp>,
+    pub(crate) set_length: Option<Timestamp>,
     /// Where in the source clip this sound starts.
     /// Relevant if the start has been trimmed off.
-    pub start_offset: usize,
+    /// This is in the domain of the source clip's sample rate.
+    pub(crate) start_offset: OriginalSamples,
 
-    pub reader: AudioClipReader,
+    pub(crate) reader: AudioClipReader,
 }
 impl AudioClip {
-    pub fn current_length(&self, sample_rate: u32, bpm_cents: u16) -> Timestamp {
-        self.length.unwrap_or(Timestamp::from_samples_ceil(
-            self.reader.len(sample_rate),
-            sample_rate,
+    pub fn start(&self) -> Timestamp {
+        self.start
+    }
+    pub fn length(&self, bpm_cents: u16) -> Timestamp {
+        self.set_length.unwrap_or(Timestamp::from_samples_ceil(
+            self.reader.len_original().into(),
+            self.reader.sample_rate_original(),
             bpm_cents,
         ))
     }
 
-    pub fn end(&self, sample_rate: u32, bpm_cents: u16) -> Timestamp {
-        self.start + self.current_length(sample_rate, bpm_cents)
+    pub fn end(&self, bpm_cents: u16) -> Timestamp {
+        self.start + self.length(bpm_cents)
     }
 
-    pub fn overlaps(&self, other: &Self, sample_rate: u32, bpm_cents: u16) -> bool {
+    pub fn overlaps(&self, other: &Self, bpm_cents: u16) -> bool {
         let start1 = self.start;
-        let end1 = self.end(sample_rate, bpm_cents);
+        let end1 = self.end(bpm_cents);
 
         let start2 = other.start;
-        let end2 = other.end(sample_rate, bpm_cents);
+        let end2 = other.end(bpm_cents);
 
         start1 <= start2 && start2 < end1 || start2 <= start1 && start1 < end2
     }
@@ -63,7 +67,7 @@ impl AudioClip {
             key: self.key,
             start_offset: self.start_offset,
             start: self.start,
-            length: self.length,
+            length: self.set_length,
             inner: self.reader.key(),
         }
     }
@@ -78,7 +82,8 @@ pub struct AudioClipProcessor {
     pub length: Option<Timestamp>,
     /// Where in the source clip this sound starts.
     /// Relevant if the start has been trimmed off.
-    pub start_offset: usize,
+    /// This is in the domain of the source clip's sample rate.
+    pub start_offset: OriginalSamples,
 
     reader: AudioClipReader,
 }
@@ -86,7 +91,7 @@ impl AudioClipProcessor {
     pub fn new(
         start: Timestamp,
         length: Option<Timestamp>,
-        start_offset: usize,
+        start_offset: OriginalSamples,
         reader: AudioClipReader,
     ) -> Self {
         AudioClipProcessor {
@@ -97,14 +102,14 @@ impl AudioClipProcessor {
         }
     }
 
-    pub fn end(&self, sample_rate: u32, bpm_cents: u16) -> Timestamp {
+    pub fn end(&self, bpm_cents: u16) -> Timestamp {
         if let Some(length) = self.length {
             self.start + length
         } else {
             self.start
                 + Timestamp::from_samples_ceil(
-                    self.reader.len(sample_rate) - self.start_offset,
-                    sample_rate,
+                    (self.reader.len_original() - self.start_offset).into(),
+                    self.reader.sample_rate_original(),
                     bpm_cents,
                 )
         }
@@ -112,28 +117,33 @@ impl AudioClipProcessor {
 
     /// Resets the position to the start of the clip.
     pub fn reset(&mut self, sample_rate: u32) {
-        self.reader.jump(self.start_offset, sample_rate);
+        self.reader.jump_original(self.start_offset, sample_rate);
     }
 
     /// Jumps to the given position relative to the start of the timeline.
     ///
     /// - If the position is before the start of the clip, the position is set to the start of the clip.
     /// - If the position is after the end of the clip, the position is set to the end of the clip.
-    pub fn jump_to(&mut self, pos: Timestamp, sample_rate: u32, bpm_cents: u16) {
-        let start_samples = self.start.samples(sample_rate, bpm_cents);
-        let pos_samples = pos.samples(sample_rate, bpm_cents);
+    pub fn jump(&mut self, pos: Timestamp, sample_rate: u32, bpm_cents: u16) {
+        let start_samples = OriginalSamples::new(
+            self.start
+                .samples(self.reader.sample_rate_original(), bpm_cents),
+        );
+        let pos_samples =
+            OriginalSamples::new(pos.samples(self.reader.sample_rate_original(), bpm_cents));
 
         // Saturating subtraction means that if the position is before the start of the clip,
         // then the clip is reset to 0.
         let inner_pos = pos_samples.saturating_sub(start_samples) + self.start_offset;
 
-        self.reader.jump(inner_pos, sample_rate);
+        self.reader.jump_original(inner_pos, sample_rate);
     }
 
-    fn length_samples(&self, sample_rate: u32, bpm_cents: u16) -> usize {
+    fn length_samples(&self, sample_rate: u32, bpm_cents: u16) -> ResampledSamples {
         match self.length {
-            None => self.reader.len(sample_rate) - self.start_offset,
-            Some(length) => length.samples(sample_rate, bpm_cents),
+            None => (self.reader.len_original() - self.start_offset)
+                .into_resampled(sample_rate, self.reader.sample_rate_original()),
+            Some(length) => ResampledSamples::new(length.samples(sample_rate, bpm_cents)),
         }
     }
 
@@ -146,9 +156,12 @@ impl AudioClipProcessor {
         } = *info;
 
         let length = self.length_samples(sample_rate, bpm_cents);
-        let pos = self.reader.position() - self.start_offset;
+        let pos = self.reader.position()
+            - self
+                .start_offset
+                .into_resampled(sample_rate, self.reader.sample_rate_original());
         let remaining = length.saturating_sub(pos);
-        let capped_buffer_size = min(buffer_size, remaining);
+        let capped_buffer_size = min(buffer_size, remaining.into());
 
         self.reader.output(&Info {
             sample_rate,
@@ -167,7 +180,7 @@ impl rbtree_node::Keyed for AudioClipProcessor {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AudioClipState {
     pub key: AudioClipKey,
-    pub start_offset: usize,
+    pub start_offset: OriginalSamples,
     pub start: Timestamp,
     pub length: Option<Timestamp>,
     pub inner: StoredAudioClipKey,

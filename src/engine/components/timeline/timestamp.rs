@@ -1,3 +1,4 @@
+use num_traits::{CheckedAdd, CheckedSub, SaturatingAdd, SaturatingSub};
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use std::ops::{Add, Mul, Sub};
@@ -69,20 +70,31 @@ impl Timestamp {
     pub const fn beats(&self) -> u32 {
         self.beat_units / UNITS_PER_BEAT
     }
+    /// Converts a timestamp to a number of samples, rounding down.
     pub const fn samples(&self, sample_rate: u32, bpm_cents: u16) -> usize {
         (self.beat_units as usize * sample_rate as usize * 60 * 100)
             / (bpm_cents as usize * UNITS_PER_BEAT as usize)
     }
 
-    pub fn checked_add(&self, rhs: Self) -> Option<Self> {
+    pub fn checked_add(self, rhs: Self) -> Option<Self> {
         self.beat_units
             .checked_add(rhs.beat_units)
             .map(Self::from_beat_units)
     }
-    pub fn checked_sub(&self, rhs: Self) -> Option<Self> {
+    pub fn checked_sub(self, rhs: Self) -> Option<Self> {
         self.beat_units
             .checked_sub(rhs.beat_units)
             .map(Self::from_beat_units)
+    }
+    pub fn saturating_add(self, rhs: Self) -> Self {
+        Self {
+            beat_units: self.beat_units.saturating_add(rhs.beat_units),
+        }
+    }
+    pub fn saturating_sub(self, rhs: Self) -> Self {
+        Self {
+            beat_units: self.beat_units.saturating_sub(rhs.beat_units),
+        }
     }
 }
 impl Debug for Timestamp {
@@ -120,6 +132,26 @@ impl Sub for Timestamp {
         Self {
             beat_units: self.beat_units - rhs.beat_units,
         }
+    }
+}
+impl CheckedAdd for Timestamp {
+    fn checked_add(&self, rhs: &Self) -> Option<Self> {
+        Self::checked_add(*self, *rhs)
+    }
+}
+impl CheckedSub for Timestamp {
+    fn checked_sub(&self, rhs: &Self) -> Option<Self> {
+        Self::checked_sub(*self, *rhs)
+    }
+}
+impl SaturatingAdd for Timestamp {
+    fn saturating_add(&self, rhs: &Self) -> Self {
+        Self::saturating_add(*self, *rhs)
+    }
+}
+impl SaturatingSub for Timestamp {
+    fn saturating_sub(&self, rhs: &Self) -> Self {
+        Self::saturating_sub(*self, *rhs)
     }
 }
 impl Mul<u32> for Timestamp {

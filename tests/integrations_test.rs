@@ -511,7 +511,7 @@ mod audio_clips {
         let ac = e.audio_clip(ack).unwrap();
 
         assert_eq!(r, Ok(()));
-        assert_eq!(ac.start, Timestamp::from_beats(1));
+        assert_eq!(ac.start(), Timestamp::from_beats(1));
     }
 
     #[test]
@@ -541,7 +541,7 @@ mod audio_clips {
         let ac = e.audio_clip(ack).unwrap();
 
         assert_eq!(r, Err(MoveAudioClipError::Overlapping));
-        assert_eq!(ac.start, Timestamp::from_beats(0));
+        assert_eq!(ac.start(), Timestamp::from_beats(0));
     }
 
     #[test]
@@ -564,8 +564,8 @@ mod audio_clips {
         let ac = e.audio_clip(ack).unwrap();
 
         assert_eq!(r, Ok(()));
-        assert_eq!(ac.start, Timestamp::from_beats(1));
-        assert_eq!(ac.length, Some(Timestamp::from_beats(1)));
+        assert_eq!(ac.start(), Timestamp::from_beats(1));
+        assert_eq!(ac.length(e.bpm_cents()), Timestamp::from_beats(1));
     }
 
     #[test]
@@ -598,8 +598,8 @@ mod audio_clips {
         let ac = e.audio_clip(ack).unwrap();
 
         assert_eq!(r, Err(MoveAudioClipError::Overlapping));
-        assert_eq!(ac.start, Timestamp::from_beats(1));
-        assert_eq!(ac.length, Some(Timestamp::from_beats(1)));
+        assert_eq!(ac.start(), Timestamp::from_beats(1));
+        assert_eq!(ac.length(e.bpm_cents()), Timestamp::from_beats(1));
     }
 
     #[test]
@@ -626,8 +626,8 @@ mod audio_clips {
         let ac = e.audio_clip(ack).unwrap();
 
         // Then it's capped at the original length
-        assert_eq!(ac.start, Timestamp::from_beats(1));
-        assert_eq!(ac.length, Some(Timestamp::from_beats(2)));
+        assert_eq!(ac.start(), Timestamp::from_beats(1));
+        assert_eq!(ac.length(e.bpm_cents()), Timestamp::from_beats(2));
     }
 
     #[test]
@@ -674,8 +674,8 @@ mod audio_clips {
         let ac = e.audio_clip(ack).unwrap();
 
         assert_eq!(r, Ok(()));
-        assert_eq!(ac.start, Timestamp::from_beats(0));
-        assert_eq!(ac.length, Some(Timestamp::from_beats(1)));
+        assert_eq!(ac.start(), Timestamp::from_beats(0));
+        assert_eq!(ac.length(e.bpm_cents()), Timestamp::from_beats(1));
     }
 
     #[test]
@@ -705,8 +705,8 @@ mod audio_clips {
         let ac = e.audio_clip(ack).unwrap();
 
         assert_eq!(r, Err(MoveAudioClipError::Overlapping));
-        assert_eq!(ac.start, Timestamp::from_beats(0));
-        assert_eq!(ac.length, Some(Timestamp::from_beats(1)));
+        assert_eq!(ac.start(), Timestamp::from_beats(0));
+        assert_eq!(ac.length(e.bpm_cents()), Timestamp::from_beats(1));
     }
 
     #[test]
