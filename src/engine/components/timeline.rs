@@ -567,16 +567,18 @@ impl Timeline {
         let clip_end = old_start + old_length;
 
         let old_start_offset = clip.start_offset;
-        let old_start_samples = old_start.samples(self.sample_rate, self.bpm_cents);
+        let old_start_offset_timestamp =
+            Timestamp::from_samples_ceil(old_start_offset, self.sample_rate, self.bpm_cents);
+
         let desired_new_start = clip.start + old_length - new_length;
 
-        let new_start_samples = max(
-            desired_new_start.samples(self.sample_rate, self.bpm_cents),
-            old_start_samples.saturating_sub(old_start_offset),
+        let new_start = max(
+            desired_new_start,
+            old_start.saturating_sub(old_start_offset_timestamp),
         );
-        let new_start_offset = old_start_offset + new_start_samples - old_start_samples;
-        let new_start =
-            Timestamp::from_samples(new_start_samples, self.sample_rate, self.bpm_cents);
+        let new_start_offset = old_start_offset
+            + new_start.samples(self.sample_rate, self.bpm_cents)
+            - old_start.samples(self.sample_rate, self.bpm_cents);
 
         let new_length = old_length + old_start - new_start;
 
@@ -1395,5 +1397,40 @@ mod tests {
         no_heap! {{
             tlp.poll();
         }}
+    }
+
+    #[test]
+    fn crop_start_offset_rounding() {
+        let (mut tl, _, ie) = timeline(&TimelineState::default(), 40_000, 10);
+        assert!(ie.is_empty());
+
+        let ck = tl
+            .import_audio_clip(&test_file_path("44100 16-bit.wav"))
+            .unwrap();
+        let tk = tl.add_track(MixerTrackKey::new(0)).unwrap();
+        let ack = tl
+            .add_audio_clip(
+                tk,
+                ck,
+                Timestamp::from_beat_units(0),
+                Some(Timestamp::from_beats(30)),
+            )
+            .unwrap();
+
+        // When cropping the start of the clip to a very specifc length
+        tl.audio_clip_crop_start(
+            ack,
+            Timestamp::from_beats(20) + Timestamp::from_beat_units(1),
+        )
+        .unwrap();
+
+        // And then resetting it to the original
+        tl.audio_clip_crop_start(ack, Timestamp::from_beats(30))
+            .unwrap();
+
+        let clip = tl.audio_clip(ack).unwrap();
+
+        // Then the start offset should be 0
+        assert_eq!(clip.start_offset, 0);
     }
 }
