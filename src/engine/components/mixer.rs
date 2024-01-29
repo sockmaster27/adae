@@ -127,8 +127,12 @@ impl Mixer {
         let track = mixer_track_from_state(state, self.max_buffer_size);
         self.push_track(track);
     }
-    pub fn reconstruct_tracks<'a>(&mut self, states: impl Iterator<Item = &'a MixerTrackState>) {
+    pub fn reconstruct_tracks<'a>(
+        &mut self,
+        states: impl IntoIterator<Item = &'a MixerTrackState>,
+    ) {
         let tracks = states
+            .into_iter()
             .map(|state| {
                 self.key_generator
                     .reserve(state.key)

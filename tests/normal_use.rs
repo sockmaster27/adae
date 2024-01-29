@@ -2,7 +2,7 @@ extern crate adae;
 
 use std::{path::Path, thread::sleep, time::Duration};
 
-use adae::{TimelineTrackKey, Timestamp};
+use adae::{AudioTrackKey, TimelineTrackKey, Timestamp};
 
 #[test]
 fn play_around() {
@@ -10,7 +10,7 @@ fn play_around() {
     let mut engine = adae::Engine::dummy();
 
     // Add tracks
-    let audio_track_keys = engine.add_audio_tracks(3).unwrap();
+    let audio_track_keys: Vec<AudioTrackKey> = engine.add_audio_tracks(3).unwrap().collect();
     assert!(audio_track_keys.len() == 3);
     let timeline_track_keys: Vec<TimelineTrackKey> = audio_track_keys
         .into_iter()
@@ -67,8 +67,8 @@ fn play_around() {
     // Close and load from state
     let state = engine.state();
     drop(engine);
-    let (engine, import_erros) = adae::Engine::dummy_from_state(&state);
-    assert!(import_erros.is_empty());
+    let (engine, import_errors) = adae::Engine::dummy_from_state(&state);
+    assert!(import_errors.count() == 0);
     assert_eq!(engine.state(), state);
 }
 

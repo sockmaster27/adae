@@ -113,7 +113,7 @@ where
 
     /// Return `count` new unique key, registering them as occupied
     /// until [`Self::free()`] is called with these keys as argument.
-    pub fn next_n(&mut self, count: K::Id) -> Result<Vec<K>, OverflowError> {
+    pub fn next_n(&mut self, count: K::Id) -> Result<impl Iterator<Item = K>, OverflowError> {
         if self.remaining_keys() < count {
             return Err(OverflowError);
         }
@@ -125,7 +125,7 @@ where
             i += K::Id::one();
         }
 
-        Ok(keys)
+        Ok(keys.into_iter())
     }
 
     /// Checks what the next key will be, without actually reserving it.

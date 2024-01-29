@@ -72,7 +72,7 @@ mod audio_tracks {
         let mut e = Engine::dummy();
         assert_eq!(e.audio_tracks().count(), 0);
 
-        let mut ats = e.add_audio_tracks(42).unwrap();
+        let mut ats: Vec<AudioTrackKey> = e.add_audio_tracks(42).unwrap().collect();
 
         assert_eq!(ats.len(), 42);
         assert_eq!(e.audio_tracks().count(), 42);
@@ -101,7 +101,7 @@ mod audio_tracks {
         let mut e = Engine::dummy();
         let ats = e.add_audio_tracks(42).unwrap();
 
-        let r = e.delete_audio_tracks(&ats);
+        let r = e.delete_audio_tracks(ats);
 
         assert!(r.is_ok());
         assert_eq!(e.audio_tracks().count(), 0);
@@ -146,7 +146,7 @@ mod audio_tracks {
     #[test]
     fn reconstruct_audio_track_repeat() {
         let mut e = Engine::dummy();
-        let ats = e.add_audio_tracks(42).unwrap();
+        let ats: Vec<AudioTrackKey> = e.add_audio_tracks(42).unwrap().collect();
 
         for &at in &ats {
             let mt = e.mixer_track(e.audio_mixer_track_key(at).unwrap()).unwrap();
@@ -158,7 +158,7 @@ mod audio_tracks {
             .iter()
             .map(|&at| e.audio_track_state(at).unwrap())
             .collect();
-        e.delete_audio_tracks(&ats).unwrap();
+        e.delete_audio_tracks(ats.iter().copied()).unwrap();
 
         for (at, s) in zip(ats, ss) {
             let at_new = e.reconstruct_audio_track(s).unwrap();
@@ -215,7 +215,7 @@ mod audio_tracks {
     #[test]
     fn reconstruct_audio_tracks() {
         let mut e = Engine::dummy();
-        let ats = e.add_audio_tracks(42).unwrap();
+        let ats: Vec<AudioTrackKey> = e.add_audio_tracks(42).unwrap().collect();
 
         for &at in &ats {
             let mt = e.mixer_track(e.audio_mixer_track_key(at).unwrap()).unwrap();
@@ -227,9 +227,9 @@ mod audio_tracks {
             .iter()
             .map(|&at| e.audio_track_state(at).unwrap())
             .collect();
-        e.delete_audio_tracks(&ats).unwrap();
+        e.delete_audio_tracks(ats.iter().copied()).unwrap();
 
-        let ats_new: Vec<AudioTrackKey> = e.reconstruct_audio_tracks(&ss).unwrap().collect();
+        let ats_new: Vec<AudioTrackKey> = e.reconstruct_audio_tracks(ss).unwrap().collect();
 
         for (at_new, at) in zip(ats_new, ats) {
             assert_eq!(at_new, at);
@@ -287,7 +287,10 @@ mod mixer_tracks {
 }
 
 mod audio_clips {
-    use adae::error::{MoveAudioClipError, MoveAudioClipToTrackError};
+    use adae::{
+        error::{MoveAudioClipError, MoveAudioClipToTrackError},
+        AudioClipKey,
+    };
 
     use super::*;
 
@@ -411,7 +414,7 @@ mod audio_clips {
             42
         );
 
-        let r = e.delete_audio_clips(&acs);
+        let r = e.delete_audio_clips(acs);
 
         assert!(r.is_ok());
         assert_eq!(
@@ -476,11 +479,12 @@ mod audio_clips {
             ss.push(e.audio_clip(ac).unwrap().state())
         }
 
-        e.delete_audio_clips(&acs).unwrap();
+        e.delete_audio_clips(acs.iter().copied()).unwrap();
 
-        let acs_new = e
+        let acs_new: Vec<AudioClipKey> = e
             .reconstruct_audio_clips(e.audio_timeline_track_key(at).unwrap(), ss)
-            .unwrap();
+            .unwrap()
+            .collect();
 
         assert_eq!(
             e.audio_clips(e.audio_timeline_track_key(at).unwrap())

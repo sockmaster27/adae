@@ -430,16 +430,17 @@ impl Timeline {
     }
     pub fn delete_audio_clips(
         &mut self,
-        clip_keys: &[AudioClipKey],
+        clip_keys: impl IntoIterator<Item = AudioClipKey>,
     ) -> Result<(), InvalidAudioClipsError> {
+        let clip_keys: Vec<AudioClipKey> = clip_keys.into_iter().collect();
+
         let some_invalid = clip_keys
             .iter()
             .any(|&key| !self.clip_key_generator.in_use(key));
         if some_invalid {
-            let invalid_keys = clip_keys
-                .iter()
-                .filter(|&&key| !self.clip_key_generator.in_use(key))
-                .copied()
+            let invalid_keys: Vec<AudioClipKey> = clip_keys
+                .into_iter()
+                .filter(|&key| !self.clip_key_generator.in_use(key))
                 .collect();
             return Err(InvalidAudioClipsError { keys: invalid_keys });
         }
@@ -495,9 +496,11 @@ impl Timeline {
     pub fn reconstruct_audio_clips(
         &mut self,
         track_key: TimelineTrackKey,
-        clip_states: Vec<AudioClipState>,
-    ) -> Result<Vec<AudioClipKey>, AudioClipReconstructionError> {
-        let keys = clip_states.iter().map(|c| c.key).collect();
+        clip_states: impl IntoIterator<Item = AudioClipState>,
+    ) -> Result<impl Iterator<Item = AudioClipKey>, AudioClipReconstructionError> {
+        let clip_states: Vec<AudioClipState> = clip_states.into_iter().collect();
+        let keys: Vec<AudioClipKey> = clip_states.iter().map(|c| c.key).collect();
+
         for &key in &keys {
             if self.clip_key_generator.in_use(key) {
                 return Err(AudioClipReconstructionError::KeyInUse(key));
@@ -507,7 +510,8 @@ impl Timeline {
         for &key in &keys {
             self.clip_key_generator.reserve(key).unwrap();
         }
-        Ok(keys)
+
+        Ok(keys.into_iter())
     }
 
     pub fn audio_clip_move(
@@ -849,8 +853,11 @@ impl Timeline {
         self.event_sender.send(Event::Track(event));
     }
 
-    pub fn reconstruct_tracks<'a>(&mut self, states: impl Iterator<Item = &'a TimelineTrackState>) {
-        let states: Vec<_> = states.collect();
+    pub fn reconstruct_tracks<'a>(
+        &mut self,
+        states: impl IntoIterator<Item = &'a TimelineTrackState>,
+    ) {
+        let states: Vec<&TimelineTrackState> = states.into_iter().collect();
 
         let keys = states.iter().map(|state| state.key);
 

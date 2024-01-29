@@ -82,7 +82,7 @@ impl Engine {
         let (engine, import_errors) = Engine::new(Config::default(), &EngineState::default())
             .expect("Failed to create empty engine");
         debug_assert!(
-            import_errors.is_empty(),
+            import_errors.count() == 0,
             "Empty engine should not have import errors"
         );
 
@@ -92,7 +92,7 @@ impl Engine {
     pub fn new(
         config: Config,
         state: &EngineState,
-    ) -> Result<(Self, Vec<ImportError>), InvalidConfigError> {
+    ) -> Result<(Self, impl Iterator<Item = ImportError>), InvalidConfigError> {
         let StartedStream {
             stopped_flag,
             join_handle,
@@ -115,7 +115,7 @@ impl Engine {
             )),
         };
 
-        Ok((engine, import_errors))
+        Ok((engine, import_errors.into_iter()))
     }
 
     /// Get the config that is currently in use.
@@ -154,7 +154,7 @@ impl Engine {
     pub fn dummy() -> Self {
         let (engine, import_errors) = Engine::dummy_from_state(&EngineState::default());
         debug_assert!(
-            import_errors.is_empty(),
+            import_errors.count() == 0,
             "Empty engine should not have import errors"
         );
 
@@ -162,7 +162,7 @@ impl Engine {
     }
 
     /// Like [`Engine::dummy()`], but uses the given state instead of the default state.
-    pub fn dummy_from_state(state: &EngineState) -> (Self, Vec<ImportError>) {
+    pub fn dummy_from_state(state: &EngineState) -> (Self, impl Iterator<Item = ImportError>) {
         let (stopped, join_handle, processor_interface, import_errors) =
             Self::start_dummy_stream(state);
 
@@ -181,7 +181,7 @@ impl Engine {
             )),
         };
 
-        (engine, import_errors)
+        (engine, import_errors.into_iter())
     }
 
     /// Creates an engine that simulates outputting without outputting to any audio device,
@@ -192,7 +192,7 @@ impl Engine {
         let (engine, processor, import_errors) =
             Engine::dummy_with_processor_from_state(&EngineState::default());
         debug_assert!(
-            import_errors.is_empty(),
+            import_errors.count() == 0,
             "Empty engine should not have import errors"
         );
 
@@ -202,7 +202,7 @@ impl Engine {
     /// Like [`Engine::dummy_with_processor()`], but uses the given state instead of the default state.
     pub fn dummy_with_processor_from_state(
         state: &EngineState,
-    ) -> (Self, Processor, Vec<ImportError>) {
+    ) -> (Self, Processor, impl Iterator<Item = ImportError>) {
         let (processor_interface, processor, import_errors) = processor(
             &state.processor,
             &cpal::StreamConfig {
@@ -228,7 +228,7 @@ impl Engine {
             )),
         };
 
-        (engine, processor, import_errors)
+        (engine, processor, import_errors.into_iter())
     }
 
     /// Starts a stream with the given config and state.
@@ -347,7 +347,7 @@ impl Engine {
         Arc<AtomicBool>,
         JoinHandle<()>,
         ProcessorInterface,
-        Vec<ImportError>,
+        impl Iterator<Item = ImportError>,
     ) {
         let (processor_interface, mut processor, import_errors) = processor(
             &state.processor,
@@ -378,7 +378,12 @@ impl Engine {
             }
         });
 
-        (stopped1, join_handle, processor_interface, import_errors)
+        (
+            stopped1,
+            join_handle,
+            processor_interface,
+            import_errors.into_iter(),
+        )
     }
 
     /// Stops the stream if it is running.
@@ -496,7 +501,7 @@ impl Engine {
     }
     pub fn delete_audio_clips(
         &mut self,
-        audio_clip_keys: &[AudioClipKey],
+        audio_clip_keys: impl IntoIterator<Item = AudioClipKey>,
     ) -> Result<(), InvalidAudioClipsError> {
         self.processor_interface
             .timeline
@@ -515,8 +520,8 @@ impl Engine {
     pub fn reconstruct_audio_clips(
         &mut self,
         timeline_track_key: TimelineTrackKey,
-        audio_clip_states: Vec<AudioClipState>,
-    ) -> Result<Vec<AudioClipKey>, AudioClipReconstructionError> {
+        audio_clip_states: impl IntoIterator<Item = AudioClipState>,
+    ) -> Result<impl Iterator<Item = AudioClipKey>, AudioClipReconstructionError> {
         self.processor_interface
             .timeline
             .reconstruct_audio_clips(timeline_track_key, audio_clip_states)
@@ -646,7 +651,7 @@ impl Engine {
     pub fn add_audio_tracks(
         &mut self,
         count: u32,
-    ) -> Result<Vec<AudioTrackKey>, AudioTrackOverflowError> {
+    ) -> Result<impl Iterator<Item = AudioTrackKey>, AudioTrackOverflowError> {
         if self.processor_interface.timeline.remaining_keys() < count {
             return Err(AudioTrackOverflowError::TimelineTracks(
                 TimelineTrackOverflowError,
@@ -667,7 +672,8 @@ impl Engine {
             .timeline
             .add_tracks(mixer_track_keys.clone())
             .unwrap();
-        let audio_track_keys = self.key_generator.next_n(count).unwrap();
+        let audio_track_keys: Vec<AudioTrackKey> =
+            self.key_generator.next_n(count).unwrap().collect();
 
         for (&audio_track_key, tuple) in zip(
             &audio_track_keys,
@@ -675,7 +681,8 @@ impl Engine {
         ) {
             self.audio_tracks.insert(audio_track_key, tuple);
         }
-        Ok(audio_track_keys)
+
+        Ok(audio_track_keys.into_iter())
     }
 
     pub fn delete_audio_track(
@@ -705,8 +712,10 @@ impl Engine {
     }
     pub fn delete_audio_tracks(
         &mut self,
-        audio_track_keys: &[AudioTrackKey],
+        audio_track_keys: impl IntoIterator<Item = AudioTrackKey>,
     ) -> Result<(), InvalidAudioTracksError> {
+        let audio_track_keys: Vec<AudioTrackKey> = audio_track_keys.into_iter().collect();
+
         let some_invalid = audio_track_keys
             .iter()
             .any(|&key| !self.key_generator.in_use(key));
@@ -737,7 +746,7 @@ impl Engine {
             .delete_tracks(mixer_track_keys)
             .unwrap();
 
-        for &key in audio_track_keys {
+        for &key in audio_track_keys.iter() {
             self.audio_tracks.remove(&key);
             self.key_generator.free(key).unwrap();
         }
@@ -808,9 +817,11 @@ impl Engine {
     }
     pub fn reconstruct_audio_tracks<'a>(
         &mut self,
-        states: &'a [AudioTrackState],
+        states: impl IntoIterator<Item = AudioTrackState>,
     ) -> Result<impl Iterator<Item = AudioTrackKey> + 'a, AudioTrackReconstructionError> {
-        for state in states {
+        let states_vec: Vec<AudioTrackState> = states.into_iter().collect();
+
+        for state in &states_vec {
             let audio_track_key = state.key;
             let timeline_track_key = state.timeline_track_state.key;
             let mixer_track_key = state.mixer_track_state.key;
@@ -834,12 +845,12 @@ impl Engine {
 
         self.processor_interface
             .timeline
-            .reconstruct_tracks(states.iter().map(|state| &state.timeline_track_state));
+            .reconstruct_tracks(states_vec.iter().map(|state| &state.timeline_track_state));
         self.processor_interface
             .mixer
-            .reconstruct_tracks(states.iter().map(|state| &state.mixer_track_state));
+            .reconstruct_tracks(states_vec.iter().map(|state| &state.mixer_track_state));
 
-        for state in states {
+        for state in &states_vec {
             let audio_track_key = state.key;
             let timeline_track_key = state.timeline_track_state.key;
             let mixer_track_key = state.mixer_track_state.key;
@@ -849,7 +860,7 @@ impl Engine {
             self.key_generator.reserve(audio_track_key).unwrap();
         }
 
-        let audio_track_keys = states.iter().map(|state| state.key);
+        let audio_track_keys = states_vec.into_iter().map(|state| state.key);
         Ok(audio_track_keys)
     }
 
