@@ -66,6 +66,7 @@ struct StartedStream {
     import_errors: Vec<ImportError>,
 }
 
+/// The Adae audio engine.
 pub struct Engine {
     /// Signal whether the stream should stop.
     stopped: Arc<AtomicBool>,
@@ -78,6 +79,7 @@ pub struct Engine {
     audio_tracks: HashMap<AudioTrackKey, (TimelineTrackKey, MixerTrackKey)>,
 }
 impl Engine {
+    /// Create a clean, empty instance of the engine with the default config.
     pub fn empty() -> Self {
         let (engine, import_errors) = Engine::new(Config::default(), &EngineState::default())
             .expect("Failed to create empty engine");
@@ -89,6 +91,7 @@ impl Engine {
         engine
     }
 
+    /// Create a new instance of the engine from the given state with the given config.
     pub fn new(
         config: Config,
         state: &EngineState,
@@ -118,122 +121,9 @@ impl Engine {
         Ok((engine, import_errors.into_iter()))
     }
 
-    /// Get the config that is currently in use.
-    pub fn config(&self) -> &Config {
-        &self.config
-    }
-    /// Restart the engine with the given config.
-    pub fn set_config(&mut self, config: Config) -> Result<(), InvalidConfigError> {
-        let state = self.state();
-
-        self.stop_stream();
-
-        let StartedStream {
-            stopped_flag,
-            join_handle,
-            processor_interface,
-            import_errors,
-        } = Self::start_stream(&config, &state)?;
-
-        debug_assert!(import_errors.is_empty());
-
-        self.stopped = stopped_flag;
-        self.join_handle = Some(join_handle);
-        self.processor_interface = processor_interface;
-
-        self.config = config;
-
-        Ok(())
-    }
-
-    /// Creates an engine that simulates outputting without outputting to any audio device.
-    ///
-    /// Spins poll and output callback as fast as possible with a varying buffersize.  
-    ///
-    /// Useful for integration testing.
-    pub fn dummy() -> Self {
-        let (engine, import_errors) = Engine::dummy_from_state(&EngineState::default());
-        debug_assert!(
-            import_errors.count() == 0,
-            "Empty engine should not have import errors"
-        );
-
-        engine
-    }
-
-    /// Like [`Engine::dummy()`], but uses the given state instead of the default state.
-    pub fn dummy_from_state(state: &EngineState) -> (Self, impl Iterator<Item = ImportError>) {
-        let (stopped, join_handle, processor_interface, import_errors) =
-            Self::start_dummy_stream(state);
-
-        let engine = Engine {
-            stopped,
-            join_handle: Some(join_handle),
-            config: Config::dummy(),
-            processor_interface,
-            key_generator: KeyGenerator::from_iter(
-                state.audio_tracks.iter().map(|(key, _, _)| *key),
-            ),
-            audio_tracks: HashMap::from_iter(state.audio_tracks.iter().map(
-                |(key, timeline_track_key, mixer_track_key)| {
-                    (*key, (*timeline_track_key, *mixer_track_key))
-                },
-            )),
-        };
-
-        (engine, import_errors.into_iter())
-    }
-
-    /// Creates an engine that simulates outputting without outputting to any audio device,
-    /// while returning the processor to be poll and output manually.
-    ///
-    /// Useful for benchmarking.
-    pub fn dummy_with_processor() -> (Self, Processor) {
-        let (engine, processor, import_errors) =
-            Engine::dummy_with_processor_from_state(&EngineState::default());
-        debug_assert!(
-            import_errors.count() == 0,
-            "Empty engine should not have import errors"
-        );
-
-        (engine, processor)
-    }
-
-    /// Like [`Engine::dummy_with_processor()`], but uses the given state instead of the default state.
-    pub fn dummy_with_processor_from_state(
-        state: &EngineState,
-    ) -> (Self, Processor, impl Iterator<Item = ImportError>) {
-        let (processor_interface, processor, import_errors) = processor(
-            &state.processor,
-            &cpal::StreamConfig {
-                channels: 2,
-                sample_rate: cpal::SampleRate(48_000),
-                buffer_size: cpal::BufferSize::Default,
-            },
-            1024,
-        );
-
-        let engine = Engine {
-            stopped: Arc::new(AtomicBool::new(false)),
-            join_handle: None,
-            config: Config::dummy(),
-            processor_interface,
-            key_generator: KeyGenerator::from_iter(
-                state.audio_tracks.iter().map(|(key, _, _)| *key),
-            ),
-            audio_tracks: HashMap::from_iter(state.audio_tracks.iter().map(
-                |(key, timeline_track_key, mixer_track_key)| {
-                    (*key, (*timeline_track_key, *mixer_track_key))
-                },
-            )),
-        };
-
-        (engine, processor, import_errors.into_iter())
-    }
-
     /// Starts a stream with the given config and state.
     ///
-    /// Returns a the stop flag, the join handle, the processor interface and a list of import errors.
+    /// Returns a the stop flag, the join handle, the processor interface and a (possibly empty) list of import errors.
     fn start_stream(
         config: &Config,
         state: &EngineState,
@@ -265,20 +155,20 @@ impl Engine {
         use SampleFormatIntUnsigned::*;
         let create_stream = match output_config.sample_format.clone() {
             Int(s) => match s {
-                I8 => Self::create_stream::<i8>,
-                I16 => Self::create_stream::<i16>,
-                I32 => Self::create_stream::<i32>,
-                I64 => Self::create_stream::<i64>,
+                I8 => Self::create_stream_of_type::<i8>,
+                I16 => Self::create_stream_of_type::<i16>,
+                I32 => Self::create_stream_of_type::<i32>,
+                I64 => Self::create_stream_of_type::<i64>,
             },
             IntUnsigned(s) => match s {
-                U8 => Self::create_stream::<u8>,
-                U16 => Self::create_stream::<u16>,
-                U32 => Self::create_stream::<u32>,
-                U64 => Self::create_stream::<u64>,
+                U8 => Self::create_stream_of_type::<u8>,
+                U16 => Self::create_stream_of_type::<u16>,
+                U32 => Self::create_stream_of_type::<u32>,
+                U64 => Self::create_stream_of_type::<u64>,
             },
             Float(s) => match s {
-                F32 => Self::create_stream::<f32>,
-                F64 => Self::create_stream::<f64>,
+                F32 => Self::create_stream_of_type::<f32>,
+                F64 => Self::create_stream_of_type::<f64>,
             },
         };
 
@@ -340,6 +230,124 @@ impl Engine {
         }
     }
 
+    /// Create a cpal stream with the given sample type.
+    fn create_stream_of_type<T: 'static + cpal::SizedSample + cpal::FromSample<Sample>>(
+        device: &cpal::Device,
+        config: &cpal::StreamConfig,
+        mut processor: Processor,
+    ) -> Result<cpal::Stream, InvalidConfigError> {
+        device
+            .build_output_stream(
+                config,
+                move |data: &mut [T], _info| {
+                    no_heap! {{
+                        processor.poll();
+                        processor.output(data);
+                    }}
+                },
+                |err| panic!("{err}"),
+                None,
+            )
+            .map_err(|e| match e {
+                cpal::BuildStreamError::DeviceNotAvailable => {
+                    InvalidConfigError::DeviceNotAvailable
+                }
+                cpal::BuildStreamError::StreamConfigNotSupported => InvalidConfigError::Other,
+                cpal::BuildStreamError::InvalidArgument => InvalidConfigError::Other,
+
+                e => panic!("Stream could not be created: {e}"),
+            })
+    }
+
+    /// Creates an engine that simulates outputting without outputting to any audio device.
+    ///
+    /// Spins poll and output callback as fast as possible with a varying buffersize.  
+    ///
+    /// Useful for integration testing.
+    #[doc(hidden)]
+    pub fn dummy() -> Self {
+        let (engine, import_errors) = Engine::dummy_from_state(&EngineState::default());
+        debug_assert!(
+            import_errors.count() == 0,
+            "Empty engine should not have import errors"
+        );
+
+        engine
+    }
+
+    /// Like [`Engine::dummy()`], but uses the given state instead of the default state.
+    #[doc(hidden)]
+    pub fn dummy_from_state(state: &EngineState) -> (Self, impl Iterator<Item = ImportError>) {
+        let (stopped, join_handle, processor_interface, import_errors) =
+            Self::start_dummy_stream(state);
+
+        let engine = Engine {
+            stopped,
+            join_handle: Some(join_handle),
+            config: Config::dummy(),
+            processor_interface,
+            key_generator: KeyGenerator::from_iter(
+                state.audio_tracks.iter().map(|(key, _, _)| *key),
+            ),
+            audio_tracks: HashMap::from_iter(state.audio_tracks.iter().map(
+                |(key, timeline_track_key, mixer_track_key)| {
+                    (*key, (*timeline_track_key, *mixer_track_key))
+                },
+            )),
+        };
+
+        (engine, import_errors.into_iter())
+    }
+
+    /// Creates an engine that simulates outputting without outputting to any audio device,
+    /// while returning the processor to be poll and output manually.
+    ///
+    /// Useful for benchmarking.
+    #[doc(hidden)]
+    pub fn dummy_with_processor() -> (Self, Processor) {
+        let (engine, processor, import_errors) =
+            Engine::dummy_with_processor_from_state(&EngineState::default());
+        debug_assert!(
+            import_errors.count() == 0,
+            "Empty engine should not have import errors"
+        );
+
+        (engine, processor)
+    }
+
+    /// Like [`Engine::dummy_with_processor()`], but uses the given state instead of the default state.
+    #[doc(hidden)]
+    pub fn dummy_with_processor_from_state(
+        state: &EngineState,
+    ) -> (Self, Processor, impl Iterator<Item = ImportError>) {
+        let (processor_interface, processor, import_errors) = processor(
+            &state.processor,
+            &cpal::StreamConfig {
+                channels: 2,
+                sample_rate: cpal::SampleRate(48_000),
+                buffer_size: cpal::BufferSize::Default,
+            },
+            1024,
+        );
+
+        let engine = Engine {
+            stopped: Arc::new(AtomicBool::new(false)),
+            join_handle: None,
+            config: Config::dummy(),
+            processor_interface,
+            key_generator: KeyGenerator::from_iter(
+                state.audio_tracks.iter().map(|(key, _, _)| *key),
+            ),
+            audio_tracks: HashMap::from_iter(state.audio_tracks.iter().map(
+                |(key, timeline_track_key, mixer_track_key)| {
+                    (*key, (*timeline_track_key, *mixer_track_key))
+                },
+            )),
+        };
+
+        (engine, processor, import_errors.into_iter())
+    }
+
     /// Starts a stream that simulates outputting without outputting to any audio device.
     fn start_dummy_stream(
         state: &EngineState,
@@ -399,203 +407,77 @@ impl Engine {
         }
     }
 
-    /// Create a cpal stream with the given sample type.
-    fn create_stream<T: 'static + cpal::SizedSample + cpal::FromSample<Sample>>(
-        device: &cpal::Device,
-        config: &cpal::StreamConfig,
-        mut processor: Processor,
-    ) -> Result<cpal::Stream, InvalidConfigError> {
-        device
-            .build_output_stream(
-                config,
-                move |data: &mut [T], _info| {
-                    no_heap! {{
-                        processor.poll();
-                        processor.output(data);
-                    }}
-                },
-                |err| panic!("{err}"),
-                None,
-            )
-            .map_err(|e| match e {
-                cpal::BuildStreamError::DeviceNotAvailable => {
-                    InvalidConfigError::DeviceNotAvailable
-                }
-                cpal::BuildStreamError::StreamConfigNotSupported => InvalidConfigError::Other,
-                cpal::BuildStreamError::InvalidArgument => InvalidConfigError::Other,
+    /// Get the config that is currently in use.
+    pub fn config(&self) -> &Config {
+        &self.config
+    }
+    /// Restart the engine with the given config.
+    pub fn set_config(&mut self, config: Config) -> Result<(), InvalidConfigError> {
+        let state = self.state();
 
-                e => panic!("Stream could not be created: {e}"),
-            })
+        self.stop_stream();
+
+        let StartedStream {
+            stopped_flag,
+            join_handle,
+            processor_interface,
+            import_errors,
+        } = Self::start_stream(&config, &state)?;
+
+        debug_assert!(import_errors.is_empty());
+
+        self.stopped = stopped_flag;
+        self.join_handle = Some(join_handle);
+        self.processor_interface = processor_interface;
+
+        self.config = config;
+
+        Ok(())
     }
 
+    /// Get the current BPM multiplied by 100.
+    ///
+    /// For example, a return value of 12000 means 120 BPM.
     pub fn bpm_cents(&self) -> u16 {
         self.processor_interface.timeline.bpm_cents()
     }
 
+    /// Play timeline from the current playhead position.
     pub fn play(&mut self) {
         self.processor_interface.timeline.play()
     }
+    /// Pause playback of the timeline, without resetting the playhead position.
     pub fn pause(&mut self) {
         self.processor_interface.timeline.pause()
     }
+    /// Set the current playhead position.
+    ///
+    /// This can be done both while the timeline is playing and while it is paused.
     pub fn jump_to(&mut self, position: Timestamp) {
         self.processor_interface.timeline.jump_to(position)
     }
+    /// Get the current playhead position.
+    ///
+    /// This reports the position as it currently is on the audio thread, which might have a slight delay in reacting to [`Engine::jump_to()`].
     pub fn playhead_position(&mut self) -> Timestamp {
         self.processor_interface.timeline.playhead_position()
     }
 
-    pub fn import_audio_clip(&mut self, path: &Path) -> Result<StoredAudioClipKey, ImportError> {
-        self.processor_interface.timeline.import_audio_clip(path)
-    }
-
-    pub fn stored_audio_clip(
-        &self,
-        key: StoredAudioClipKey,
-    ) -> Result<Arc<StoredAudioClip>, InvalidStoredAudioClipError> {
-        self.processor_interface.timeline.stored_audio_clip(key)
-    }
-
-    pub fn stored_audio_clips(&self) -> impl Iterator<Item = Arc<StoredAudioClip>> + '_ {
-        self.processor_interface.timeline.stored_audio_clips()
-    }
-
-    pub fn add_audio_clip(
-        &mut self,
-        timeline_track_key: TimelineTrackKey,
-        clip_key: StoredAudioClipKey,
-        start: Timestamp,
-        length: Option<Timestamp>,
-    ) -> Result<AudioClipKey, AddClipError> {
-        self.processor_interface.timeline.add_audio_clip(
-            timeline_track_key,
-            clip_key,
-            start,
-            length,
-        )
-    }
-
-    pub fn audio_clip(
-        &self,
-        audio_clip_key: AudioClipKey,
-    ) -> Result<&AudioClip, InvalidAudioClipError> {
-        self.processor_interface.timeline.audio_clip(audio_clip_key)
-    }
-
-    pub fn audio_clips(
-        &self,
-        timeline_track_key: TimelineTrackKey,
-    ) -> Result<impl Iterator<Item = &AudioClip>, InvalidTimelineTrackError> {
-        self.processor_interface
-            .timeline
-            .audio_clips(timeline_track_key)
-    }
-
-    pub fn delete_audio_clip(
-        &mut self,
-        audio_clip_key: AudioClipKey,
-    ) -> Result<(), InvalidAudioClipError> {
-        self.processor_interface
-            .timeline
-            .delete_audio_clip(audio_clip_key)
-    }
-    pub fn delete_audio_clips(
-        &mut self,
-        audio_clip_keys: impl IntoIterator<Item = AudioClipKey>,
-    ) -> Result<(), InvalidAudioClipsError> {
-        self.processor_interface
-            .timeline
-            .delete_audio_clips(audio_clip_keys)
-    }
-
-    pub fn reconstruct_audio_clip(
-        &mut self,
-        timneline_track_key: TimelineTrackKey,
-        audio_clip_state: AudioClipState,
-    ) -> Result<AudioClipKey, AudioClipReconstructionError> {
-        self.processor_interface
-            .timeline
-            .reconstruct_audio_clip(timneline_track_key, audio_clip_state)
-    }
-    pub fn reconstruct_audio_clips(
-        &mut self,
-        timeline_track_key: TimelineTrackKey,
-        audio_clip_states: impl IntoIterator<Item = AudioClipState>,
-    ) -> Result<impl Iterator<Item = AudioClipKey>, AudioClipReconstructionError> {
-        self.processor_interface
-            .timeline
-            .reconstruct_audio_clips(timeline_track_key, audio_clip_states)
-    }
-
-    /// Set the start position of the clip.
-    pub fn audio_clip_move(
-        &mut self,
-        audio_clip_key: AudioClipKey,
-        new_start: Timestamp,
-    ) -> Result<(), MoveAudioClipError> {
-        self.processor_interface
-            .timeline
-            .audio_clip_move(audio_clip_key, new_start)
-    }
-
-    /// Set the length of the clip, keeping the end position fixed.
-    ///
-    /// If this would result in the clip being extended past the beginning of the stored clip, or the beginning of the timeline, it will be capped to this length.
-    /// The resulting start and length can queried from [AudioClip::start] and [AudioClip::current_length] after this.
-    pub fn audio_clip_crop_start(
-        &mut self,
-        audio_clip_key: AudioClipKey,
-        new_length: Timestamp,
-    ) -> Result<(), MoveAudioClipError> {
-        self.processor_interface
-            .timeline
-            .audio_clip_crop_start(audio_clip_key, new_length)
-    }
-
-    /// Set the length of the clip, keeping the start position fixed.
-    ///
-    /// If this results in the clip being extended past the end of the stored clip, the clip will be extended with silence.
-    pub fn audio_clip_crop_end(
-        &mut self,
-        audio_clip_key: AudioClipKey,
-        new_length: Timestamp,
-    ) -> Result<(), MoveAudioClipError> {
-        self.processor_interface
-            .timeline
-            .audio_clip_crop_end(audio_clip_key, new_length)
-    }
-
-    pub fn audio_clip_move_to_track(
-        &mut self,
-        audio_clip_key: AudioClipKey,
-        new_timeline_track_key: TimelineTrackKey,
-    ) -> Result<(), MoveAudioClipToTrackError> {
-        self.processor_interface
-            .timeline
-            .audio_clip_move_to_track(audio_clip_key, new_timeline_track_key)
-    }
-
+    /// Immutably borrow the master track, which is always present on the mixer.
     pub fn master(&self) -> &MixerTrack {
         self.processor_interface.mixer.master()
     }
+    /// Mutably borrow the master track, which is always present on the mixer.
     pub fn master_mut(&mut self) -> &mut MixerTrack {
         self.processor_interface.mixer.master_mut()
     }
 
-    pub fn mixer_track(&self, key: MixerTrackKey) -> Result<&MixerTrack, InvalidMixerTrackError> {
-        self.processor_interface.mixer.track(key)
-    }
-    pub fn mixer_track_mut(
-        &mut self,
-        key: MixerTrackKey,
-    ) -> Result<&mut MixerTrack, InvalidMixerTrackError> {
-        self.processor_interface.mixer.track_mut(key)
-    }
-
+    /// Get the keys of all audio tracks currently in the engine.
     pub fn audio_tracks(&self) -> impl Iterator<Item = AudioTrackKey> + '_ {
         self.audio_tracks.keys().copied()
     }
 
+    /// Get the key of the timeline track that corresponds to the given audio track.
     pub fn audio_timeline_track_key(
         &self,
         audio_track_key: AudioTrackKey,
@@ -608,6 +490,8 @@ impl Engine {
                 })?;
         Ok(timeline_track_key)
     }
+
+    /// Get the key of the mixer track that corresponds to the given audio track.
     pub fn audio_mixer_track_key(
         &self,
         audio_track_key: AudioTrackKey,
@@ -621,6 +505,7 @@ impl Engine {
         Ok(mixer_track_key)
     }
 
+    /// Create new audio track, and add it to the engine.
     pub fn add_audio_track(&mut self) -> Result<AudioTrackKey, AudioTrackOverflowError> {
         if self.processor_interface.timeline.remaining_keys() == 0 {
             return Err(AudioTrackOverflowError::TimelineTracks(
@@ -648,6 +533,8 @@ impl Engine {
             .insert(audio_track_key, (timeline_track_key, mixer_track_key));
         Ok(audio_track_key)
     }
+
+    /// Create new set of tracks, and add them to the engine.
     pub fn add_audio_tracks(
         &mut self,
         count: u32,
@@ -685,6 +572,7 @@ impl Engine {
         Ok(audio_track_keys.into_iter())
     }
 
+    /// Delete audio track, and remove it from the engine.
     pub fn delete_audio_track(
         &mut self,
         audio_track_key: AudioTrackKey,
@@ -710,6 +598,8 @@ impl Engine {
 
         Ok(())
     }
+
+    /// Delete a set of audio tracks, and remove them from the engine.
     pub fn delete_audio_tracks(
         &mut self,
         audio_track_keys: impl IntoIterator<Item = AudioTrackKey>,
@@ -753,6 +643,10 @@ impl Engine {
         Ok(())
     }
 
+    /// Get the state of the audio track with the given key.
+    ///
+    /// This can be used to reconstruct the audio track after it has been deleted,
+    /// using [`Engine::reconstruct_audio_track()`]/[`Engine::reconstruct_audio_tracks()`].
     pub fn audio_track_state(
         &self,
         audio_track_key: AudioTrackKey,
@@ -778,6 +672,17 @@ impl Engine {
         })
     }
 
+    /// Reconstruct an audio track that has been deleted.
+    ///
+    /// A state can be obtained using [`Engine::audio_track_state()`].
+    ///
+    /// # Errors
+    /// - [`AudioTrackReconstructionError::AudioTracks`] when the key of the audio track is already in use.
+    /// - [`AudioTrackReconstructionError::TimelineTracks`] when the key of the timeline track is already in use.
+    /// - [`AudioTrackReconstructionError::MixerTracks`] when the key of the mixer track is already in use.
+    ///
+    /// When a key is already in use, it means that the track either hasn't been deleted,
+    /// or that the key has been repurposed for a new track.
     pub fn reconstruct_audio_track(
         &mut self,
         state: AudioTrackState,
@@ -815,6 +720,18 @@ impl Engine {
 
         Ok(audio_track_key)
     }
+
+    /// Reconstruct a set of audio tracks that have been deleted.
+    ///
+    /// A state can be obtained using [`Engine::audio_track_state()`].
+    ///
+    /// # Errors
+    /// - [`AudioTrackReconstructionError::AudioTracks`] when the key of the audio track is already in use.
+    /// - [`AudioTrackReconstructionError::TimelineTracks`] when the key of the timeline track is already in use.
+    /// - [`AudioTrackReconstructionError::MixerTracks`] when the key of the mixer track is already in use.
+    ///
+    /// When a key is already in use, it means that the track either hasn't been deleted,
+    /// or that the key has been repurposed for a new track.
     pub fn reconstruct_audio_tracks<'a>(
         &mut self,
         states: impl IntoIterator<Item = AudioTrackState>,
@@ -864,6 +781,186 @@ impl Engine {
         Ok(audio_track_keys)
     }
 
+    /// Import audio clip from file.
+    pub fn import_audio_clip(&mut self, path: &Path) -> Result<StoredAudioClipKey, ImportError> {
+        self.processor_interface.timeline.import_audio_clip(path)
+    }
+
+    /// Get an imported audio clip.
+    pub fn stored_audio_clip(
+        &self,
+        key: StoredAudioClipKey,
+    ) -> Result<Arc<StoredAudioClip>, InvalidStoredAudioClipError> {
+        self.processor_interface.timeline.stored_audio_clip(key)
+    }
+
+    /// Get all currently imported audio clips.
+    pub fn stored_audio_clips(&self) -> impl Iterator<Item = Arc<StoredAudioClip>> + '_ {
+        self.processor_interface.timeline.stored_audio_clips()
+    }
+
+    /// Add an audio clip to the given track's timeline.
+    ///
+    /// # Errors
+    /// - [`AddClipError::InvalidTimelineTrack`] when the timeline track key is invalid.
+    /// - [`AddClipError::InvalidClip`] when the stored audio clip key is invalid.
+    /// - [`AddClipError::Overlapping`] when the clip would overlap with another clip on the same track.
+    pub fn add_audio_clip(
+        &mut self,
+        timeline_track_key: TimelineTrackKey,
+        clip_key: StoredAudioClipKey,
+        start: Timestamp,
+        length: Option<Timestamp>,
+    ) -> Result<AudioClipKey, AddClipError> {
+        self.processor_interface.timeline.add_audio_clip(
+            timeline_track_key,
+            clip_key,
+            start,
+            length,
+        )
+    }
+
+    /// Get the audio clip with the given key.
+    pub fn audio_clip(
+        &self,
+        audio_clip_key: AudioClipKey,
+    ) -> Result<&AudioClip, InvalidAudioClipError> {
+        self.processor_interface.timeline.audio_clip(audio_clip_key)
+    }
+
+    /// Get all audio clips on the given track.
+    pub fn audio_clips(
+        &self,
+        timeline_track_key: TimelineTrackKey,
+    ) -> Result<impl Iterator<Item = &AudioClip>, InvalidTimelineTrackError> {
+        self.processor_interface
+            .timeline
+            .audio_clips(timeline_track_key)
+    }
+
+    /// Delete the audio clip with the given key.
+    pub fn delete_audio_clip(
+        &mut self,
+        audio_clip_key: AudioClipKey,
+    ) -> Result<(), InvalidAudioClipError> {
+        self.processor_interface
+            .timeline
+            .delete_audio_clip(audio_clip_key)
+    }
+
+    /// Delete the audio clips with the given keys.
+    pub fn delete_audio_clips(
+        &mut self,
+        audio_clip_keys: impl IntoIterator<Item = AudioClipKey>,
+    ) -> Result<(), InvalidAudioClipsError> {
+        self.processor_interface
+            .timeline
+            .delete_audio_clips(audio_clip_keys)
+    }
+
+    /// Reconstruct an audio clip that has been deleted.
+    /// A state can be obtained using [`AudioClip::state()`].
+    ///
+    /// # Errors
+    /// - [`AudioClipReconstructionError::InvalidTrack`] when the timeline track this clip was on no longer exists.
+    /// - [`AudioClipReconstructionError::InvalidStoredClip`] when the stored audio clip this clip was based on no longer exists.
+    /// - [`AudioClipReconstructionError::KeyInUse`] when the audio clip's key is already in use,
+    ///     either because it was never deleted or because it has been repurposed for another clip.
+    /// - [`AudioClipReconstructionError::Overlapping`] when the clip would overlap with another clip on the same track.
+    pub fn reconstruct_audio_clip(
+        &mut self,
+        timneline_track_key: TimelineTrackKey,
+        audio_clip_state: AudioClipState,
+    ) -> Result<AudioClipKey, AudioClipReconstructionError> {
+        self.processor_interface
+            .timeline
+            .reconstruct_audio_clip(timneline_track_key, audio_clip_state)
+    }
+
+    /// Reconstruct a set of audio clips that have been deleted.
+    /// A state can be obtained using [`AudioClip::state()`].
+    ///
+    /// # Errors
+    /// - [`AudioClipReconstructionError::InvalidTrack`] when the timeline track this clip was on no longer exists.
+    /// - [`AudioClipReconstructionError::InvalidStoredClip`] when the stored audio clip this clip was based on no longer exists.
+    /// - [`AudioClipReconstructionError::KeyInUse`] when the audio clip's key is already in use,
+    ///     either because it was never deleted or because it has been repurposed for another clip.
+    /// - [`AudioClipReconstructionError::Overlapping`] when the clip would overlap with another clip on the same track.
+    pub fn reconstruct_audio_clips(
+        &mut self,
+        timeline_track_key: TimelineTrackKey,
+        audio_clip_states: impl IntoIterator<Item = AudioClipState>,
+    ) -> Result<impl Iterator<Item = AudioClipKey>, AudioClipReconstructionError> {
+        self.processor_interface
+            .timeline
+            .reconstruct_audio_clips(timeline_track_key, audio_clip_states)
+    }
+
+    /// Set the start position of the clip.
+    pub fn audio_clip_move(
+        &mut self,
+        audio_clip_key: AudioClipKey,
+        new_start: Timestamp,
+    ) -> Result<(), MoveAudioClipError> {
+        self.processor_interface
+            .timeline
+            .audio_clip_move(audio_clip_key, new_start)
+    }
+
+    /// Set the length of the clip, keeping the end position fixed.
+    ///
+    /// If this would result in the clip being extended past the beginning of the stored clip, or the beginning of the timeline, it will be capped to this length.
+    /// The resulting start and length can queried from [`AudioClip::start()`] and [`AudioClip::length()`] after this.
+    pub fn audio_clip_crop_start(
+        &mut self,
+        audio_clip_key: AudioClipKey,
+        new_length: Timestamp,
+    ) -> Result<(), MoveAudioClipError> {
+        self.processor_interface
+            .timeline
+            .audio_clip_crop_start(audio_clip_key, new_length)
+    }
+
+    /// Set the length of the clip, keeping the start position fixed.
+    ///
+    /// If this results in the clip being extended past the end of the stored clip, the clip will be extended with silence.
+    pub fn audio_clip_crop_end(
+        &mut self,
+        audio_clip_key: AudioClipKey,
+        new_length: Timestamp,
+    ) -> Result<(), MoveAudioClipError> {
+        self.processor_interface
+            .timeline
+            .audio_clip_crop_end(audio_clip_key, new_length)
+    }
+
+    /// Move clip to another track.
+    pub fn audio_clip_move_to_track(
+        &mut self,
+        audio_clip_key: AudioClipKey,
+        new_timeline_track_key: TimelineTrackKey,
+    ) -> Result<(), MoveAudioClipToTrackError> {
+        self.processor_interface
+            .timeline
+            .audio_clip_move_to_track(audio_clip_key, new_timeline_track_key)
+    }
+
+    /// Get an immutable reference to the mixer track with the given key.
+    pub fn mixer_track(&self, key: MixerTrackKey) -> Result<&MixerTrack, InvalidMixerTrackError> {
+        self.processor_interface.mixer.track(key)
+    }
+
+    /// Get a mutable reference to the mixer track with the given key.
+    pub fn mixer_track_mut(
+        &mut self,
+        key: MixerTrackKey,
+    ) -> Result<&mut MixerTrack, InvalidMixerTrackError> {
+        self.processor_interface.mixer.track_mut(key)
+    }
+
+    /// Get the current state of the engine.
+    ///
+    /// This can be used to recreate this exact state at a later time using [`Engine::new()`].
     pub fn state(&self) -> EngineState {
         EngineState {
             processor: self.processor_interface.state(),
@@ -881,6 +978,7 @@ impl Engine {
     }
 }
 impl Drop for Engine {
+    /// Closes down the engine gracefully.
     fn drop(&mut self) {
         self.stop_stream();
     }
