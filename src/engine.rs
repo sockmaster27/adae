@@ -907,6 +907,20 @@ impl Engine {
             .audio_clip_move(audio_clip_key, new_start)
     }
 
+    /// Move clip to the given position on another track.
+    pub fn audio_clip_move_to_track(
+        &mut self,
+        audio_clip_key: AudioClipKey,
+        new_start: Timestamp,
+        new_timeline_track_key: TimelineTrackKey,
+    ) -> Result<(), MoveAudioClipToTrackError> {
+        self.processor_interface.timeline.audio_clip_move_to_track(
+            audio_clip_key,
+            new_start,
+            new_timeline_track_key,
+        )
+    }
+
     /// Set the length of the clip, keeping the end position fixed.
     ///
     /// If this would result in the clip being extended past the beginning of the stored clip, or the beginning of the timeline, it will be capped to this length.
@@ -932,17 +946,6 @@ impl Engine {
         self.processor_interface
             .timeline
             .audio_clip_crop_end(audio_clip_key, new_length)
-    }
-
-    /// Move clip to another track.
-    pub fn audio_clip_move_to_track(
-        &mut self,
-        audio_clip_key: AudioClipKey,
-        new_timeline_track_key: TimelineTrackKey,
-    ) -> Result<(), MoveAudioClipToTrackError> {
-        self.processor_interface
-            .timeline
-            .audio_clip_move_to_track(audio_clip_key, new_timeline_track_key)
     }
 
     /// Get an immutable reference to the mixer track with the given key.

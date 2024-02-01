@@ -729,7 +729,11 @@ mod audio_clips {
             )
             .unwrap();
 
-        let r = e.audio_clip_move_to_track(ac, e.audio_timeline_track_key(at2).unwrap());
+        let r = e.audio_clip_move_to_track(
+            ac,
+            Timestamp::from_beats(42),
+            e.audio_timeline_track_key(at2).unwrap(),
+        );
 
         assert!(r.is_ok());
         assert_eq!(
@@ -744,6 +748,7 @@ mod audio_clips {
                 .count(),
             1
         );
+        assert_eq!(e.audio_clip(ac).unwrap().start(), Timestamp::from_beats(42));
     }
 
     #[test]
@@ -764,12 +769,16 @@ mod audio_clips {
         e.add_audio_clip(
             e.audio_timeline_track_key(at2).unwrap(),
             ck,
-            Timestamp::from_beats(0),
+            Timestamp::from_beats(2),
             Some(Timestamp::from_beats(1)),
         )
         .unwrap();
 
-        let r = e.audio_clip_move_to_track(ac, e.audio_timeline_track_key(at2).unwrap());
+        let r = e.audio_clip_move_to_track(
+            ac,
+            Timestamp::from_beats(2),
+            e.audio_timeline_track_key(at2).unwrap(),
+        );
 
         assert_eq!(r, Err(MoveAudioClipToTrackError::Overlapping));
         assert_eq!(
@@ -784,5 +793,6 @@ mod audio_clips {
                 .count(),
             1
         );
+        assert_eq!(e.audio_clip(ac).unwrap().start(), Timestamp::from_beats(0));
     }
 }

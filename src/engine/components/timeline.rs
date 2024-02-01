@@ -554,6 +554,54 @@ impl Timeline {
         Ok(())
     }
 
+    pub fn audio_clip_move_to_track(
+        &mut self,
+        clip_key: AudioClipKey,
+        new_start: Timestamp,
+        new_track_key: TimelineTrackKey,
+    ) -> Result<(), MoveAudioClipToTrackError> {
+        if !self.clip_key_generator.in_use(clip_key) {
+            return Err(MoveAudioClipToTrackError::InvalidClip(
+                InvalidAudioClipError { clip_key },
+            ));
+        }
+
+        let old_track_key = *self.clip_to_track.get(&clip_key).unwrap();
+        let old_track = self.tracks.get_mut(&old_track_key).unwrap();
+        let clip = old_track.clips.get(&clip_key).unwrap();
+
+        let new_end = new_start + clip.length(self.bpm_cents);
+
+        let new_track =
+            self.tracks
+                .get(&new_track_key)
+                .ok_or(MoveAudioClipToTrackError::InvalidNewTrack {
+                    track_key: new_track_key,
+                })?;
+
+        // Check for overlaps
+        for other_clip in new_track.clips.values() {
+            let same = other_clip.key == clip_key;
+            let overlapping =
+                new_start < other_clip.end(self.bpm_cents) && other_clip.start < new_end;
+            if !same && overlapping {
+                return Err(MoveAudioClipToTrackError::Overlapping);
+            }
+        }
+
+        let old_track_mut = self.tracks.get_mut(&old_track_key).unwrap();
+        let mut clip_mut = old_track_mut.clips.remove(&clip_key).unwrap();
+
+        clip_mut.start = new_start;
+
+        let new_track_mut = self.tracks.get_mut(&new_track_key).unwrap();
+        new_track_mut.clips.insert(clip_key, clip_mut);
+
+        self.clip_to_track.insert(clip_key, new_track_key);
+
+        Ok(())
+    }
+
     pub fn audio_clip_crop_start(
         &mut self,
         clip_key: AudioClipKey,
@@ -654,49 +702,6 @@ impl Timeline {
             clip_start,
             new_length,
         });
-
-        Ok(())
-    }
-
-    pub fn audio_clip_move_to_track(
-        &mut self,
-        clip_key: AudioClipKey,
-        new_track_key: TimelineTrackKey,
-    ) -> Result<(), MoveAudioClipToTrackError> {
-        if !self.clip_key_generator.in_use(clip_key) {
-            return Err(MoveAudioClipToTrackError::InvalidClip(
-                InvalidAudioClipError { clip_key },
-            ));
-        }
-
-        let old_track_key = *self.clip_to_track.get(&clip_key).unwrap();
-        let old_track = self.tracks.get_mut(&old_track_key).unwrap();
-        let clip = old_track.clips.get(&clip_key).unwrap();
-
-        let clip_start = clip.start;
-        let clip_end = clip.end(self.bpm_cents);
-
-        let new_track =
-            self.tracks
-                .get(&new_track_key)
-                .ok_or(MoveAudioClipToTrackError::InvalidNewTrack {
-                    track_key: new_track_key,
-                })?;
-
-        // Check for overlaps
-        for other_clip in new_track.clips.values() {
-            let same = other_clip.key == clip_key;
-            let overlapping =
-                clip_start < other_clip.end(self.bpm_cents) && other_clip.start < clip_end;
-            if !same && overlapping {
-                return Err(MoveAudioClipToTrackError::Overlapping);
-            }
-        }
-
-        let old_track_mut = self.tracks.get_mut(&old_track_key).unwrap();
-        let clip = old_track_mut.clips.remove(&clip_key).unwrap();
-        let new_track_mut = self.tracks.get_mut(&new_track_key).unwrap();
-        new_track_mut.clips.insert(clip_key, clip);
 
         Ok(())
     }
