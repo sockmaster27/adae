@@ -477,6 +477,11 @@ impl Engine {
         self.audio_tracks.keys().copied()
     }
 
+    /// Check if the engine contains an audio track with the given key.
+    pub fn has_audio_track(&self, key: AudioTrackKey) -> bool {
+        self.audio_tracks.contains_key(&key)
+    }
+
     /// Get the key of the timeline track that corresponds to the given audio track.
     pub fn audio_timeline_track_key(
         &self,
