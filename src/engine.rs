@@ -1062,6 +1062,7 @@ impl Display for InvalidConfigError {
         }
     }
 }
+impl Error for InvalidConfigError {}
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum AudioTrackOverflowError {
