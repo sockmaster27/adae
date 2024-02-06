@@ -342,11 +342,11 @@ impl AudioClipReader {
 }
 impl Debug for AudioClipReader {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "AudioClipReader {{ inner: {:?}, position(): {:?}, ... }}",
-            self.inner, self.inner_position,
-        )
+        f.debug_struct("AudioClipReader")
+            .field("inner", &self.inner)
+            .field("inner_position", &self.inner_position)
+            .field("position", &self.position)
+            .finish_non_exhaustive()
     }
 }
 

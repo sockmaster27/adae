@@ -156,33 +156,8 @@ impl<T: Clone> CircularArray<T> {
 }
 impl<T: Clone + Debug> Debug for CircularArray<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let ordered_list: Vec<&T> = self.iter().collect();
-        write!(
-            f,
-            "CircularArray {}",
-            format_truncate_list(10, &ordered_list[..])
-        )
+        f.debug_list().entries(self.iter()).finish()
     }
-}
-
-/// Format list truncated like:
-/// `"[0, 1, 2 ... 7, 8, 9]"`
-pub fn format_truncate_list<T: Debug>(max_length: usize, list: &[T]) -> String {
-    fn format_list<'a, T: 'a + Debug>(list: &[T]) -> String {
-        let strings: Vec<String> = list.iter().map(|e| format!("{:?}", *e)).collect();
-        strings.join(", ")
-    }
-
-    let truncated_iter = if list.len() <= max_length {
-        format_list(list)
-    } else {
-        let half_length = max_length / 2;
-        let first = format_list(&list[..half_length]);
-        let last = format_list(&list[(list.len() - half_length)..]);
-        format!("{} ... {}", first, last)
-    };
-
-    format!("[{}]", truncated_iter)
 }
 
 /// Get the the message from a `panic` cause.
@@ -245,18 +220,5 @@ mod tests {
         // Observe that all initial values are pushed through, plus a single of the supplied ones.
         let expected_output = [1, 1, 1, 1, 1, 2];
         assert_eq!(output, expected_output);
-    }
-
-    #[test]
-    fn format_small_list() {
-        let range: Vec<_> = (0..5).collect();
-        let output = format_truncate_list(5, &range[..]);
-        assert_eq!(output, "[0, 1, 2, 3, 4]");
-    }
-    #[test]
-    fn format_long_list() {
-        let range: Vec<_> = (0..6).collect();
-        let output = format_truncate_list(5, &range[..]);
-        assert_eq!(output, "[0, 1 ... 4, 5]");
     }
 }

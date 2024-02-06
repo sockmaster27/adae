@@ -479,7 +479,12 @@ impl TimelineTrackProcessor {
 }
 impl Debug for TimelineTrackProcessor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "TimelineTrack")
+        f.debug_struct("TimelineTrackProcessor")
+            .field("position", &self.position)
+            .field("sample_rate", &self.sample_rate)
+            .field("bpm_cents", &self.bpm_cents)
+            .field("output_track", &self.output_track)
+            .finish_non_exhaustive()
     }
 }
 

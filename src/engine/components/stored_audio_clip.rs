@@ -165,13 +165,12 @@ impl StoredAudioClip {
 }
 impl Debug for StoredAudioClip {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "AudioClip {{ sample_rate: {}, ..., channels(): {}, len(): {} }}",
-            self.sample_rate,
-            self.channels(),
-            self.length(),
-        )
+        f.debug_struct("StoredAudioClip")
+            .field("key", &self.key)
+            .field("sample_rate", &self.sample_rate)
+            .field("channels", &self.channels())
+            .field("length", &self.length())
+            .finish_non_exhaustive()
     }
 }
 

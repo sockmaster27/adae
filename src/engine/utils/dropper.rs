@@ -102,7 +102,10 @@ impl Drop for Dropper {
 }
 impl Debug for Dropper {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Dropper {{ handle: {:?} }}", self.handle)
+        f.debug_struct("Dropper")
+            .field("sleep", &self.sleep)
+            .field("handle", &self.handle)
+            .finish_non_exhaustive()
     }
 }
 

@@ -3,7 +3,7 @@ use std::{
     sync::{atomic::Ordering, Arc},
 };
 
-use crate::engine::{utils::format_truncate_list, CHANNELS};
+use crate::engine::CHANNELS;
 
 use crate::engine::utils::{AtomicF32, MovingAverage};
 
@@ -62,12 +62,9 @@ impl F32ParameterProcessor {
 }
 impl Debug for F32ParameterProcessor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "F32Parameter {{ desired: {:?}, moving_average: {:?}, buffer: {} }}",
-            self.desired,
-            self.moving_average,
-            format_truncate_list(5, &self.buffer[..])
-        )
+        f.debug_struct("F32ParameterProcessor")
+            .field("desired", &self.desired)
+            .field("moving_average", &self.moving_average)
+            .finish_non_exhaustive()
     }
 }

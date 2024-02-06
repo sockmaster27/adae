@@ -249,7 +249,10 @@ impl MixerProcessor {
 }
 impl Debug for MixerProcessor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "MixerProcessor {{ tracks: {:?}, ... }}", self.tracks)
+        f.debug_struct("MixerProcessor")
+            .field("tracks", &self.tracks)
+            .field("master", &self.master)
+            .finish_non_exhaustive()
     }
 }
 
