@@ -116,8 +116,7 @@ mod audio_tracks {
         mt.set_panning(0.42);
         mt.set_volume(0.65);
 
-        let s = e.audio_track_state(at).unwrap();
-        e.delete_audio_track(at).unwrap();
+        let s = e.delete_audio_track(at).unwrap();
 
         let at_new = e.reconstruct_audio_track(s).unwrap();
 
@@ -154,11 +153,10 @@ mod audio_tracks {
             mt.set_volume(0.65);
         }
 
-        let ss: Vec<AudioTrackState> = ats
-            .iter()
-            .map(|&at| e.audio_track_state(at).unwrap())
+        let ss: Vec<AudioTrackState> = e
+            .delete_audio_tracks(ats.iter().copied())
+            .unwrap()
             .collect();
-        e.delete_audio_tracks(ats.iter().copied()).unwrap();
 
         for (at, s) in zip(ats, ss) {
             let at_new = e.reconstruct_audio_track(s).unwrap();
@@ -201,8 +199,7 @@ mod audio_tracks {
         )
         .unwrap();
 
-        let s = e.audio_track_state(at).unwrap();
-        e.delete_audio_track(at).unwrap();
+        let s = e.delete_audio_track(at).unwrap();
 
         let at_new = e.reconstruct_audio_track(s).unwrap();
         let acs_new = e
@@ -223,11 +220,7 @@ mod audio_tracks {
             mt.set_volume(0.65);
         }
 
-        let ss: Vec<AudioTrackState> = ats
-            .iter()
-            .map(|&at| e.audio_track_state(at).unwrap())
-            .collect();
-        e.delete_audio_tracks(ats.iter().copied()).unwrap();
+        let ss = e.delete_audio_tracks(ats.iter().copied()).unwrap();
 
         let ats_new: Vec<AudioTrackKey> = e.reconstruct_audio_tracks(ss).unwrap().collect();
 

@@ -578,82 +578,11 @@ impl Engine {
     }
 
     /// Delete audio track, and remove it from the engine.
+    ///
+    /// Returns a state that can be passed to [`Engine::reconstruct_audio_track()`]/[`Engine::reconstruct_audio_tracks()`],
+    /// to reconstruct this track.
     pub fn delete_audio_track(
         &mut self,
-        audio_track_key: AudioTrackKey,
-    ) -> Result<(), InvalidAudioTrackError> {
-        let &(timeline_track_key, mixer_track_key) = self
-            .audio_tracks
-            .get(&audio_track_key)
-            .ok_or(InvalidAudioTrackError {
-                key: audio_track_key,
-            })?;
-
-        self.processor_interface
-            .timeline
-            .delete_track(timeline_track_key)
-            .unwrap();
-        self.processor_interface
-            .mixer
-            .delete_track(mixer_track_key)
-            .unwrap();
-
-        self.audio_tracks.remove(&audio_track_key);
-        self.key_generator.free(audio_track_key).unwrap();
-
-        Ok(())
-    }
-
-    /// Delete a set of audio tracks, and remove them from the engine.
-    pub fn delete_audio_tracks(
-        &mut self,
-        audio_track_keys: impl IntoIterator<Item = AudioTrackKey>,
-    ) -> Result<(), InvalidAudioTracksError> {
-        let audio_track_keys: Vec<AudioTrackKey> = audio_track_keys.into_iter().collect();
-
-        let some_invalid = audio_track_keys
-            .iter()
-            .any(|&key| !self.key_generator.in_use(key));
-        if some_invalid {
-            let invalid_keys = audio_track_keys
-                .iter()
-                .filter(|&&key| !self.key_generator.in_use(key))
-                .copied()
-                .collect();
-            return Err(InvalidAudioTracksError { keys: invalid_keys });
-        }
-
-        let timeline_track_keys = audio_track_keys
-            .iter()
-            .map(|&key| self.audio_tracks.get(&key).unwrap().0)
-            .collect();
-        let mixer_track_keys = audio_track_keys
-            .iter()
-            .map(|&key| self.audio_tracks.get(&key).unwrap().1)
-            .collect();
-
-        self.processor_interface
-            .timeline
-            .delete_tracks(timeline_track_keys)
-            .unwrap();
-        self.processor_interface
-            .mixer
-            .delete_tracks(mixer_track_keys)
-            .unwrap();
-
-        for &key in audio_track_keys.iter() {
-            self.audio_tracks.remove(&key);
-            self.key_generator.free(key).unwrap();
-        }
-        Ok(())
-    }
-
-    /// Get the state of the audio track with the given key.
-    ///
-    /// This can be used to reconstruct the audio track after it has been deleted,
-    /// using [`Engine::reconstruct_audio_track()`]/[`Engine::reconstruct_audio_tracks()`].
-    pub fn audio_track_state(
-        &self,
         audio_track_key: AudioTrackKey,
     ) -> Result<AudioTrackState, InvalidAudioTrackError> {
         let &(timeline_track_key, mixer_track_key) = self
@@ -670,11 +599,91 @@ impl Engine {
             .unwrap();
         let mixer_track_state = self.mixer_track(mixer_track_key).unwrap().state();
 
+        self.processor_interface
+            .timeline
+            .delete_track(timeline_track_key)
+            .unwrap();
+        self.processor_interface
+            .mixer
+            .delete_track(mixer_track_key)
+            .unwrap();
+
+        self.audio_tracks.remove(&audio_track_key);
+        self.key_generator.free(audio_track_key).unwrap();
+
         Ok(AudioTrackState {
             key: audio_track_key,
             timeline_track_state,
             mixer_track_state,
         })
+    }
+
+    /// Delete a set of audio tracks, and remove them from the engine.
+    ///
+    /// Returns an iterator of states that can be passed to [`Engine::reconstruct_audio_track()`]/[`Engine::reconstruct_audio_tracks()`],
+    /// to reconstruct these tracks.
+    pub fn delete_audio_tracks(
+        &mut self,
+        audio_track_keys: impl IntoIterator<Item = AudioTrackKey>,
+    ) -> Result<impl Iterator<Item = AudioTrackState>, InvalidAudioTracksError> {
+        let audio_track_keys: Vec<AudioTrackKey> = audio_track_keys.into_iter().collect();
+
+        let some_invalid = audio_track_keys
+            .iter()
+            .any(|&key| !self.key_generator.in_use(key));
+        if some_invalid {
+            let invalid_keys = audio_track_keys
+                .iter()
+                .filter(|&&key| !self.key_generator.in_use(key))
+                .copied()
+                .collect();
+            return Err(InvalidAudioTracksError { keys: invalid_keys });
+        }
+
+        let timeline_track_keys: Vec<TimelineTrackKey> = audio_track_keys
+            .iter()
+            .map(|&key| self.audio_tracks.get(&key).unwrap().0)
+            .collect();
+        let mixer_track_keys: Vec<MixerTrackKey> = audio_track_keys
+            .iter()
+            .map(|&key| self.audio_tracks.get(&key).unwrap().1)
+            .collect();
+
+        let timeline_track_states = timeline_track_keys
+            .iter()
+            .map(|&key| self.processor_interface.timeline.track_state(key).unwrap());
+        let mixer_track_states = mixer_track_keys
+            .iter()
+            .map(|&key| self.mixer_track(key).unwrap().state());
+
+        let audio_track_states: Vec<AudioTrackState> = zip(
+            audio_track_keys.iter(),
+            zip(timeline_track_states, mixer_track_states),
+        )
+        .map(
+            |(&key, (timeline_track_state, mixer_track_state))| AudioTrackState {
+                key,
+                timeline_track_state,
+                mixer_track_state,
+            },
+        )
+        .collect();
+
+        self.processor_interface
+            .timeline
+            .delete_tracks(timeline_track_keys)
+            .unwrap();
+        self.processor_interface
+            .mixer
+            .delete_tracks(mixer_track_keys)
+            .unwrap();
+
+        for &key in audio_track_keys.iter() {
+            self.audio_tracks.remove(&key);
+            self.key_generator.free(key).unwrap();
+        }
+
+        Ok(audio_track_states.into_iter())
     }
 
     /// Reconstruct an audio track that has been deleted.
