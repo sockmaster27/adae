@@ -433,9 +433,7 @@ mod audio_clips {
             )
             .unwrap();
 
-        let s = e.audio_clip(ac).unwrap().state();
-
-        e.delete_audio_clip(ac).unwrap();
+        let s = e.delete_audio_clip(ac).unwrap();
 
         let ac_new = e
             .reconstruct_audio_clip(e.audio_timeline_track_key(at).unwrap(), s)
@@ -458,7 +456,6 @@ mod audio_clips {
         let ck = import_audio_clip(&mut e);
 
         let mut acs = Vec::new();
-        let mut ss = Vec::new();
         for i in 0..42 {
             let ac = e
                 .add_audio_clip(
@@ -469,10 +466,9 @@ mod audio_clips {
                 )
                 .unwrap();
             acs.push(ac);
-            ss.push(e.audio_clip(ac).unwrap().state())
         }
 
-        e.delete_audio_clips(acs.iter().copied()).unwrap();
+        let ss = e.delete_audio_clips(acs.iter().copied()).unwrap();
 
         let acs_new: Vec<AudioClipKey> = e
             .reconstruct_audio_clips(e.audio_timeline_track_key(at).unwrap(), ss)

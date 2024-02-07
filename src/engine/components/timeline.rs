@@ -43,7 +43,7 @@ pub use timestamp::Timestamp;
 use track::TimelineTrack;
 pub use track::{TimelineTrackKey, TimelineTrackProcessor, TimelineTrackState};
 
-pub fn timeline(
+pub(crate) fn timeline(
     state: &TimelineState,
     sample_rate: u32,
     max_buffer_size: usize,
@@ -193,7 +193,7 @@ enum Event {
     },
 }
 
-pub struct Timeline {
+pub(crate) struct Timeline {
     sample_rate: u32,
     bpm_cents: u16,
 
@@ -407,7 +407,7 @@ impl Timeline {
     pub fn delete_audio_clip(
         &mut self,
         clip_key: AudioClipKey,
-    ) -> Result<(), InvalidAudioClipError> {
+    ) -> Result<AudioClipState, InvalidAudioClipError> {
         if !self.clip_key_generator.in_use(clip_key) {
             return Err(InvalidAudioClipError { clip_key });
         }
@@ -426,12 +426,12 @@ impl Timeline {
             clip_start: clip.start,
         });
 
-        Ok(())
+        Ok(clip.state())
     }
     pub fn delete_audio_clips(
         &mut self,
         clip_keys: impl IntoIterator<Item = AudioClipKey>,
-    ) -> Result<(), InvalidAudioClipsError> {
+    ) -> Result<impl Iterator<Item = AudioClipState>, InvalidAudioClipsError> {
         let clip_keys: Vec<AudioClipKey> = clip_keys.into_iter().collect();
 
         let some_invalid = clip_keys
@@ -462,6 +462,15 @@ impl Timeline {
             })
             .collect();
 
+        let clip_states: Vec<AudioClipState> = track_and_clip_keys
+            .iter()
+            .map(|(track_key, clip_key)| {
+                let track = self.tracks.get(track_key).unwrap();
+                let clip = track.clips.get(clip_key).unwrap();
+                clip.state()
+            })
+            .collect();
+
         for (track_key, clip_key) in track_and_clip_keys {
             let track = self.tracks.get_mut(&track_key).unwrap();
 
@@ -477,7 +486,7 @@ impl Timeline {
             track_keys_and_clip_starts: DBox::new(track_keys_and_clip_starts),
         });
 
-        Ok(())
+        Ok(clip_states.into_iter())
     }
 
     pub fn reconstruct_audio_clip(

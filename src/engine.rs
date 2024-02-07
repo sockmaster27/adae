@@ -856,7 +856,7 @@ impl Engine {
     pub fn delete_audio_clip(
         &mut self,
         audio_clip_key: AudioClipKey,
-    ) -> Result<(), InvalidAudioClipError> {
+    ) -> Result<AudioClipState, InvalidAudioClipError> {
         self.processor_interface
             .timeline
             .delete_audio_clip(audio_clip_key)
@@ -866,14 +866,14 @@ impl Engine {
     pub fn delete_audio_clips(
         &mut self,
         audio_clip_keys: impl IntoIterator<Item = AudioClipKey>,
-    ) -> Result<(), InvalidAudioClipsError> {
+    ) -> Result<impl Iterator<Item = AudioClipState>, InvalidAudioClipsError> {
         self.processor_interface
             .timeline
             .delete_audio_clips(audio_clip_keys)
     }
 
     /// Reconstruct an audio clip that has been deleted.
-    /// A state can be obtained using [`AudioClip::state()`].
+    /// A state can be obtained using [`Engine::delete_audio_clip()`]/[`Engine::delete_audio_clips()`].
     ///
     /// # Errors
     /// - [`AudioClipReconstructionError::InvalidTrack`] when the timeline track this clip was on no longer exists.
@@ -892,7 +892,7 @@ impl Engine {
     }
 
     /// Reconstruct a set of audio clips that have been deleted.
-    /// A state can be obtained using [`AudioClip::state()`].
+    /// A state can be obtained using [`Engine::delete_audio_clip()`].
     ///
     /// # Errors
     /// - [`AudioClipReconstructionError::InvalidTrack`] when the timeline track this clip was on no longer exists.

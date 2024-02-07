@@ -62,7 +62,7 @@ impl AudioClip {
         self.reader.key()
     }
 
-    pub fn state(&self) -> AudioClipState {
+    pub(crate) fn state(&self) -> AudioClipState {
         AudioClipState {
             key: self.key,
             start_offset: self.start_offset,
