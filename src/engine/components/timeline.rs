@@ -179,6 +179,12 @@ enum Event {
         old_start: Timestamp,
         new_start: Timestamp,
     },
+    MoveAudioClipToTrack {
+        old_track_key: TimelineTrackKey,
+        new_track_key: TimelineTrackKey,
+        old_start: Timestamp,
+        new_start: Timestamp,
+    },
     CropAudioClipStart {
         track_key: TimelineTrackKey,
         old_start: Timestamp,
@@ -579,6 +585,7 @@ impl Timeline {
         let old_track = self.tracks.get_mut(&old_track_key).unwrap();
         let clip = old_track.clips.get(&clip_key).unwrap();
 
+        let old_start = clip.start;
         let new_end = new_start + clip.length(self.bpm_cents);
 
         let new_track =
@@ -607,6 +614,13 @@ impl Timeline {
         new_track_mut.clips.insert(clip_key, clip_mut);
 
         self.clip_to_track.insert(clip_key, new_track_key);
+
+        self.event_sender.send(Event::MoveAudioClipToTrack {
+            old_track_key,
+            new_track_key,
+            old_start,
+            new_start,
+        });
 
         Ok(())
     }
@@ -974,6 +988,17 @@ impl TimelineProcessor {
                         old_start,
                         new_start,
                     } => self.move_audio_clip(track_key, old_start, new_start),
+                    Event::MoveAudioClipToTrack {
+                        old_track_key,
+                        new_track_key,
+                        old_start,
+                        new_start,
+                    } => self.move_audio_clip_to_track(
+                        old_track_key,
+                        new_track_key,
+                        old_start,
+                        new_start,
+                    ),
                     Event::CropAudioClipStart {
                         track_key,
                         old_start,
@@ -1066,6 +1091,28 @@ impl TimelineProcessor {
             .expect("Track doesn't exist");
 
         track.move_clip(old_start, new_start);
+    }
+
+    pub fn move_audio_clip_to_track(
+        &mut self,
+        old_track_key: TimelineTrackKey,
+        new_track_key: TimelineTrackKey,
+        old_start: Timestamp,
+        new_start: Timestamp,
+    ) {
+        let old_track = self
+            .tracks
+            .get_mut(&old_track_key)
+            .expect("Track doesn't exist");
+        let clip = old_track.take_clip(old_start);
+
+        clip.borrow_mut().start = new_start;
+
+        let new_track = self
+            .tracks
+            .get_mut(&new_track_key)
+            .expect("Track doesn't exist");
+        new_track.insert_clip(clip);
     }
 
     pub fn crop_audio_clip_start(

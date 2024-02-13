@@ -121,18 +121,32 @@ impl TimelineTrackProcessor {
             })
     }
 
+    /// Delete the clip at `clip_start`.
+    ///
+    /// # Panics
+    /// Panics if the track does not contain a clip at `clip_start`.
     pub fn delete_clip(&mut self, clip_start: Timestamp) {
+        let el = self.take_clip(clip_start);
+        dropper::send(el);
+    }
+
+    /// Take the clip at `clip_start` and remove it from this track.
+    ///
+    /// # Panics
+    /// Panics if the track does not contain a clip at `clip_start`.
+    pub fn take_clip(&mut self, clip_start: Timestamp) -> Box<TreeNode<AudioClipProcessor>> {
         let mut tree = self.relevant_clip.take().unwrap().into_inner();
 
         let el = tree
             .find_mut(&clip_start)
             .remove()
             .expect("Attempted to delete non-existing clip");
-        dropper::send(el);
 
         let pos_samples = self.position.load(Ordering::Relaxed);
         let position = Timestamp::from_samples(pos_samples, self.sample_rate, self.bpm_cents);
         self.relevant_clip = Some(tree.upper_bound_owning(Bound::Included(&position)));
+
+        el
     }
 
     pub fn move_clip(&mut self, old_start: Timestamp, new_start: Timestamp) {
