@@ -7,8 +7,10 @@ pub mod ringbuffer;
 use std::any::Any;
 use std::fmt::Debug;
 use std::iter::zip;
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
+
+#[cfg(test)]
+use std::path::PathBuf;
 
 use super::{Sample, CHANNELS};
 
@@ -27,13 +29,48 @@ pub fn smallest_pow2(x: f64) -> usize {
     2usize.pow(x.log2().ceil() as u32)
 }
 
+/// Get the smallest and largest value from an iterator in the form `(min, max)`.
+/// If the iterator is empty, the default value is returned for both.
+pub fn min_max<I, T>(i: I, default: T) -> (T, T)
+where
+    I: IntoIterator<Item = T>,
+    T: PartialOrd + Copy,
+{
+    let iter = i.into_iter();
+    iter.fold((default, default), |(min, max), x| {
+        (partial_min(min, x), partial_max(max, x))
+    })
+}
+
+pub fn partial_min<T>(a: T, b: T) -> T
+where
+    T: PartialOrd,
+{
+    if a < b {
+        a
+    } else {
+        b
+    }
+}
+
+pub fn partial_max<T>(a: T, b: T) -> T
+where
+    T: PartialOrd,
+{
+    if a > b {
+        a
+    } else {
+        b
+    }
+}
+
 /// Get PathBuf to any file located in the `test_files` directory.
 /// Should only be used for testing.
 ///
 /// For example:
 ///
 /// `test_file_path("44100 16-bit.wav")`
-#[allow(dead_code)]
+#[cfg(test)]
 pub fn test_file_path(file_name: &str) -> PathBuf {
     PathBuf::from(format!(
         "{}{}",

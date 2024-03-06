@@ -5,7 +5,7 @@ use crate::{
     engine::{
         components::audio_clip_reader::{AudioClipReader, OriginalSamples, ResampledSamples},
         info::Info,
-        utils::{key_generator::key_type, rbtree_node},
+        utils::{key_generator::key_type, min_max, rbtree_node},
         Sample,
     },
     StoredAudioClipKey, Timestamp,
@@ -60,6 +60,28 @@ impl AudioClip {
 
     pub fn stored_clip(&self) -> StoredAudioClipKey {
         self.reader.key()
+    }
+
+    /// Get the data needed to visualize the waveform of the clip.
+    ///
+    /// The data is layed out as a vector of channels, where each channel is a vector of `(min, max)` pairs, with the length of `chunks`.
+    pub fn waveform(&self, chunks: usize) -> Vec<Vec<(i16, i16)>> {
+        let out = self.reader.output_raw();
+        let len: usize = self.reader.len_original().into();
+        let chunk_size = len.div_ceil(chunks);
+        out.iter()
+            .map(|c| {
+                c.chunks(chunk_size)
+                    .map(|chunk| {
+                        let (min, max) = min_max(chunk.iter().copied(), 0.0);
+                        (
+                            (min * i16::MAX as Sample) as i16,
+                            (max * i16::MAX as Sample) as i16,
+                        )
+                    })
+                    .collect()
+            })
+            .collect()
     }
 
     pub(crate) fn state(&self) -> AudioClipState {

@@ -339,6 +339,12 @@ impl AudioClipReader {
             self.output_not_resampling(info)
         }
     }
+
+    /// Outputs the raw data of the clip without resampling.
+    /// Returns a slice of channels, where each channel is a vector of samples.
+    pub fn output_raw(&self) -> &[Vec<Sample>] {
+        self.inner.data()
+    }
 }
 impl Debug for AudioClipReader {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

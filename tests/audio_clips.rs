@@ -470,3 +470,25 @@ fn move_audio_clip_to_another_track_overlapping() {
     );
     assert_eq!(e.audio_clip(ac).unwrap().start(), Timestamp::from_beats(0));
 }
+
+#[test]
+fn waveform() {
+    let mut e = Engine::dummy();
+    let at = e.add_audio_track().unwrap();
+
+    let ck = import_audio_clip(&mut e);
+    let ac = e
+        .add_audio_clip(
+            e.audio_timeline_track_key(at).unwrap(),
+            ck,
+            Timestamp::from_beats(0),
+            Some(Timestamp::from_beats(1)),
+        )
+        .unwrap();
+
+    let w = e.audio_clip(ac).unwrap().waveform(42);
+
+    assert_eq!(w.len(), 2);
+    assert_eq!(w[0].len(), 42);
+    assert_eq!(w[1].len(), 42);
+}

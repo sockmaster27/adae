@@ -44,20 +44,8 @@ impl Timestamp {
     }
     /// Like [`Timestamp::from_samples`], but rounds up instead of down.
     pub const fn from_samples_ceil(samples: usize, sample_rate: u32, bpm_cents: u16) -> Self {
-        const fn div_ceil(a: usize, b: usize) -> usize {
-            let d = a / b;
-            let r = a % b;
-            if r != 0 {
-                d + 1
-            } else {
-                d
-            }
-        }
-
-        let beat_units = div_ceil(
-            samples * bpm_cents as usize * UNITS_PER_BEAT as usize,
-            sample_rate as usize * 60 * 100,
-        );
+        let beat_units = (samples * bpm_cents as usize * UNITS_PER_BEAT as usize)
+            .div_ceil(sample_rate as usize * 60 * 100);
         Self {
             beat_units: beat_units as u32,
         }
