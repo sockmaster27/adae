@@ -16,7 +16,7 @@ hound = { version = "3.5.0", optional = true }
 symphonia = { version = "0.5.3", features = ["mp3"] }
 num-traits = "0.2.15"
 intrusive-collections = "0.9.6"
-rubato = "0.14.1"
+rubato = "0.15.0"
 serde = { version = "1.0", features = ["derive"] }
 
 [dev-dependencies]
