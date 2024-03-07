@@ -85,6 +85,10 @@ impl AudioClipReader {
         self.inner.sample_rate()
     }
 
+    pub fn channels_original(&self) -> usize {
+        self.inner.channels()
+    }
+
     /// Throws out the given delay from the start of the clip.
     /// Remember to set `self.position` after calling this.
     fn chop_delay(&mut self, delay: ResampledSamples, sample_rate: u32) {

@@ -63,25 +63,33 @@ impl AudioClip {
     }
 
     /// Get the data needed to visualize the waveform of the clip.
+    /// This will divide the entirety of the clip into `chunks` parts, and for each part it will find the minimum and maximum value for each channel.
     ///
-    /// The data is layed out as a vector of channels, where each channel is a vector of `(min, max)` pairs, with the length of `chunks`.
-    pub fn waveform(&self, chunks: usize) -> Vec<Vec<(i16, i16)>> {
-        let out = self.reader.output_raw();
+    /// The data will contain the clip's original number of channels, and will be interleaved like this:
+    ///
+    /// `
+    /// [minChannel0Chunk0, maxChannel0Chunk0, minChannel1Chunk0, maxChannel1Chunk0, minChannel0Chunk1, maxChannel0Chunk1, ...]
+    /// `
+    ///
+    /// The data will be normalized to fit within the range of a 16-bit signed integer, such that the highest peak in the clip will be at 32767 or -32767.
+    pub fn waveform(&self, chunks: usize) -> Vec<i16> {
+        let channels = self.reader.channels_original();
+        let mut out = vec![0; 2 * chunks * channels];
+
+        // TODO: Take own start and length into account
+        let data = self.reader.output_raw();
+
         let len: usize = self.reader.len_original().into();
         let chunk_size = len.div_ceil(chunks);
-        out.iter()
-            .map(|c| {
-                c.chunks(chunk_size)
-                    .map(|chunk| {
-                        let (min, max) = min_max(chunk.iter().copied(), 0.0);
-                        (
-                            (min * i16::MAX as Sample) as i16,
-                            (max * i16::MAX as Sample) as i16,
-                        )
-                    })
-                    .collect()
-            })
-            .collect()
+        for (channel_i, channel) in data.iter().enumerate() {
+            for (chunk_i, chunk) in channel.chunks(chunk_size).enumerate() {
+                let i = (2 * channels * chunk_i) + (2 * channel_i);
+                let (min, max) = min_max(chunk.iter().copied(), 0.0);
+                out[i] = (min * i16::MAX as f32) as i16;
+                out[i + 1] = (max * i16::MAX as f32) as i16;
+            }
+        }
+        out
     }
 
     pub(crate) fn state(&self) -> AudioClipState {

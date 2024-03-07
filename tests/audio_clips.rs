@@ -488,7 +488,5 @@ fn waveform() {
 
     let w = e.audio_clip(ac).unwrap().waveform(42);
 
-    assert_eq!(w.len(), 2);
-    assert_eq!(w[0].len(), 42);
-    assert_eq!(w[1].len(), 42);
+    assert_eq!(w.len(), 2 * 2 * 42);
 }
