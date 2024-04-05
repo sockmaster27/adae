@@ -19,7 +19,9 @@ static GLOBAL: TestAlloc<PanicError> = TestAlloc {
     error: PhantomData,
 };
 
-thread_local!(static ALLOWED: Cell<bool> = Cell::new(true));
+thread_local! {
+    static ALLOWED: Cell<bool> = const { Cell::new(true) }
+}
 
 macro_rules! no_heap {
     {$body:block} => {{

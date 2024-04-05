@@ -13,7 +13,7 @@ use std::{
 use super::ringbuffer::{self, ringbuffer};
 
 thread_local! {
-    static DROPPER: RefCell<Option<Box<Dropper>>> = RefCell::new(None);
+    static DROPPER: RefCell<Option<Box<Dropper>>> = const { RefCell::new(None) };
 }
 
 /// Send a box to another thread to be dropped
