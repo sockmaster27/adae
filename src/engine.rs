@@ -834,12 +834,22 @@ impl Engine {
         )
     }
 
-    /// Get the audio clip with the given key.
+    /// Get a reference to the audio clip with the given key.
     pub fn audio_clip(
         &self,
         audio_clip_key: AudioClipKey,
     ) -> Result<&AudioClip, InvalidAudioClipError> {
         self.processor_interface.timeline.audio_clip(audio_clip_key)
+    }
+
+    /// Get a mutable reference to the audio clip with the given key.
+    pub fn audio_clip_mut(
+        &mut self,
+        audio_clip_key: AudioClipKey,
+    ) -> Result<&mut AudioClip, InvalidAudioClipError> {
+        self.processor_interface
+            .timeline
+            .audio_clip_mut(audio_clip_key)
     }
 
     /// Get all audio clips on the given track.

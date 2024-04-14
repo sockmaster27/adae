@@ -79,6 +79,7 @@ pub(crate) fn timeline(
                             reader: clip_store
                                 .reader(clip_state.inner)
                                 .expect("An invalid audio clip was referenced"),
+                            cached_waveform: None,
                         },
                     )
                 })),
@@ -281,6 +282,7 @@ impl Timeline {
             set_length: length,
             start_offset,
             reader: reader1,
+            cached_waveform: None,
         };
 
         let reader2 = self.clip_store.reader(stored_clip_key).unwrap();
@@ -336,6 +338,7 @@ impl Timeline {
                     set_length: length,
                     start_offset,
                     reader: reader1,
+                    cached_waveform: None,
                 };
 
                 let reader2 = self.clip_store.reader(stored_clip_key).unwrap();
@@ -395,6 +398,21 @@ impl Timeline {
         let track_key = *self.clip_to_track.get(&clip_key).unwrap();
         let track = self.tracks.get(&track_key).unwrap();
         let clip = track.clips.get(&clip_key).unwrap();
+
+        Ok(clip)
+    }
+
+    pub fn audio_clip_mut(
+        &mut self,
+        clip_key: AudioClipKey,
+    ) -> Result<&mut AudioClip, InvalidAudioClipError> {
+        if !self.clip_key_generator.in_use(clip_key) {
+            return Err(InvalidAudioClipError { clip_key });
+        }
+
+        let track_key = *self.clip_to_track.get(&clip_key).unwrap();
+        let track = self.tracks.get_mut(&track_key).unwrap();
+        let clip = track.clips.get_mut(&clip_key).unwrap();
 
         Ok(clip)
     }
@@ -852,6 +870,7 @@ impl Timeline {
                                 .clip_store
                                 .reader(clip_state.inner)
                                 .expect("An invalid audio clip was referenced"),
+                            cached_waveform: None,
                         },
                     )
                 })),
