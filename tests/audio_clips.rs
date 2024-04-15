@@ -486,7 +486,9 @@ fn waveform() {
         )
         .unwrap();
 
-    let w = e.audio_clip_mut(ac).unwrap().waveform(42);
+    let bpm_cents = e.bpm_cents();
+
+    let w = e.audio_clip_mut(ac).unwrap().waveform(bpm_cents);
 
     assert_eq!(w.len(), 2 * 2 * 42);
 }

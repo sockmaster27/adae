@@ -156,14 +156,27 @@ impl AudioClipReader {
         self.inner_position = pos_original;
     }
 
-    // The length of the inner clip in frames (samples per channel), converted relative to the given sample rate.
+    /// The length of the inner clip in frames (samples per channel), converted relative to the given sample rate.
     pub fn len_resampled(&self, sample_rate: u32) -> ResampledSamples {
         self.len_original()
             .into_resampled(sample_rate, self.inner.sample_rate())
     }
-    // The length of the inner clip in frames (samples per channel), before resampling.
+    /// The length of the inner clip in frames (samples per channel), before resampling.
     pub fn len_original(&self) -> OriginalSamples {
         OriginalSamples::new(self.inner.length())
+    }
+
+    /// Returns the waveform data of the inner clip for the given range.
+    pub fn waveform(&self, start_offset: OriginalSamples, length: OriginalSamples) -> &[i16] {
+        let start_samples: usize = start_offset.into();
+        let length_samples: usize = length.into();
+
+        let channels = self.channels_original();
+
+        let start = (start_samples / 1024) * 2 * channels;
+        let length = (length_samples / 1024) * 2 * channels;
+
+        &self.inner.waveform_data()[start..start + length]
     }
 
     /// Scales `range` of each channel in `input` to down to two channels and writes it to `output`.
@@ -271,7 +284,7 @@ impl AudioClipReader {
                     &mut c.next().unwrap()[..resampler.input_frames_next()],
                     &mut c.next().unwrap()[..resampler.input_frames_next()],
                 ];
-                Self::scale_channels(self.inner.data(), range, &mut channel_scale_buffer);
+                Self::scale_channels(self.inner.audio_data(), range, &mut channel_scale_buffer);
 
                 let result = resampler.process_into_buffer(
                     &channel_scale_buffer,
@@ -324,7 +337,7 @@ impl AudioClipReader {
             &mut c.next().unwrap()[..output_size.into()],
             &mut c.next().unwrap()[..output_size.into()],
         ];
-        Self::scale_channels(self.inner.data(), range, &mut channel_scale_buffer);
+        Self::scale_channels(self.inner.audio_data(), range, &mut channel_scale_buffer);
         Self::interleave(
             &self.channel_scale_buffer,
             ResampledSamples::new(0)..ResampledSamples::new(output_size.into()),
@@ -342,12 +355,6 @@ impl AudioClipReader {
         } else {
             self.output_not_resampling(info)
         }
-    }
-
-    /// Outputs the raw data of the clip without resampling.
-    /// Returns a slice of channels, where each channel is a vector of samples.
-    pub fn output_raw(&self) -> &[Vec<Sample>] {
-        self.inner.data()
     }
 }
 impl Debug for AudioClipReader {

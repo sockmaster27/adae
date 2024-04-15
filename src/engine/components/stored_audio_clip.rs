@@ -18,7 +18,10 @@ use symphonia::core::{
     sample::Sample as SymphoniaSample,
 };
 
-use crate::engine::{utils::key_generator::key_type, Sample};
+use crate::engine::{
+    utils::{key_generator::key_type, min_max},
+    Sample,
+};
 
 key_type!(pub struct StoredAudioClipKey(u32));
 
@@ -27,9 +30,11 @@ key_type!(pub struct StoredAudioClipKey(u32));
 pub struct StoredAudioClip {
     key: StoredAudioClipKey,
 
+    waveform_data: Vec<i16>,
+
     sample_rate: u32,
     /// List of channel buffers
-    data: Vec<Vec<Sample>>,
+    audio_data: Vec<Vec<Sample>>,
 }
 impl StoredAudioClip {
     pub fn import(key: StoredAudioClipKey, path: &Path) -> Result<Self, ImportError> {
@@ -65,7 +70,7 @@ impl StoredAudioClip {
             .or(Err(ImportError::UknownFormat))?;
 
         let mut sample_rate = 0;
-        let mut data = Vec::with_capacity(2);
+        let mut audio_data = Vec::with_capacity(2);
         let mut first = true;
         loop {
             let packet = match format.next_packet() {
@@ -90,20 +95,36 @@ impl StoredAudioClip {
                         }
 
                         for _ in 0..channels {
-                            data.push(Vec::new());
+                            audio_data.push(Vec::new());
                         }
                     }
 
-                    Self::extend_from_buffer(&mut data, received_buffer);
+                    Self::extend_from_buffer(&mut audio_data, received_buffer);
                 }
                 Err(e) => panic!("{}", e),
             }
         }
 
+        let channels = audio_data.len();
+        let len = audio_data[0].len();
+
+        let chunks = len / 1024;
+        let mut waveform_data = vec![0; 2 * chunks * channels];
+        let chunk_size = len.div_ceil(chunks);
+        for (channel_i, channel) in audio_data.iter().enumerate() {
+            for (chunk_i, chunk) in channel.chunks(chunk_size).enumerate() {
+                let i = (2 * channels * chunk_i) + (2 * channel_i);
+                let (min, max) = min_max(chunk.iter().copied(), 0.0);
+                waveform_data[i] = (min * i16::MAX as f32) as i16;
+                waveform_data[i + 1] = (max * i16::MAX as f32) as i16;
+            }
+        }
+
         Ok(Self {
             key,
+            waveform_data,
             sample_rate,
-            data,
+            audio_data,
         })
     }
     fn extend_from_buffer(data: &mut [Vec<Sample>], buffer_ref: AudioBufferRef) {
@@ -139,28 +160,32 @@ impl StoredAudioClip {
         self.key
     }
 
+    pub fn waveform_data(&self) -> &[i16] {
+        &self.waveform_data
+    }
+
     pub fn sample_rate(&self) -> u32 {
         self.sample_rate
     }
 
-    pub fn data(&self) -> &[Vec<Sample>] {
-        &self.data
+    pub fn audio_data(&self) -> &[Vec<Sample>] {
+        &self.audio_data
     }
 
     /// Number of channels
     pub fn channels(&self) -> usize {
-        self.data.len()
+        self.audio_data.len()
     }
 
     /// Number of frames (samples per channel) in total
     pub fn length(&self) -> usize {
         // All channels should have the same length
         debug_assert!(self
-            .data
+            .audio_data
             .iter()
-            .all(|channel| channel.len() == self.data[0].len()));
+            .all(|channel| channel.len() == self.audio_data[0].len()));
 
-        self.data[0].len()
+        self.audio_data[0].len()
     }
 }
 impl Debug for StoredAudioClip {
@@ -216,9 +241,9 @@ mod tests {
         assert_eq!(ac.length(), 1_322_978);
 
         // These should be 1.0 and -1.0 exactly, but sample conversion skews that a little bit
-        let first_left_sample = ac.data[0][0];
+        let first_left_sample = ac.audio_data[0][0];
         assert!((0.999..=1.001).contains(&first_left_sample));
-        let first_right_sample = ac.data[1][0];
+        let first_right_sample = ac.audio_data[1][0];
         assert!((-1.001..=-0.999).contains(&first_right_sample));
     }
     fn test_lossy(ac: StoredAudioClip, sample_rate: u32) {

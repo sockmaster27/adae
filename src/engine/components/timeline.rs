@@ -79,7 +79,6 @@ pub(crate) fn timeline(
                             reader: clip_store
                                 .reader(clip_state.inner)
                                 .expect("An invalid audio clip was referenced"),
-                            cached_waveform: None,
                         },
                     )
                 })),
@@ -282,7 +281,6 @@ impl Timeline {
             set_length: length,
             start_offset,
             reader: reader1,
-            cached_waveform: None,
         };
 
         let reader2 = self.clip_store.reader(stored_clip_key).unwrap();
@@ -338,7 +336,6 @@ impl Timeline {
                     set_length: length,
                     start_offset,
                     reader: reader1,
-                    cached_waveform: None,
                 };
 
                 let reader2 = self.clip_store.reader(stored_clip_key).unwrap();
@@ -870,7 +867,6 @@ impl Timeline {
                                 .clip_store
                                 .reader(clip_state.inner)
                                 .expect("An invalid audio clip was referenced"),
-                            cached_waveform: None,
                         },
                     )
                 })),

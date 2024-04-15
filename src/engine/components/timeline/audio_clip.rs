@@ -5,7 +5,7 @@ use crate::{
     engine::{
         components::audio_clip_reader::{AudioClipReader, OriginalSamples, ResampledSamples},
         info::Info,
-        utils::{key_generator::key_type, min_max, rbtree_node},
+        utils::{key_generator::key_type, rbtree_node},
         Sample,
     },
     StoredAudioClipKey, Timestamp,
@@ -31,8 +31,6 @@ pub struct AudioClip {
     pub(crate) start_offset: OriginalSamples,
 
     pub(crate) reader: AudioClipReader,
-
-    pub(crate) cached_waveform: Option<Vec<i16>>,
 }
 impl AudioClip {
     pub fn start(&self) -> Timestamp {
@@ -74,29 +72,13 @@ impl AudioClip {
     /// `
     ///
     /// The data will be normalized to fit within the range of a 16-bit signed integer, such that the highest peak in the clip will be at 32767 or -32767.
-    pub fn waveform(&mut self, chunks: usize) -> &[i16] {
-        if self.cached_waveform.is_none() {
-            let channels = self.reader.channels_original();
-            let mut out = vec![0; 2 * chunks * channels];
-
-            // TODO: Take own start and length into account
-            let data = self.reader.output_raw();
-
-            let len: usize = self.reader.len_original().into();
-            let chunk_size = len.div_ceil(chunks);
-            for (channel_i, channel) in data.iter().enumerate() {
-                for (chunk_i, chunk) in channel.chunks(chunk_size).enumerate() {
-                    let i = (2 * channels * chunk_i) + (2 * channel_i);
-                    let (min, max) = min_max(chunk.iter().copied(), 0.0);
-                    out[i] = (min * i16::MAX as f32) as i16;
-                    out[i + 1] = (max * i16::MAX as f32) as i16;
-                }
-            }
-
-            self.cached_waveform = Some(out);
-        }
-
-        self.cached_waveform.as_ref().unwrap()
+    pub fn waveform(&self, bpm_cents: u16) -> &[i16] {
+        let start = self.start_offset;
+        let length = OriginalSamples::new(
+            self.length(bpm_cents)
+                .samples(self.reader.sample_rate_original(), bpm_cents),
+        );
+        self.reader.waveform(start, length)
     }
 
     pub(crate) fn state(&self) -> AudioClipState {
