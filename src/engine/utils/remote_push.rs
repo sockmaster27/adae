@@ -22,28 +22,6 @@ pub trait RemotePushable<E: Send, K: Send>: Send + Debug + Sized {
     fn remove(&mut self, key: K) -> bool;
     fn transplant(&mut self, other: &mut Self);
 
-    fn remote_push_with_capacity(
-        initial_capacity: usize,
-    ) -> (RemotePusher<E, K, Self>, RemotePushed<E, K, Self>) {
-        let (event_sender, event_receiver) = ringbuffer_with_capacity(16);
-
-        (
-            RemotePusher {
-                length: 0,
-                capacity: initial_capacity,
-                event_sender,
-            },
-            RemotePushed {
-                inner: DBox::new(Self::with_capacity(initial_capacity)),
-                event_receiver,
-            },
-        )
-    }
-
-    fn remote_push() -> (RemotePusher<E, K, Self>, RemotePushed<E, K, Self>) {
-        Self::remote_push_with_capacity(16)
-    }
-
     fn into_remote_push(self) -> (RemotePusher<E, K, Self>, RemotePushed<E, K, Self>) {
         let (event_sender, event_receiver) = ringbuffer_with_capacity(16);
 
@@ -312,13 +290,11 @@ mod tests {
     use super::*;
 
     mod hash_map {
-        use std::{iter::zip, vec};
-
         use super::*;
 
         #[test]
         fn push_one() {
-            let (mut rper, mut rped) = HashMap::remote_push();
+            let (mut rper, mut rped) = HashMap::new().into_remote_push();
 
             rper.push(("mop", 5));
 
@@ -331,7 +307,7 @@ mod tests {
 
         #[test]
         fn push_repeatedly() {
-            let (mut rper, mut rped) = HashMap::remote_push();
+            let (mut rper, mut rped) = HashMap::new().into_remote_push();
 
             rper.push(("mop", 2));
             rper.push(("stop", 5));
@@ -348,7 +324,7 @@ mod tests {
 
         #[test]
         fn push_multiple() {
-            let (mut rper, mut rped) = HashMap::remote_push();
+            let (mut rper, mut rped) = HashMap::new().into_remote_push();
 
             rper.push_multiple(vec![("mop", 2), ("stop", 5), ("flop", 1)]);
 
@@ -363,7 +339,7 @@ mod tests {
 
         #[test]
         fn push_multiple_repeatedly() {
-            let (mut rper, mut rped) = HashMap::remote_push();
+            let (mut rper, mut rped) = HashMap::new().into_remote_push();
 
             rper.push_multiple(vec![("mop", 2), ("stop", 5), ("flop", 1)]);
             rper.push_multiple(vec![("glop", 7), ("plop", 13), ("pop", 0)]);
@@ -393,10 +369,17 @@ mod tests {
 
         #[test]
         fn reallocate() {
-            let (mut rper, mut rped) = HashMap::remote_push_with_capacity(4);
+            let (mut rper, mut rped) = HashMap::with_capacity(4).into_remote_push();
 
             let pre_cap = rped.capacity();
-            for (k, v) in zip("abcde".chars(), 0..5) {
+            assert!(pre_cap >= 4);
+
+            // Generate a list of entries to push, like vec![('0', 0), ('1', 1), ('2', 2), ('3', 3), ('4', 4), ...]
+            let entries: Vec<(char, usize)> = (0..pre_cap + 1)
+                .map(|i| (char::from_digit(i as u32, 10).unwrap(), i))
+                .collect();
+
+            for &(k, v) in entries.iter() {
                 assert_eq!(pre_cap, rped.capacity());
                 rper.push((k, v));
 
@@ -408,15 +391,12 @@ mod tests {
 
             let mut result: Vec<(char, usize)> = rped.drain().collect();
             result.sort();
-            assert_eq!(
-                result,
-                vec![('a', 0), ('b', 1), ('c', 2), ('d', 3), ('e', 4)]
-            );
+            assert_eq!(result, entries);
         }
 
         #[test]
         fn remove_immediately() {
-            let (mut rper, mut rped) = HashMap::remote_push();
+            let (mut rper, mut rped) = HashMap::new().into_remote_push();
 
             rper.push(("mop", 5));
             rper.remove("mop");
@@ -430,7 +410,7 @@ mod tests {
 
         #[test]
         fn remove_delayed() {
-            let (mut rper, mut rped) = HashMap::remote_push();
+            let (mut rper, mut rped) = HashMap::new().into_remote_push();
 
             let mut poll = || {
                 no_heap! {{
@@ -450,7 +430,7 @@ mod tests {
         #[test]
         #[should_panic]
         fn remove_invalid() {
-            let (mut rper, mut rped) = HashMap::remote_push();
+            let (mut rper, mut rped) = HashMap::new().into_remote_push();
 
             rper.push(("mop", 5));
             rper.remove("slop");
@@ -462,7 +442,7 @@ mod tests {
 
         #[test]
         fn push_manually() {
-            let (mut rper, mut rped) = HashMap::remote_push();
+            let (mut rper, mut rped) = HashMap::new().into_remote_push();
 
             let event = rper.push_event(("mop", 5));
 
@@ -477,7 +457,7 @@ mod tests {
 
         #[test]
         fn remove_manually() {
-            let (mut rper, mut rped) = HashMap::remote_push();
+            let (mut rper, mut rped) = HashMap::new().into_remote_push();
 
             let event1 = rper.push_event(("mop", 5));
             let event2 = rper.remove_event("mop");
@@ -491,7 +471,7 @@ mod tests {
 
         #[test]
         fn push_mulptiple_manually() {
-            let (mut rper, mut rped) = HashMap::remote_push();
+            let (mut rper, mut rped) = HashMap::new().into_remote_push();
 
             let event = rper.push_multiple_event(vec![("mop", 2), ("stop", 5), ("flop", 1)]);
 
@@ -506,7 +486,7 @@ mod tests {
 
         #[test]
         fn remove_multiple_manually() {
-            let (mut rper, mut rped) = HashMap::remote_push();
+            let (mut rper, mut rped) = HashMap::new().into_remote_push();
 
             let event1 = rper.push_multiple_event(vec![("mop", 2), ("stop", 5), ("flop", 1)]);
             let event2 = rper.remove_multiple_event(vec!["mop", "stop", "flop"]);
