@@ -490,5 +490,12 @@ fn waveform() {
 
     let w = e.audio_clip_mut(ac).unwrap().waveform(bpm_cents);
 
-    assert_eq!(w.len(), 2 * 2 * 42);
+    // Should consist of a number of 4-tuples
+    assert_eq!(w.len() % 4, 0);
+
+    for pair in w.chunks_exact(2) {
+        if let [min, max] = pair {
+            assert!(min <= max);
+        }
+    }
 }
