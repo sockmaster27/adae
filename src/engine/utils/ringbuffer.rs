@@ -1,11 +1,15 @@
 //! Ringbuffer based channel, reallocated by the sender
-use ringbuf::{HeapConsumer, HeapProducer, HeapRb};
+use ringbuf::{
+    traits::{Consumer, Observer, Producer, Split},
+    HeapCons, HeapProd, HeapRb,
+};
 
 use super::{dropper::DBox, smallest_pow2};
 
 pub fn ringbuffer_with_capacity<T: Send>(capacity: usize) -> (Sender<T>, Receiver<T>) {
     // There will be allocated enough room for capacity elements, plus one more slot for the reallocation
-    let (producer, consumer) = HeapRb::new(capacity + 1).split();
+    let rb = HeapRb::new(capacity + 1);
+    let (producer, consumer) = rb.split();
     (
         Sender { inner: producer },
         Receiver {
@@ -19,7 +23,7 @@ pub fn ringbuffer<T: Send>() -> (Sender<T>, Receiver<T>) {
 }
 
 pub struct Sender<T: Send> {
-    inner: HeapProducer<Event<T>>,
+    inner: HeapProd<Event<T>>,
 }
 impl<T> Sender<T>
 where
@@ -28,7 +32,7 @@ where
     /// Might heap-allocate a new ringbuffer
     pub fn send(&mut self, element: T) {
         self.ensure_capacity();
-        let _result = self.inner.push(Event::Element(element));
+        let _result = self.inner.try_push(Event::Element(element));
 
         #[cfg(debug_assertions)]
         if _result.is_err() {
@@ -37,10 +41,11 @@ where
     }
 
     fn ensure_capacity(&mut self) {
-        if self.inner.free_len() == 1 {
-            let new_capacity = smallest_pow2((self.inner.capacity() + 1) as f64);
+        if self.inner.vacant_len() == 1 {
+            let old_capacity: usize = self.inner.capacity().into();
+            let new_capacity = smallest_pow2((old_capacity + 1) as f64);
             let (producer, consumer) = HeapRb::new(new_capacity).split();
-            let _result = self.inner.push(Event::Reallocated(Box::new(consumer)));
+            let _result = self.inner.try_push(Event::Reallocated(Box::new(consumer)));
             self.inner = producer;
 
             #[cfg(debug_assertions)]
@@ -52,7 +57,7 @@ where
 }
 
 pub struct Receiver<T: 'static + Send> {
-    inner: DBox<HeapConsumer<Event<T>>>,
+    inner: DBox<HeapCons<Event<T>>>,
 }
 impl<T> Receiver<T>
 where
@@ -60,7 +65,7 @@ where
 {
     pub fn recv(&mut self) -> Option<T> {
         loop {
-            match self.inner.pop() {
+            match self.inner.try_pop() {
                 None => return None,
                 Some(event) => match event {
                     Event::Element(e) => return Some(e),
@@ -98,17 +103,25 @@ where
 
 enum Event<T> {
     Element(T),
-    Reallocated(Box<HeapConsumer<Event<T>>>),
+    Reallocated(Box<HeapCons<Event<T>>>),
 }
+/// Compiler can't figure out that `Event<T>` is `Send`,
+/// probably because `Event<T>` is only `Send` if `HeapCons<Event<T>>` is `Send`,
+/// and `HeapCons<Event<T>>` is only `Send` if `Event<T>` is `Send`, and so on.
+unsafe impl<T: Send> Send for Event<T> {}
+unsafe impl<T: Sync> Sync for Event<T> {}
 
 #[cfg(test)]
 mod tests {
+    use ringbuf::traits::Observer;
+
     use super::*;
 
     fn capacity<T: Send>(sender: &Sender<T>) -> usize {
         // The spot for reallocation doesn't count
         // (consistent with ringbuffer_with_capacity)
-        sender.inner.capacity() - 1
+        let full_cap: usize = sender.inner.capacity().into();
+        full_cap - 1
     }
 
     #[test]
