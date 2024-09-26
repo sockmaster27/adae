@@ -25,6 +25,9 @@ use crate::engine::{
 
 key_type!(pub struct StoredAudioClipKey(u32));
 
+/// Number of samples per chunk in the waveform data.
+pub const SAMPLES_PER_WAVEFORM_CHUNK: usize = 1024;
+
 /// An audio clip that has been imported.
 #[derive(PartialEq)]
 pub struct StoredAudioClip {
@@ -108,7 +111,7 @@ impl StoredAudioClip {
         let channels = audio_data.len();
         let len = audio_data[0].len();
 
-        let chunks = len / 1024;
+        let chunks = len / SAMPLES_PER_WAVEFORM_CHUNK;
         let mut waveform_data = vec![0; 2 * chunks * channels];
         let chunk_size = len.div_ceil(chunks);
         for (channel_i, channel) in audio_data.iter().enumerate() {

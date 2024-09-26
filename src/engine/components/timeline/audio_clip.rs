@@ -63,7 +63,7 @@ impl AudioClip {
     }
 
     /// Get the data needed to visualize the waveform of the clip.
-    /// This will divide the entirety of the clip into `chunks` parts, and for each part it will find the minimum and maximum value for each channel.
+    /// This will divide the entirety of the clip into chunks, and for each chunk it will find the minimum and maximum value for each channel.
     ///
     /// The data will contain the clip's original number of channels, and will be interleaved like this:
     ///

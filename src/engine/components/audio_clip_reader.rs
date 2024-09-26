@@ -14,7 +14,7 @@ use crate::{
     StoredAudioClipKey,
 };
 
-use super::stored_audio_clip::StoredAudioClip;
+use super::stored_audio_clip::{StoredAudioClip, SAMPLES_PER_WAVEFORM_CHUNK};
 
 pub struct AudioClipReader {
     inner: Arc<StoredAudioClip>,
@@ -173,8 +173,8 @@ impl AudioClipReader {
 
         let channels = self.channels_original();
 
-        let start = (start_samples / 1024) * 2 * channels;
-        let length = (length_samples / 1024) * 2 * channels;
+        let start = (start_samples / SAMPLES_PER_WAVEFORM_CHUNK) * 2 * channels;
+        let length = (length_samples / SAMPLES_PER_WAVEFORM_CHUNK) * 2 * channels;
 
         &self.inner.waveform_data()[start..start + length]
     }
