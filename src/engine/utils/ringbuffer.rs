@@ -90,7 +90,7 @@ where
 pub struct Iter<'a, T: 'static + Send> {
     inner: &'a mut Receiver<T>,
 }
-impl<'a, T> Iterator for Iter<'a, T>
+impl<T> Iterator for Iter<'_, T>
 where
     T: Send,
 {
